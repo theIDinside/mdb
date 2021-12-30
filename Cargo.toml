@@ -1,0 +1,12 @@
+[workspace]
+members = [
+	"mdbg",
+	"cli",
+	"wrapper",
+	"repl",
+	"server"
+]
+
+[profile.dev]
+opt-level = 0               # Use slightly better optimizations.
+overflow-checks = true     # Disable integer overflow checks.

@@ -1,0 +1,13 @@
+[package]
+name = "mdbg"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+cli = { path = "../cli" }
+# wrappers around C functions / libc. This will be hardcoded simple/dumb wrappers, but placed here, so that possibly in the future
+# changing these to better design, is possible.
+wrapper = { path = "../wrapper" }
+libc = "*"
