@@ -1,8 +1,8 @@
 [workspace]
 members = [
-	"mdbg",
+	"midas",
 	"cli",
-	"wrapper",
+	"linuxwrapper",
 	"repl",
 	"server"
 ]
