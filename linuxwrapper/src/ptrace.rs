@@ -21,3 +21,19 @@ pub fn kill_on_midas_exit(pid: Pid) -> Result<(), String> {
         }
     }
 }
+
+pub fn trace_me() -> crate::MidasSysResult<()> {
+    unsafe {
+        if ptrace(
+            libc::PTRACE_TRACEME,
+            0,
+            std::ptr::null() as *const libc::c_void,
+            std::ptr::null() as *const libc::c_void,
+        ) == -1
+        {
+            Err(crate::errno::get_errno_msg())
+        } else {
+            Ok(())
+        }
+    }
+}

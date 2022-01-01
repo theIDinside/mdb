@@ -2,9 +2,9 @@ use libc::pid_t;
 use std::os::unix::prelude::OsStrExt;
 pub mod waitstatus;
 pub use waitstatus::{Pid, WaitStatus};
-mod errno;
+pub mod errno;
 pub mod ptrace;
-
+pub type MidasSysResult<T> = Result<T, String>;
 pub enum Fork {
     Parent(pid_t),
     Child,
