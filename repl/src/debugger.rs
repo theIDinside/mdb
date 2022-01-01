@@ -53,21 +53,7 @@ impl Debugger {
         }
     }
 
-    pub(crate) fn handle_command(&self, command: midas::commands::Command) {
-        match command {
-            Command::SetBreakpoint(bp_req) => todo!(),
-            Command::Run(thread_id) => todo!(),
-            Command::ListLines(line_count) => todo!(),
-            Command::RunAll => todo!(),
-            Command::Step { count } => todo!(),
-            Command::StepIn => todo!(),
-            Command::Next { count } => todo!(),
-            Command::Finish => todo!(),
-            Command::Noop => todo!(),
-            Command::Info => todo!(),
-            Command::Unknown => todo!(),
-        }
-    }
+    pub(crate) fn handle_command(&self, command: midas::commands::Command) {}
 
     pub(crate) fn wait_for_input(&self) -> String {
         todo!()
