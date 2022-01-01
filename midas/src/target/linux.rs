@@ -14,15 +14,18 @@ pub struct LinuxTarget {
 
 impl super::Target for LinuxTarget {
     type OSTarget = LinuxTarget;
-    fn launch(path: &std::path::Path) -> MidasSysResult<(Box<Self::OSTarget>, WaitStatus)> {
+    fn launch(
+        command: &mut std::process::Command,
+    ) -> MidasSysResult<(Box<Self::OSTarget>, WaitStatus)> {
+        let pathstr = command.get_program().to_owned();
+        let path = std::path::Path::new(&pathstr);
         if !path.exists() {
             Err(format!("binary {} could not be found", path.display()))
         } else {
             unsafe {
-                let mut cmd = std::process::Command::new(path);
                 // this closure executes in the forked child code. So in a "regular" old fork situation
                 // we would check pid if == 0 or something similar, and then handle accordingly. This closure always execs in the child.
-                cmd.pre_exec(|| {
+                command.pre_exec(|| {
                     #[cfg(target_os = "linux")]
                     {
                         if libc::personality(libc::ADDR_NO_RANDOMIZE as _) == -1 {
@@ -34,7 +37,7 @@ impl super::Target for LinuxTarget {
                         Ok(())
                     }
                 });
-                let child = cmd
+                let child = command
                     .spawn()
                     .map_err(|err| format!("Spawning child failed: {}", err))?;
                 let pid = Pid(child.id() as _);

@@ -1,3 +1,5 @@
+use std::convert::From;
+
 use nixwrap::{Pid, WaitStatus};
 pub mod linux;
 
@@ -7,7 +9,7 @@ use nixwrap::MidasSysResult;
 pub trait Target {
     type OSTarget;
     fn launch(
-        path: &std::path::Path,
+        command: &mut std::process::Command,
     ) -> MidasSysResult<(Box<<Self as Target>::OSTarget>, WaitStatus)>;
     fn process_id(&self) -> Pid;
     fn step(&self, steps: usize);
@@ -15,4 +17,15 @@ pub trait Target {
     fn kill(&self) -> MidasSysResult<WaitStatus>;
     fn read_memory(&self, address: usize, bytes: usize) -> Vec<u8>;
     fn kill_on_tracer_exit(&self) -> MidasSysResult<()>;
+}
+
+pub fn make_command(program_path: &str, args: Vec<&str>) -> MidasSysResult<std::process::Command> {
+    let program = std::path::Path::new(program_path);
+    if !program.exists() {
+        Err(format!("{} doesn't exist", program.display()))
+    } else {
+        let mut command = std::process::Command::new(program);
+        command.args(args.iter());
+        Ok(command)
+    }
 }
