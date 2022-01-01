@@ -4,6 +4,7 @@ pub mod waitstatus;
 pub use waitstatus::{Pid, WaitStatus};
 pub mod errno;
 pub mod ptrace;
+pub mod signals;
 pub type MidasSysResult<T> = Result<T, String>;
 pub enum Fork {
     Parent(pid_t),
@@ -35,31 +36,6 @@ pub fn unwrap_err_err(err: Result<String, String>) -> String {
     }
 }
 
-pub fn begin_trace_target(target_binary_path: &std::path::Path) -> Result<(), String> {
-    use libc::{execl, ptrace, PTRACE_TRACEME};
-    let p = std::path::Path::new(target_binary_path);
-    if !p.exists() {
-        Err(format!("{:?} doesn't exist", target_binary_path))
-    } else {
-        unsafe {
-            if ptrace(
-                PTRACE_TRACEME,
-                0,
-                std::ptr::null() as *const libc::c_void,
-                std::ptr::null() as *const libc::c_void,
-            ) == -1
-            {
-                return Err(errno::get_errno_msg());
-            } else {
-                if execl(p.as_os_str().as_bytes().as_ptr() as _, std::ptr::null()) == -1 {
-                    return Err(errno::get_errno_msg());
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
 pub fn continue_execution(pid: pid_t) -> Result<(), String> {
     use libc::{ptrace, PTRACE_CONT};
     unsafe {
@@ -87,10 +63,4 @@ pub fn waitpid(pid: pid_t, options: i32) -> Result<WaitStatus, String> {
 }
 
 #[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
-    }
-}
+mod tests {}
