@@ -3,5 +3,5 @@
 
 int main() {
     std::printf("Hello world!\n");
-    return 0;
+    exit(EXIT_FAILURE);
 }

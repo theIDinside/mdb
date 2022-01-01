@@ -12,9 +12,19 @@ macro_rules! tests_dir {
     };
 }
 
+macro_rules! subjects {
+    () => {
+        concat!(tests_dir!(), "/executables")
+    };
+    ($e: expr) => {
+        concat!(concat!(tests_dir!(), "/executables/"), $e)
+    };
+}
+
 pub fn pre_test() {
     BuiltTestDebuggees.call_once(|| {
         let status = Command::new("make")
+            .arg("all")
             .current_dir(tests_dir!())
             .spawn()
             .unwrap()
@@ -24,9 +34,9 @@ pub fn pre_test() {
     });
 }
 
-#[test]
+// #[test]
 pub fn exited() {
-    let program_path = concat!(tests_dir!(), "/helloworld");
+    let program_path = subjects!("helloworld");
     pre_test();
     let fork = nixwrap::fork().unwrap();
     match fork {
@@ -38,8 +48,7 @@ pub fn exited() {
             );
             let status = debugger.continue_execution().unwrap();
             println!("continue execution...");
-
-            assert_eq!(status, WaitStatus::Stopped(Pid(pid)));
+            assert_eq!(status, WaitStatus::ExitedNormally(Pid(pid), 0));
         }
         nixwrap::Fork::Child => {
             match nixwrap::begin_trace_target(std::path::Path::new(program_path)) {
@@ -50,4 +59,16 @@ pub fn exited() {
             }
         }
     }
+}
+
+#[test]
+pub fn exit_with_exit_status_1() {
+    use midas::target::Target;
+    let program_path = subjects!("helloworld_exit_status_1");
+    pre_test();
+    let (target, waitstatus) =
+        midas::target::linux::LinuxTarget::launch(std::path::Path::new(program_path)).unwrap();
+    println!("Wait status after fork: {:?}", waitstatus);
+    let status = target.continue_execution().unwrap();
+    assert_eq!(status, WaitStatus::ExitedNormally(target.process_id(), 1));
 }
