@@ -22,9 +22,13 @@ fn main() -> Result<(), OsString> {
                 debugger.handle_command(commands::parse_input(input));
             }
         }
-        nixwrap::Fork::Child => match nixwrap::trace_execution_of(&program_path) {
-            Ok(()) => todo!("execution successfully began. Not implemented."),
-            Err(err) => return Err(err.into()),
-        },
+        nixwrap::Fork::Child => {
+            match nixwrap::begin_trace_target(std::path::Path::new(program_path)) {
+                Ok(()) => {
+                    todo!()
+                }
+                Err(err) => return Err(err.into()),
+            }
+        }
     }
 }
