@@ -1,2 +1,5 @@
 /target
 **/Cargo.lock
+
+# the subjects for testing, should not be included, but built when used
+helloworld
