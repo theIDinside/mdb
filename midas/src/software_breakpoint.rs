@@ -1,5 +1,5 @@
 use super::types::Address;
-use libc::pid_t;
+use nixwrap::Pid;
 
 #[allow(dead_code)]
 pub enum BreakpointRequest {
@@ -11,9 +11,11 @@ pub enum BreakpointRequest {
 pub struct Breakpoint {
     pub address: Address,
     instruction_binary: isize,
-    pid: pid_t,
+    pid: Pid,
 }
 
-impl Breakpoint {
-    pub fn set_breakpoint(address: usize) -> Result<Breakpoint, String> {}
-}
+pub struct HWBreakpoint {}
+
+impl Breakpoint {}
+
+impl HWBreakpoint {}
