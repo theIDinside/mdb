@@ -13,22 +13,5 @@ fn main() -> Result<(), OsString> {
     let (debugger_output_stream, cli_input_stream) = std::sync::mpsc::channel();
     let midas_communications =
         MidasCommuncation::new(debugger_input_stream, debugger_output_stream);
-    match nixwrap::fork()? {
-        nixwrap::Fork::Parent(pid) => {
-            let mut cli = Box::new(cli::Prompt::new("mdb> ")?);
-            let debugger = debugger::Debugger::new(program_path.clone(), pid, midas_communications);
-            loop {
-                let input = debugger.wait_for_input();
-                debugger.handle_command(commands::parse_input(input));
-            }
-        }
-        nixwrap::Fork::Child => {
-            match nixwrap::begin_trace_target(std::path::Path::new(program_path)) {
-                Ok(()) => {
-                    todo!()
-                }
-                Err(err) => return Err(err.into()),
-            }
-        }
-    }
+    Ok(())
 }
