@@ -1,5 +1,6 @@
 use super::commands::Command;
-use crate::{software_breakpoint::Breakpoint, types::Address, MidasSysResult};
+use crate::{software_breakpoint::Breakpoint, types::Address};
+use nixwrap::MidasSysResult;
 use nixwrap::{Pid, WaitStatus};
 use std::{
     collections::{HashMap, HashSet},

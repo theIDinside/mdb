@@ -57,13 +57,13 @@ impl super::Target for LinuxTarget {
         todo!()
     }
 
-    fn continue_execution(&self) -> crate::MidasSysResult<nixwrap::WaitStatus> {
+    fn continue_execution(&self) -> nixwrap::MidasSysResult<nixwrap::WaitStatus> {
         nixwrap::continue_execution(*self.pid).unwrap();
         let opts = 0;
         nixwrap::waitpid(*self.pid, opts)
     }
 
-    fn kill(&self) -> crate::MidasSysResult<nixwrap::WaitStatus> {
+    fn kill(&self) -> nixwrap::MidasSysResult<nixwrap::WaitStatus> {
         todo!()
     }
 
@@ -71,7 +71,7 @@ impl super::Target for LinuxTarget {
         todo!()
     }
 
-    fn kill_on_tracer_exit(&self) -> crate::MidasSysResult<()> {
+    fn kill_on_tracer_exit(&self) -> nixwrap::MidasSysResult<()> {
         nixwrap::ptrace::kill_on_midas_exit(self.process_id())
     }
 }
