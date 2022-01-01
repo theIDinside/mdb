@@ -6,8 +6,6 @@ pub mod software_breakpoint;
 pub mod target;
 pub mod types;
 
-pub type MidasSysResult<T> = Result<T, String>;
-
 #[cfg(test)]
 mod tests {
     #[test]
