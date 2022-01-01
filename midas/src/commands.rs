@@ -1,5 +1,4 @@
 use crate::software_breakpoint::BreakpointRequest;
-use libc::pid_t;
 
 #[allow(dead_code)]
 pub enum Command {

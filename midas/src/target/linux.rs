@@ -7,9 +7,9 @@ use std::{
 use crate::{software_breakpoint::Breakpoint, types::Address};
 
 pub struct LinuxTarget {
-    binary: String,
+    _binary: String,
     pid: Pid,
-    software_breakpoints: HashMap<Address, HashSet<Breakpoint>>,
+    _software_breakpoints: HashMap<Address, HashSet<Breakpoint>>,
 }
 
 impl super::Target for LinuxTarget {
@@ -43,9 +43,9 @@ impl super::Target for LinuxTarget {
                 let pid = Pid(child.id() as _);
                 let status = waitpid(*pid, 0)?;
                 let target = Box::new(LinuxTarget {
-                    binary: path.to_str().unwrap().to_string(),
+                    _binary: path.to_str().unwrap().to_string(),
                     pid: pid,
-                    software_breakpoints: HashMap::new(),
+                    _software_breakpoints: HashMap::new(),
                 });
                 Ok((target, status))
             }
@@ -56,7 +56,7 @@ impl super::Target for LinuxTarget {
         self.pid
     }
 
-    fn step(&self, steps: usize) {
+    fn step(&self, _steps: usize) {
         todo!()
     }
 
@@ -70,7 +70,7 @@ impl super::Target for LinuxTarget {
         todo!()
     }
 
-    fn read_memory(&self, address: usize, bytes: usize) -> Vec<u8> {
+    fn read_memory(&self, _address: usize, _bytes: usize) -> Vec<u8> {
         todo!()
     }
 

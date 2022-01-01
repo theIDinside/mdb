@@ -1,5 +1,3 @@
-use std::io::Write;
-
 use crate::ansicodes;
 use crate::cfg;
 use crate::key;
@@ -109,10 +107,6 @@ impl Prompt {
         &self.prompt[4..]
     }
 
-    fn prompt_len(&self) -> usize {
-        self.prompt.len().saturating_sub(4)
-    }
-
     pub fn set_prompt(&mut self, prompt: &str) {
         self.prompt = format!("\x1b[2K{}", prompt);
     }
@@ -148,7 +142,7 @@ impl Prompt {
                     }
                 }
                 KeyboardInput::Left => {
-                    if let Some(m) = read_key.modifier {
+                    if let Some(_) = read_key.modifier {
                         let p = res.len().saturating_sub(self.cursor_column);
                         let steps_left = res
                             .chars()
@@ -215,7 +209,7 @@ impl Prompt {
                     }
                 }
                 KeyboardInput::Backspace => {
-                    if let Some(m) = read_key.modifier {
+                    if let Some(_) = read_key.modifier {
                         if !res.is_empty() && self.cursor_column != 0 {
                             let skip = res.len().saturating_sub(self.cursor_column);
                             let mut remove_count = self.cursor_column;
@@ -234,7 +228,7 @@ impl Prompt {
                                     res.len().saturating_sub(self.cursor_column),
                                 )
                             }
-                            for x in 0..remove_count {
+                            for _ in 0..remove_count {
                                 res.pop();
                             }
                             self.cursor_column = self.cursor_column.saturating_sub(remove_count);

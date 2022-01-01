@@ -2,23 +2,20 @@ use super::commands::Command;
 use crate::{software_breakpoint::Breakpoint, types::Address};
 use nixwrap::MidasSysResult;
 use nixwrap::{Pid, WaitStatus};
-use std::{
-    collections::{HashMap, HashSet},
-    ops::Deref,
-};
+use std::collections::{HashMap, HashSet};
 
 pub struct Debugger {
-    binary: String,
+    _binary: String,
     pid: Pid,
-    software_breakpoints: HashMap<Address, HashSet<Breakpoint>>,
+    _software_breakpoints: HashMap<Address, HashSet<Breakpoint>>,
 }
 
 impl Debugger {
     pub fn new(binary: String, pid: Pid) -> Debugger {
         Debugger {
-            binary,
+            _binary: binary,
             pid,
-            software_breakpoints: HashMap::new(),
+            _software_breakpoints: HashMap::new(),
         }
     }
 
@@ -29,7 +26,7 @@ impl Debugger {
     }
 
     // Public API for repl, server, etc to communicate with. *Everything* goes through here.
-    pub fn handle_command(&mut self, cmd: Command) {
+    pub fn handle_command(&mut self, _cmd: Command) {
         todo!("handle of request commands not implemented")
     }
 }

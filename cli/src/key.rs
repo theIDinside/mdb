@@ -23,7 +23,7 @@ impl Into<ParsedKey> for KeyboardInput {
         }
     }
 }
-
+#[allow(unused)]
 pub enum Modifier {
     Control,
     Shift,

@@ -1,5 +1,3 @@
-use std::convert::From;
-
 use nixwrap::{Pid, WaitStatus};
 pub mod linux;
 

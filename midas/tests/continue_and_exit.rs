@@ -1,10 +1,9 @@
 use linuxwrapper as nixwrap;
-use midas::debugger::Debugger;
 use midas::{self, target};
-use nixwrap::{Pid, WaitStatus};
+use nixwrap::WaitStatus;
 use std::{panic, process::Command, sync::Once};
 
-static BuiltTestDebuggees: Once = Once::new();
+static BUILT_TEST_DEBUGGEES: Once = Once::new();
 
 macro_rules! tests_dir {
     () => {
@@ -22,7 +21,7 @@ macro_rules! subjects {
 }
 
 pub fn compile_subjects() {
-    BuiltTestDebuggees.call_once(|| {
+    BUILT_TEST_DEBUGGEES.call_once(|| {
         let status = Command::new("make")
             .arg("all")
             .current_dir(tests_dir!())
@@ -49,7 +48,6 @@ pub fn exit_with_exit_status_1() {
         use midas::target::Target;
         let program_path = subjects!("helloworld_exit_status_1");
         compile_subjects();
-        let mut cmd = std::process::Command::new(program_path).arg("exit_with_exit_status_1");
         let (target, waitstatus) = midas::target::linux::LinuxTarget::launch(
             &mut target::make_command(program_path, vec!["exit_with_exit_status_1"]).unwrap(),
         )
@@ -86,7 +84,6 @@ pub fn exited() {
         use midas::target::Target;
         let program_path = subjects!("helloworld");
         compile_subjects();
-        let mut cmd = std::process::Command::new(program_path).arg("exited");
         let (target, waitstatus) = midas::target::linux::LinuxTarget::launch(
             &mut target::make_command(program_path, vec!["exited"]).unwrap(),
         )

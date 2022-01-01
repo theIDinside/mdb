@@ -10,8 +10,8 @@ pub enum BreakpointRequest {
 
 pub struct Breakpoint {
     pub address: Address,
-    instruction_binary: isize,
-    pid: Pid,
+    _instruction_binary: isize,
+    _pid: Pid,
 }
 
 pub struct HWBreakpoint {}

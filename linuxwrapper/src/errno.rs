@@ -1,10 +1,10 @@
 use std::sync::Once;
 
-static ErrNo: Once = Once::new();
+static ERR_NO: Once = Once::new();
 static mut ERRNO: *mut i32 = std::ptr::null_mut() as _;
 
 fn get_errno() -> &'static i32 {
-    ErrNo.call_once(|| {
+    ERR_NO.call_once(|| {
         unsafe {
             ERRNO = libc::__errno_location();
             if ERRNO.is_null() {
