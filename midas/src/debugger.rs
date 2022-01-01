@@ -1,15 +1,19 @@
-use crate::types::Address;
-use libc::pid_t;
-use std::collections::{HashMap, HashSet};
+use super::commands::Command;
+use crate::{software_breakpoint::Breakpoint, types::Address, MidasSysResult};
+use nixwrap::{Pid, WaitStatus};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Deref,
+};
 
 pub struct Debugger {
     binary: String,
-    pid: pid_t,
+    pid: Pid,
     software_breakpoints: HashMap<Address, HashSet<Breakpoint>>,
 }
 
 impl Debugger {
-    pub fn new(binary: String, pid: pid_t) -> Debugger {
+    pub fn new(binary: String, pid: Pid) -> Debugger {
         Debugger {
             binary,
             pid,
@@ -17,15 +21,14 @@ impl Debugger {
         }
     }
 
-    pub fn continue_execution(&mut self) {
-        nixwrap::continue_execution(self.pid).unwrap();
+    pub fn continue_execution(&mut self) -> MidasSysResult<WaitStatus> {
+        nixwrap::continue_execution(*self.pid).unwrap();
         let opts = 0;
-        let wait_status = nixwrap::waitpid(self.pid, opts).unwrap();
+        nixwrap::waitpid(*self.pid, opts)
     }
 
-    pub fn run(&mut self) {
-        nixwrap::continue_execution(self.pid).unwrap();
-        let opts = 0;
-        let wait_status = nixwrap::waitpid(self.pid, opts).unwrap();
+    // Public API for repl, server, etc to communicate with. *Everything* goes through here.
+    pub fn handle_command(&mut self, cmd: Command) {
+        todo!("handle of request commands not implemented")
     }
 }
