@@ -1,5 +1,6 @@
 use super::types::Address;
-use nixwrap::Pid;
+use nixwrap::ptrace;
+use nixwrap::{MidasSysResult, Pid};
 
 #[allow(dead_code)]
 pub enum BreakpointRequest {
@@ -10,12 +11,42 @@ pub enum BreakpointRequest {
 
 pub struct Breakpoint {
     pub address: Address,
-    _instruction_binary: isize,
-    _pid: Pid,
+    pub enabled: bool,
+    pid: Pid,
+    instruction_encoding: i64,
 }
 
 pub struct HWBreakpoint {}
 
-impl Breakpoint {}
+impl Breakpoint {
+    fn new(address: Address, enabled: bool, pid: Pid, instruction_encoding: i64) -> Breakpoint {
+        Breakpoint {
+            address,
+            enabled,
+            pid,
+            instruction_encoding,
+        }
+    }
+    pub fn set_enabled(pid: Pid, addr: usize) -> MidasSysResult<Breakpoint> {
+        Breakpoint::set(pid, addr, true)
+    }
+    pub fn set(pid: Pid, addr: usize, enabled: bool) -> MidasSysResult<Breakpoint> {
+        let instruction = nixwrap::ptrace::peek_data(pid, addr)?;
+        // call down the old gods upon you
+        let interrupt_3 = 0xcc;
+        if enabled {
+            let swap_in = (instruction & !0xff) | interrupt_3;
+            ptrace::poke_data(pid, addr, swap_in)?;
+        }
+        Ok(Breakpoint::new(Address(addr), enabled, pid, instruction))
+    }
+
+    pub fn disable(&mut self) {
+        if self.enabled {
+            ptrace::poke_data(self.pid, self.address.value(), self.instruction_encoding).unwrap();
+        }
+        self.enabled = false;
+    }
+}
 
 impl HWBreakpoint {}
