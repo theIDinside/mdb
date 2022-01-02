@@ -1,4 +1,4 @@
-use crate::Pid;
+use crate::{MidasSysResult, Pid};
 pub(in crate) use libc::ptrace;
 
 /** Kills the target debuggee if Midas debugger exits
@@ -31,6 +31,35 @@ pub fn trace_me() -> crate::MidasSysResult<()> {
             std::ptr::null() as *const libc::c_void,
         ) == -1
         {
+            Err(crate::errno::get_errno_msg())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+pub fn peek_data(pid: Pid, addr: usize) -> crate::MidasSysResult<i64> {
+    unsafe {
+        let quadword = libc::ptrace(
+            libc::PTRACE_PEEKDATA,
+            *pid,
+            addr,
+            std::ptr::null() as *const libc::c_void,
+        );
+        if quadword == -1 {
+            Err(format!(
+                "failed to peek data at {} of [PID: {}]",
+                addr, *pid
+            ))
+        } else {
+            Ok(quadword)
+        }
+    }
+}
+
+pub fn poke_data(pid: Pid, addr: usize, data: libc::c_long) -> MidasSysResult<()> {
+    unsafe {
+        if libc::ptrace(libc::PTRACE_POKEDATA, *pid, addr, data) == -1 {
             Err(crate::errno::get_errno_msg())
         } else {
             Ok(())
