@@ -10,20 +10,13 @@ pub use elf32::*;
 
 #[cfg(target_arch = "x86_64")]
 pub use elf64::*;
+use nixwrap::MidasSysResult;
 
 use crate::utils::midas_err;
 
-// 2nd part either has a ProgramHeaderTable or a SectionHeader, or both
-pub struct ProgramHeaderTable {}
-pub struct SectionHeader {}
-
-pub struct ELF {
-    header: ELFHeader,
-}
-
 pub struct Object {
-    data: Vec<u8>,
-    bytes_read: usize,
+    pub data: Vec<u8>,
+    pub bytes_read: usize,
 }
 
 impl Object {
