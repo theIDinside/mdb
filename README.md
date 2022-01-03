@@ -29,6 +29,13 @@ Wrapping around the libc functionality we use. We could use an already existing 
 
 The actual debugger library; the library which either the repl binary links to or the server, depending on what functionality the interface is meant to expose.
 
+#### debug_info
+
+Library that wraps around the [gimli](https://github.com/gimli-rs/gimli) & the [object](https://github.com/gimli-rs/object) crates for parsing ELF and DWARF data. The reason for wrapping this in it's own library, is because, if I ever wanted to dive down
+and make a rudimentary ELF and DWARF parser, switching this component out becomes much easier.
+
+Note: I've changed my mind, I'm going to try and write rudimentary libraries for this myself at first.
+
 ## Binaries in this workspace
 
 #### repl
@@ -38,3 +45,9 @@ The command line version of the debugger library. The functionality that this pr
 #### server
 
 An interface against Midas that instead of taking commands from the commandline, solely takes commands from a socket or some other form of IPC.
+
+## Dependencies
+
+Though, I'm trying to keep it as non-dependent on other libraries as possible, to get going and actually get somewhere here in the beginning, I'm going to pull in the following crate:
+
+- gimli - for reading DWARF.

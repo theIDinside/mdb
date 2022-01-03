@@ -4,7 +4,8 @@ members = [
 	"cli",
 	"linuxwrapper",
 	"repl",
-	"server"
+	"server",
+	"debug_info"
 ]
 
 [profile.dev]
