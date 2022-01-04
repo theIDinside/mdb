@@ -1,5 +1,3 @@
-use std::ops::Deref;
-
 use nixwrap::{Pid, WaitStatus};
 pub mod linux;
 

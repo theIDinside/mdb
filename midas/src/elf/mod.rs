@@ -1,9 +1,8 @@
 mod elf32;
 mod elf64;
+mod programheader;
 
-const EI_NIDENT: usize = 16;
-
-use std::io::{Read, Seek, SeekFrom};
+use std::io::Read;
 
 #[cfg(target_arch = "x86")]
 pub use elf32::*;
@@ -28,7 +27,7 @@ impl Object {
     }
 }
 
-pub fn load_object(path: &std::path::Path) -> nixwrap::MidasSysResult<Object> {
+pub fn load_object(path: &std::path::Path) -> MidasSysResult<Object> {
     let mut buf = vec![];
     let mut f = std::fs::OpenOptions::new()
         .read(true)

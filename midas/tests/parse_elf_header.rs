@@ -1,6 +1,4 @@
-use linuxwrapper as nixwrap;
-use midas::{self, target};
-use nixwrap::WaitStatus;
+use midas::{self};
 use std::{panic, process::Command, sync::Once};
 
 static BUILT_TEST_DEBUGGEES: Once = Once::new();
@@ -84,7 +82,11 @@ pub fn parse_elf_header() {
         assert_eq!(elf_header, should_be);
 
         println!("--- Parsed Header --- \n{}", elf_header);
-
         println!("--- Hand-written Header --- \n{}", should_be);
+
+        let firefox_object =
+            midas::elf::load_object(std::path::Path::new("/usr/lib/firefox/firefox")).unwrap();
+        let firefox_elf_header = midas::elf::ELFHeader::from(&firefox_object.data[..]).unwrap();
+        println!("---- Firefox ELF Header ----\n{}", firefox_elf_header);
     })
 }
