@@ -523,6 +523,16 @@ pub struct MidasELFHeader {
     pub object_type: ObjectType,
     pub machine_type: Machine,
     pub file_version: Version,
+    pub entry_point_addr: usize,
+    pub program_header_offset: u64,
+    pub section_header_offset: u64,
+    pub flags: u32,
+    pub elf_header_size: u16,
+    pub program_header_entry_size: u16,
+    pub program_header_entries: u16,
+    pub section_header_entry_size: u16,
+    pub section_header_entries: u16,
+    pub section_header_string_index: u16,
 }
 
 impl MidasELFHeader {
@@ -533,6 +543,16 @@ impl MidasELFHeader {
         let object_type = ObjectType::from_word(unsafe { unchecked::bytes_to_u16(&bytes[16..18]) });
         let machine_type = Machine::from_word(unsafe { unchecked::bytes_to_u16(&bytes[18..20]) });
         let file_version = Version::from_u32(unsafe { unchecked::bytes_to_u32(&bytes[20..24]) });
+        let entry_point_addr = unsafe { unchecked::bytes_to_u64(&bytes[24..32]) } as usize;
+        let program_header_offset = unsafe { unchecked::bytes_to_u64(&bytes[32..40]) };
+        let section_header_offset = unsafe { unchecked::bytes_to_u64(&bytes[40..48]) };
+        let flags = unsafe { unchecked::bytes_to_u32(&bytes[48..52]) };
+        let elf_header_size = unsafe { unchecked::bytes_to_u16(&bytes[52..54]) };
+        let program_header_entry_size = unsafe { unchecked::bytes_to_u16(&bytes[54..56]) };
+        let program_header_entries = unsafe { unchecked::bytes_to_u16(&bytes[56..58]) };
+        let section_header_entry_size = unsafe { unchecked::bytes_to_u16(&bytes[58..60]) };
+        let section_header_entries = unsafe { unchecked::bytes_to_u16(&bytes[60..62]) };
+        let section_header_string_index = unsafe { unchecked::bytes_to_u16(&bytes[62..64]) };
 
         Ok(MidasELFHeader {
             architecture,
@@ -542,6 +562,23 @@ impl MidasELFHeader {
             object_type,
             machine_type,
             file_version,
+            entry_point_addr,
+            program_header_offset,
+            section_header_offset,
+            flags,
+            elf_header_size,
+            program_header_entry_size,
+            program_header_entries,
+            section_header_entry_size,
+            section_header_entries,
+            section_header_string_index,
         })
+    }
+}
+
+impl std::fmt::Display for MidasELFHeader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", format_args!("ELF Header\nArchitecture class: {:?}\nData encoding: {:?}\nELF Version: {:?}\nOS ABI: {:?}\nObject Type: {:?}\nMachine type: {:?}\nFile version: {:?}\nEntry address: 0x{:X}\nProgram Header Offset: {} bytes\nSection Header Offset: {} bytes\nFlags value: {}\nELF Header size: {} bytes\nProgram Header Entry Size: {} bytes\nProgram Header Entries: {} entries\nSection Header Entry Size: {} bytes\nSection Header Entries: {} entries\nSection Header String Index: {}\n",
+        &self.architecture, &self.encoding, &self.elf_version, &self.os_abi, &self.object_type, &self.machine_type, &self.file_version, &self.entry_point_addr, &self.program_header_offset, &self.section_header_offset, &self.flags, &self.elf_header_size, &self.program_header_entry_size, &self.program_header_entries, &self.section_header_entry_size, &self.section_header_entries, &self.section_header_string_index))
     }
 }

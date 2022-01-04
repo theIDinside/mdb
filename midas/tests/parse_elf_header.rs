@@ -61,6 +61,16 @@ pub fn parse_elf_header() {
             object_type: midas::elf::ObjectType::Executable,
             machine_type: midas::elf::Machine::X86_64,
             file_version: midas::elf::Version::Current,
+            entry_point_addr: 0x00_00_00_00_00_40_10_40,
+            program_header_offset: 0x00_00_00_00_00_00_00_40,
+            section_header_offset: 0x00_00_00_00_00_00_4C_30,
+            flags: 0x00_00_00_00,
+            elf_header_size: 0x00_40,
+            program_header_entry_size: 0x00_38,
+            program_header_entries: 0x00_0B,
+            section_header_entry_size: 0x00_40,
+            section_header_entries: 0x00_21,
+            section_header_string_index: 0x00_20,
         };
 
         assert_eq!(elf_header.architecture, should_be.architecture);
@@ -72,5 +82,9 @@ pub fn parse_elf_header() {
         assert_eq!(elf_header.file_version, should_be.file_version);
 
         assert_eq!(elf_header, should_be);
+
+        println!("--- Parsed Header --- \n{}", elf_header);
+
+        println!("--- Hand-written Header --- \n{}", should_be);
     })
 }
