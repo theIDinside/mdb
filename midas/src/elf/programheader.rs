@@ -1,74 +1,77 @@
 use nixwrap::MidasSysResult;
+#[derive(Debug)]
+#[repr(u32)]
+pub enum Permission {
+    Executable = 0b001,
+    WriteOnly = 0b010,
+    ReadOnly = 0b100,
+    ExecuteWrite = 0b011,
+    ExecuteRead = 0b101,
+    ReadWrite = 0b110,
+    ExecuteReadWrite = 0b111,
+    Invalid,
+}
 
 pub struct ProgramHeader {
     pub ph_type: Type,
-    pub flags: u32,
-    pub offset: u64,
+    pub flags: Permission,
+    pub file_offset: u64,
     pub virtual_address: u64,
     pub physical_address: u64,
     pub file_size: u64,
     pub memory_size: u64,
     pub align: u64,
+    header_object_file_offset: usize,
 }
 
-impl Default for ProgramHeader {
-    fn default() -> Self {
-        Self {
-            ph_type: Type::Unused,
-            flags: Default::default(),
-            offset: Default::default(),
-            virtual_address: Default::default(),
-            physical_address: Default::default(),
-            file_size: Default::default(),
-            memory_size: Default::default(),
-            align: Default::default(),
-        }
+impl std::fmt::Debug for ProgramHeader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", format_args!("Program Header Type: {:?}\nPermissions: {:?}\nOffset in file: {}\nVirtual address: 0x{:X}\nPhysical address: 0x{:X}\nSize in file: {} bytes\nSize in memory: {} bytes\nAlignment: {} bytes\n",  &self.ph_type, &self.flags, &self.file_offset, &self.virtual_address, &self.physical_address, &self.file_size, &self.memory_size, &self.align))
     }
 }
 
 impl ProgramHeader {
-    // N.B. it's up to you, to make sure that this slice actually begins where this program header starts. If you blow it up, it's on you.
-    #[allow(unused)]
-    pub fn from_bytes(bytes: &[u8]) -> MidasSysResult<ProgramHeader> {
-        let ph_type = Type::from(unsafe { crate::utils::unchecked::bytes_to_u32(&bytes[..4]) })?;
-        let mut ph = ProgramHeader::default();
-        ph.ph_type = ph_type;
+    pub fn from_libc_repr(repr: &libc::Elf64_Phdr, object_file_byte_offset: usize) -> MidasSysResult<ProgramHeader> {
+        Ok(ProgramHeader {
+            ph_type: Type::from(repr.p_type).unwrap(),
+            flags: unsafe { std::mem::transmute(repr.p_flags) },
+            file_offset: repr.p_offset,
+            virtual_address: repr.p_vaddr,
+            physical_address: repr.p_paddr,
+            file_size: repr.p_filesz,
+            memory_size: repr.p_memsz,
+            align: repr.p_align,
+            header_object_file_offset: object_file_byte_offset,
+        })
+    }
 
-        unsafe {
-            // we in da danja zone
-            let offset = bytes.as_ptr().offset(4);
-            let mut ph_slice = crate::utils::unchecked::as_mut_bytes(&ph);
-            let ph_ptr = ph_slice.as_mut_ptr();
-            std::ptr::copy_nonoverlapping(
-                offset,
-                ph_ptr.offset(std::mem::size_of::<u32>() as _),
-                56 - 4,
-            );
-        }
-        Ok(ph)
+    pub fn header_object_file_offset(&self) -> usize {
+        self.header_object_file_offset
     }
 }
+
 #[allow(non_camel_case_types)]
 #[repr(u32)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Type {
-    Unused,                  /* Program header table entry unused */
-    Loadable,                /* Loadable program segment */
-    DynamicLinkInfo,         /* Dynamic linking information */
-    ProgramInterpreter,      /* Program interpreter */
-    Auxiliary,               /* Auxiliary information */
-    Reserved,                /* Reserved */
-    HeaderTable,             /* Entry for header table itself */
-    ThreadLocalStorage,      /* Thread-local storage segment */
-    DefinedTypeCount,        /* Number of defined types */
-    OSSpecific,              /* Start of OS-specific */
-    GNU_EH_FRAME,            /* GCC .eh_frame_hdr segment */
-    StackExecutability,      /* Indicates stack executability */
-    ReadOnlyAfterRelocation, /* Read-only after relocation */
-    SunSpecificBSS,          /* Sun Specific segment */
-    SUNWSTACK,               /* Stack segment */
-    EndOfOSSpecific,         /* End of OS-specific */
-    StartProcessorSpecific,  /* Start of processor-specific */
-    EndProcessorSpecific,    /* End of processor-specific */
+    Unused = 0,                              /* Program header table entry unused */
+    Loadable = 1,                            /* Loadable program segment */
+    DynamicLinkInfo = 2,                     /* Dynamic linking information */
+    ProgramInterpreter = 3,                  /* Program interpreter */
+    Auxiliary = 4,                           /* Auxiliary information */
+    Reserved = 5,                            /* Reserved */
+    HeaderTable = 6,                         /* Entry for header table itself */
+    ThreadLocalStorage = 7,                  /* Thread-local storage segment */
+    DefinedTypeCount = 8,                    /* Number of defined types */
+    OSSpecific = 0x60000000,                 /* Start of OS-specific */
+    GNU_EH_FRAME = 0x6474e550,               /* GCC .eh_frame_hdr segment */
+    GNUStackExecutability = 0x6474e551,      /* Indicates stack executability */
+    GNUReadOnlyAfterRelocation = 0x6474e552, /* Read-only after relocation */
+    SunSpecificBSS = 0x6ffffffa,             /* Sun Specific segment */
+    SUNWSTACK = 0x6ffffffb,                  /* Stack segment */
+    EndOfOSSpecific = 0x6fffffff,            /* End of OS-specific */
+    StartProcessorSpecific = 0x70000000,     /* Start of processor-specific */
+    EndProcessorSpecific = 0x7fffffff,       /* End of processor-specific */
 }
 
 impl Type {
@@ -85,8 +88,8 @@ impl Type {
             8 => Ok(Self::DefinedTypeCount),
             0x60000000 => Ok(Self::OSSpecific),
             0x6474e550 => Ok(Self::GNU_EH_FRAME),
-            0x6474e551 => Ok(Self::StackExecutability),
-            0x6474e552 => Ok(Self::ReadOnlyAfterRelocation),
+            0x6474e551 => Ok(Self::GNUStackExecutability),
+            0x6474e552 => Ok(Self::GNUReadOnlyAfterRelocation),
             0x6ffffffa => Ok(Self::SunSpecificBSS),
             0x6ffffffb => Ok(Self::SUNWSTACK),
             0x6fffffff => Ok(Self::EndOfOSSpecific),
