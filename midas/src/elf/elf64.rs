@@ -500,7 +500,7 @@ impl DataEncoding {
 pub fn parse_eident(
     data: &[u8],
 ) -> MidasSysResult<(Class, DataEncoding, Version, OperatingSystemABI)> {
-    if data[0..4] != MidasELFHeader::MAGIC {
+    if data[0..4] != ELFHeader::MAGIC {
         return Err(format!(
             "ELF Magic not found; binary blob possibly not in ELF format? ({:?})",
             &data[..4]
@@ -515,7 +515,7 @@ pub fn parse_eident(
 
 #[allow(unused)]
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct MidasELFHeader {
+pub struct ELFHeader {
     pub architecture: Class,
     pub encoding: DataEncoding,
     pub elf_version: Version,
@@ -535,9 +535,9 @@ pub struct MidasELFHeader {
     pub section_header_string_index: u16,
 }
 
-impl MidasELFHeader {
+impl ELFHeader {
     pub const MAGIC: [u8; 4] = [0x7F, 0x45, 0x4C, 0x46];
-    pub fn from(bytes: &[u8]) -> MidasSysResult<MidasELFHeader> {
+    pub fn from(bytes: &[u8]) -> MidasSysResult<ELFHeader> {
         use crate::utils::unchecked;
         let (architecture, encoding, elf_version, os_abi) = parse_eident(&bytes[0..16])?;
         let object_type = ObjectType::from_word(unsafe { unchecked::bytes_to_u16(&bytes[16..18]) });
@@ -554,7 +554,7 @@ impl MidasELFHeader {
         let section_header_entries = unsafe { unchecked::bytes_to_u16(&bytes[60..62]) };
         let section_header_string_index = unsafe { unchecked::bytes_to_u16(&bytes[62..64]) };
 
-        Ok(MidasELFHeader {
+        Ok(ELFHeader {
             architecture,
             encoding,
             elf_version,
@@ -576,7 +576,7 @@ impl MidasELFHeader {
     }
 }
 
-impl std::fmt::Display for MidasELFHeader {
+impl std::fmt::Display for ELFHeader {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", format_args!("ELF Header\nArchitecture class: {:?}\nData encoding: {:?}\nELF Version: {:?}\nOS ABI: {:?}\nObject Type: {:?}\nMachine type: {:?}\nFile version: {:?}\nEntry address: 0x{:X}\nProgram Header Offset: {} bytes\nSection Header Offset: {} bytes\nFlags value: {}\nELF Header size: {} bytes\nProgram Header Entry Size: {} bytes\nProgram Header Entries: {} entries\nSection Header Entry Size: {} bytes\nSection Header Entries: {} entries\nSection Header String Index: {}\n",
         &self.architecture, &self.encoding, &self.elf_version, &self.os_abi, &self.object_type, &self.machine_type, &self.file_version, &self.entry_point_addr, &self.program_header_offset, &self.section_header_offset, &self.flags, &self.elf_header_size, &self.program_header_entry_size, &self.program_header_entries, &self.section_header_entry_size, &self.section_header_entries, &self.section_header_string_index))

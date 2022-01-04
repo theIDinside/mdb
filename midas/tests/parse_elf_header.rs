@@ -52,8 +52,8 @@ pub fn parse_elf_header() {
     run_test(|| {
         let program_path = subjects!("helloworld");
         let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
-        let elf_header = midas::elf::MidasELFHeader::from(&object.data[..]).unwrap();
-        let should_be = midas::elf::MidasELFHeader {
+        let elf_header = midas::elf::ELFHeader::from(&object.data[..]).unwrap();
+        let should_be = midas::elf::ELFHeader {
             architecture: midas::elf::Class::ELF64,
             encoding: midas::elf::DataEncoding::LSB,
             elf_version: midas::elf::Version::Current,
