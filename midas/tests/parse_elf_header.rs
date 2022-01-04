@@ -1,4 +1,4 @@
-use midas::{self};
+use midas::{self, elf};
 use std::{panic, process::Command, sync::Once};
 
 static BUILT_TEST_DEBUGGEES: Once = Once::new();
@@ -83,10 +83,21 @@ pub fn parse_elf_header() {
 
         println!("--- Parsed Header --- \n{}", elf_header);
         println!("--- Hand-written Header --- \n{}", should_be);
-
-        let firefox_object =
-            midas::elf::load_object(std::path::Path::new("/usr/lib/firefox/firefox")).unwrap();
+        let firefox_object = midas::elf::load_object(std::path::Path::new("/usr/lib/firefox/firefox")).unwrap();
         let firefox_elf_header = midas::elf::ELFHeader::from(&firefox_object.data[..]).unwrap();
         println!("---- Firefox ELF Header ----\n{}", firefox_elf_header);
+    })
+}
+
+#[test]
+pub fn print_program_headers_of_helloworld() {
+    run_test(|| {
+        let program_path = subjects!("helloworld");
+        let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
+        let mut parser = elf::ELFParser::new_parser(&object).unwrap();
+        parser.print_program_segments();
+        println!("Interpreter: {}", parser.get_interpreter().unwrap());
+        parser.print_section_headers();
+        parser.cache_section_names();
     })
 }
