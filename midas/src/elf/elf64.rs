@@ -1,12 +1,14 @@
 use nixwrap::MidasSysResult;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u8)]
 pub enum Class {
     ELF32,
     ELF64,
     Invalid,
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u8)]
 pub enum DataEncoding {
     // ELFDATANONE
     Unknown,
@@ -16,6 +18,7 @@ pub enum DataEncoding {
     MSB,
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u32)]
 pub enum Version {
     Invalid,
     Current,
@@ -23,6 +26,7 @@ pub enum Version {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[allow(dead_code, non_camel_case_types)]
+#[repr(u16)]
 pub enum OperatingSystemABI {
     NONE_OR_SYSV, // UNIX System V ABI
     HPUX,         // HP-UX ABI
@@ -41,6 +45,7 @@ pub enum OperatingSystemABI {
     UNKNOWN,
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u16)]
 pub enum ObjectType {
     Unknown,      // An unknown type.
     Relocatable,  // A relocatable file. (REL)
@@ -53,6 +58,7 @@ pub enum ObjectType {
 
 #[allow(dead_code, non_camel_case_types)]
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u16)]
 pub enum Machine {
     NONE,
     M32,
@@ -497,9 +503,7 @@ impl DataEncoding {
     }
 }
 
-pub fn parse_eident(
-    data: &[u8],
-) -> MidasSysResult<(Class, DataEncoding, Version, OperatingSystemABI)> {
+pub fn parse_eident(data: &[u8]) -> MidasSysResult<(Class, DataEncoding, Version, OperatingSystemABI)> {
     if data[0..4] != ELFHeader::MAGIC {
         return Err(format!(
             "ELF Magic not found; binary blob possibly not in ELF format? ({:?})",
@@ -574,11 +578,19 @@ impl ELFHeader {
             section_header_string_index,
         })
     }
+
+    pub fn ph_entry_size(&self) -> usize {
+        self.program_header_entry_size as _
+    }
+
+    pub fn sh_entry_size(&self) -> usize {
+        self.section_header_entry_size as _
+    }
 }
 
 impl std::fmt::Display for ELFHeader {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", format_args!("ELF Header\nArchitecture class: {:?}\nData encoding: {:?}\nELF Version: {:?}\nOS ABI: {:?}\nObject Type: {:?}\nMachine type: {:?}\nFile version: {:?}\nEntry address: 0x{:X}\nProgram Header Offset: {} bytes\nSection Header Offset: {} bytes\nFlags value: {}\nELF Header size: {} bytes\nProgram Header Entry Size: {} bytes\nProgram Header Entries: {} entries\nSection Header Entry Size: {} bytes\nSection Header Entries: {} entries\nSection Header String Index: {}\n",
+        write!(f, "{}", format_args!("ELF Header\nArchitecture class: {:?}\nData encoding: {:?}\nELF Version: {:?}\nOS ABI: {:?}\nObject Type: {:?}\nMachine type: {:?}\nFile version: {:?}\nEntry address: 0x{:X}\nProgram Header Offset: {} bytes\nSection Header Offset: 0x{:X} bytes\nFlags value: {}\nELF Header size: {} bytes\nProgram Header Entry Size: {} bytes\nProgram Header Entries: {} entries\nSection Header Entry Size: {} bytes\nSection Header Entries: {} entries\nSection Header String Index: {}\n",
         &self.architecture, &self.encoding, &self.elf_version, &self.os_abi, &self.object_type, &self.machine_type, &self.file_version, &self.entry_point_addr, &self.program_header_offset, &self.section_header_offset, &self.flags, &self.elf_header_size, &self.program_header_entry_size, &self.program_header_entries, &self.section_header_entry_size, &self.section_header_entries, &self.section_header_string_index))
     }
 }
