@@ -1,4 +1,4 @@
-use crate::{MidasSysResult, Pid};
+use crate::{MidasSysResultDynamic, Pid};
 pub(in crate) use libc::ptrace;
 
 /** Kills the target debuggee if Midas debugger exits
@@ -22,7 +22,7 @@ pub fn kill_on_midas_exit(pid: Pid) -> Result<(), String> {
     }
 }
 
-pub fn trace_me() -> crate::MidasSysResult<()> {
+pub fn trace_me() -> crate::MidasSysResultDynamic<()> {
     unsafe {
         if ptrace(
             libc::PTRACE_TRACEME,
@@ -38,7 +38,7 @@ pub fn trace_me() -> crate::MidasSysResult<()> {
     }
 }
 
-pub fn peek_data(pid: Pid, addr: usize) -> crate::MidasSysResult<i64> {
+pub fn peek_data(pid: Pid, addr: usize) -> crate::MidasSysResultDynamic<i64> {
     unsafe {
         let quadword = libc::ptrace(
             libc::PTRACE_PEEKDATA,
@@ -57,7 +57,7 @@ pub fn peek_data(pid: Pid, addr: usize) -> crate::MidasSysResult<i64> {
     }
 }
 
-pub fn poke_data(pid: Pid, addr: usize, data: libc::c_long) -> MidasSysResult<()> {
+pub fn poke_data(pid: Pid, addr: usize, data: libc::c_long) -> MidasSysResultDynamic<()> {
     unsafe {
         if libc::ptrace(libc::PTRACE_POKEDATA, *pid, addr, data) == -1 {
             Err(crate::errno::get_errno_msg())

@@ -1,7 +1,8 @@
+#![allow(unused, non_camel_case_types)]
 use nixwrap::{Pid, WaitStatus};
 pub mod linux;
 
-use nixwrap::MidasSysResult;
+use nixwrap::MidasSysResultDynamic;
 
 use crate::types::Address;
 
@@ -11,7 +12,7 @@ pub struct MemoryRead {
 }
 
 impl MemoryRead {
-    pub fn read_memory(pid: Pid, ranges: Vec<(Address, usize)>) -> MidasSysResult<MemoryRead> {
+    pub fn read_memory(pid: Pid, ranges: Vec<(Address, usize)>) -> MidasSysResultDynamic<MemoryRead> {
         // the iovecs, containing a { pointer to a buffer where the bytes should be read from, and the length }
         let mut read_parameters = Vec::with_capacity(ranges.len());
         // the actual backing storage where we copy the data into. Each element in read_parameters, have a pointer, that points into this buffer of buffers
@@ -58,16 +59,16 @@ pub trait Target {
     type OSTarget;
     fn launch(
         command: &mut std::process::Command,
-    ) -> MidasSysResult<(Box<<Self as Target>::OSTarget>, WaitStatus)>;
+    ) -> MidasSysResultDynamic<(Box<<Self as Target>::OSTarget>, WaitStatus)>;
     fn process_id(&self) -> Pid;
     fn step(&self, steps: usize);
-    fn continue_execution(&self) -> MidasSysResult<WaitStatus>;
-    fn kill(&self) -> MidasSysResult<WaitStatus>;
+    fn continue_execution(&self) -> MidasSysResultDynamic<WaitStatus>;
+    fn kill(&self) -> MidasSysResultDynamic<WaitStatus>;
     fn read_memory(&self, address: usize, bytes: usize) -> Vec<u8>;
-    fn kill_on_tracer_exit(&self) -> MidasSysResult<()>;
+    fn kill_on_tracer_exit(&self) -> MidasSysResultDynamic<()>;
 }
 
-pub fn make_command(program_path: &str, args: Vec<&str>) -> MidasSysResult<std::process::Command> {
+pub fn make_command(program_path: &str, args: Vec<&str>) -> MidasSysResultDynamic<std::process::Command> {
     let program = std::path::Path::new(program_path);
     if !program.exists() {
         Err(format!("{} doesn't exist", program.display()))

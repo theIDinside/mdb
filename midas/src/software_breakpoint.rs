@@ -1,6 +1,6 @@
 use super::types::Address;
 use nixwrap::ptrace;
-use nixwrap::{MidasSysResult, Pid};
+use nixwrap::{MidasSysResultDynamic, Pid};
 
 #[allow(dead_code)]
 pub enum BreakpointRequest {
@@ -27,10 +27,10 @@ impl Breakpoint {
             instruction_encoding,
         }
     }
-    pub fn set_enabled(pid: Pid, addr: usize) -> MidasSysResult<Breakpoint> {
+    pub fn set_enabled(pid: Pid, addr: usize) -> MidasSysResultDynamic<Breakpoint> {
         Breakpoint::set(pid, addr, true)
     }
-    pub fn set(pid: Pid, addr: usize, enabled: bool) -> MidasSysResult<Breakpoint> {
+    pub fn set(pid: Pid, addr: usize, enabled: bool) -> MidasSysResultDynamic<Breakpoint> {
         let instruction = nixwrap::ptrace::peek_data(pid, addr)?;
         // call down the old gods upon you
         let interrupt_3 = 0xcc;

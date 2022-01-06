@@ -1,4 +1,4 @@
-use nixwrap::{waitpid, MidasSysResult, Pid, WaitStatus};
+use nixwrap::{waitpid, MidasSysResultDynamic, Pid, WaitStatus};
 use std::{
     collections::{HashMap, HashSet},
     os::unix::prelude::CommandExt,
@@ -14,9 +14,7 @@ pub struct LinuxTarget {
 
 impl super::Target for LinuxTarget {
     type OSTarget = LinuxTarget;
-    fn launch(
-        command: &mut std::process::Command,
-    ) -> MidasSysResult<(Box<Self::OSTarget>, WaitStatus)> {
+    fn launch(command: &mut std::process::Command) -> MidasSysResultDynamic<(Box<Self::OSTarget>, WaitStatus)> {
         let pathstr = command.get_program().to_owned();
         let path = std::path::Path::new(&pathstr);
         if !path.exists() {
@@ -31,9 +29,8 @@ impl super::Target for LinuxTarget {
                         if libc::personality(libc::ADDR_NO_RANDOMIZE as _) == -1 {
                             panic!("Setting no randomized virtual memory failed");
                         }
-                        nixwrap::ptrace::trace_me().map_err(|err_string| {
-                            std::io::Error::new(std::io::ErrorKind::Other, err_string)
-                        })?;
+                        nixwrap::ptrace::trace_me()
+                            .map_err(|err_string| std::io::Error::new(std::io::ErrorKind::Other, err_string))?;
                         Ok(())
                     }
                 });
@@ -60,13 +57,13 @@ impl super::Target for LinuxTarget {
         todo!()
     }
 
-    fn continue_execution(&self) -> nixwrap::MidasSysResult<nixwrap::WaitStatus> {
+    fn continue_execution(&self) -> nixwrap::MidasSysResultDynamic<nixwrap::WaitStatus> {
         nixwrap::continue_execution(*self.pid).unwrap();
         let opts = 0;
         nixwrap::waitpid(*self.pid, opts)
     }
 
-    fn kill(&self) -> nixwrap::MidasSysResult<nixwrap::WaitStatus> {
+    fn kill(&self) -> nixwrap::MidasSysResultDynamic<nixwrap::WaitStatus> {
         todo!()
     }
 
@@ -74,7 +71,7 @@ impl super::Target for LinuxTarget {
         todo!()
     }
 
-    fn kill_on_tracer_exit(&self) -> nixwrap::MidasSysResult<()> {
+    fn kill_on_tracer_exit(&self) -> nixwrap::MidasSysResultDynamic<()> {
         nixwrap::ptrace::kill_on_midas_exit(self.process_id())
     }
 }

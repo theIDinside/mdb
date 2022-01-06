@@ -1,6 +1,6 @@
 use super::commands::Command;
 use crate::{software_breakpoint::Breakpoint, types::Address};
-use nixwrap::MidasSysResult;
+use nixwrap::MidasSysResultDynamic;
 use nixwrap::{Pid, WaitStatus};
 use std::collections::{HashMap, HashSet};
 
@@ -19,7 +19,7 @@ impl Debugger {
         }
     }
 
-    pub fn continue_execution(&mut self) -> MidasSysResult<WaitStatus> {
+    pub fn continue_execution(&mut self) -> MidasSysResultDynamic<WaitStatus> {
         nixwrap::continue_execution(*self.pid).unwrap();
         let opts = 0;
         nixwrap::waitpid(*self.pid, opts)
