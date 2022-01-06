@@ -2,6 +2,7 @@ extern crate linuxwrapper as nixwrap;
 
 pub mod commands;
 pub mod debugger;
+pub mod dwarf;
 pub mod elf;
 pub mod software_breakpoint;
 pub mod target;

@@ -84,7 +84,7 @@ impl<'a> ELFParser<'a> {
             if let Some(pos) = str_term {
                 std::str::from_utf8(&bytes[idx..idx + pos]).map_err(|err| err.to_string())
             } else {
-                Err("Could not find string null terminator in string table".to_string()cd )
+                Err("Could not find string null terminator in string table".to_string())
             }
         } else {
             self.section_names
@@ -159,9 +159,14 @@ impl<'a> ELFParser<'a> {
             "Section header entries: {}",
             self.header.section_header_entries
         );
-        let section_headers = self.get_section_headers();
+        let section_headers = self.get_section_headers().unwrap();
+        let symbol_table_data = self.string_table_data().unwrap();
         for (index, sh) in section_headers.iter().enumerate() {
-            println!("Section Header Entry #{}", index);
+            println!(
+                "Section Header Entry #{}: {}",
+                index,
+                self.get_section_header_name(sh).unwrap()
+            );
             println!("{:#?}", sh);
         }
     }

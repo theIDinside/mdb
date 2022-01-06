@@ -4,6 +4,27 @@
 pub fn midas_err<T: ToString>(to_stringable_error: T) -> String {
     to_stringable_error.to_string()
 }
+
+macro_rules! kilo_bytes {
+    (e: usize) => {
+        1024 * e
+    };
+}
+
+macro_rules! mega_bytes {
+    (e: usize) => {
+        kilo_bytes!(1024) * e
+    };
+}
+
+pub const fn mega_byte(mbs: usize) -> usize {
+    1024 * 1024 * mbs
+}
+
+pub const fn kilo_byte(kbs: usize) -> usize {
+    1024 * kbs
+}
+
 pub mod unchecked {
     pub unsafe fn as_mut_bytes<T: Sized>(p: &T) -> &mut [u8] {
         std::slice::from_raw_parts_mut((p as *const T) as *mut u8, ::std::mem::size_of::<T>())
