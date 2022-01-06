@@ -9,6 +9,7 @@ pub mod target;
 pub mod types;
 pub mod utils;
 
+#[derive(Debug)]
 pub enum MidasError {
     BadUnsignedLEB128Encoding(usize),
     BadSignedLEB128Encoding(usize),
