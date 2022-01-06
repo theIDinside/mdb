@@ -1,4 +1,4 @@
-use nixwrap::MidasSysResult;
+use nixwrap::MidasSysResultDynamic;
 #[derive(Debug)]
 #[repr(u32)]
 pub enum Permission {
@@ -31,7 +31,11 @@ impl std::fmt::Debug for ProgramHeader {
 }
 
 impl ProgramHeader {
-    pub fn from_libc_repr(repr: &libc::Elf64_Phdr, object_file_byte_offset: usize) -> MidasSysResult<ProgramHeader> {
+    // todo(simon): should return MidasSysResult, i.e. a non-allocating error
+    pub fn from_libc_repr(
+        repr: &libc::Elf64_Phdr,
+        object_file_byte_offset: usize,
+    ) -> MidasSysResultDynamic<ProgramHeader> {
         Ok(ProgramHeader {
             ph_type: Type::from(repr.p_type).unwrap(),
             flags: unsafe { std::mem::transmute(repr.p_flags) },
@@ -58,7 +62,7 @@ pub enum Type {
     Loadable = 1,                            /* Loadable program segment */
     DynamicLinkInfo = 2,                     /* Dynamic linking information */
     ProgramInterpreter = 3,                  /* Program interpreter */
-    Auxiliary = 4,                           /* Auxiliary information */
+    Note = 4,                                /* Auxiliary information */
     Reserved = 5,                            /* Reserved */
     HeaderTable = 6,                         /* Entry for header table itself */
     ThreadLocalStorage = 7,                  /* Thread-local storage segment */
@@ -67,21 +71,22 @@ pub enum Type {
     GNU_EH_FRAME = 0x6474e550,               /* GCC .eh_frame_hdr segment */
     GNUStackExecutability = 0x6474e551,      /* Indicates stack executability */
     GNUReadOnlyAfterRelocation = 0x6474e552, /* Read-only after relocation */
-    SunSpecificBSS = 0x6ffffffa,             /* Sun Specific segment */
-    SUNWSTACK = 0x6ffffffb,                  /* Stack segment */
-    EndOfOSSpecific = 0x6fffffff,            /* End of OS-specific */
-    StartProcessorSpecific = 0x70000000,     /* Start of processor-specific */
-    EndProcessorSpecific = 0x7fffffff,       /* End of processor-specific */
+    GNU_PROPERTRY = 0x6474e553, // N.B. - does not exist as a macro definition in /usr/include/elf.h; but is something new to the linux kernel / ABI related stuff, according to; https://raw.githubusercontent.com/wiki/hjl-tools/linux-abi/linux-abi-draft.pdf, page 19
+    SunSpecificBSS = 0x6ffffffa, /* Sun Specific segment */
+    SUNWSTACK = 0x6ffffffb,     /* Stack segment */
+    EndOfOSSpecific = 0x6fffffff, /* End of OS-specific */
+    StartProcessorSpecific = 0x70000000, /* Start of processor-specific */
+    EndProcessorSpecific = 0x7fffffff, /* End of processor-specific */
 }
 
 impl Type {
-    pub fn from(value: u32) -> MidasSysResult<Type> {
+    pub fn from(value: u32) -> MidasSysResultDynamic<Type> {
         match value {
             0 => Ok(Self::Unused),
             1 => Ok(Self::Loadable),
             2 => Ok(Self::DynamicLinkInfo),
             3 => Ok(Self::ProgramInterpreter),
-            4 => Ok(Self::Auxiliary),
+            4 => Ok(Self::Note),
             5 => Ok(Self::Reserved),
             6 => Ok(Self::HeaderTable),
             7 => Ok(Self::ThreadLocalStorage),
@@ -90,6 +95,7 @@ impl Type {
             0x6474e550 => Ok(Self::GNU_EH_FRAME),
             0x6474e551 => Ok(Self::GNUStackExecutability),
             0x6474e552 => Ok(Self::GNUReadOnlyAfterRelocation),
+            0x6474e553 => Ok(Self::GNU_PROPERTRY),
             0x6ffffffa => Ok(Self::SunSpecificBSS),
             0x6ffffffb => Ok(Self::SUNWSTACK),
             0x6fffffff => Ok(Self::EndOfOSSpecific),
