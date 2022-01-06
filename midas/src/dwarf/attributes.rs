@@ -1,3 +1,30 @@
+#![allow(unused, non_camel_case_types)]
+pub struct AbbreviationsTableEntry {
+    entry_id: usize,
+    attrs_list: Vec<(Attribute, AttributeForm)>,
+    has_children: bool,
+}
+
+use std::collections::HashMap;
+type AttributeIndex = usize;
+pub fn parse_attributes(
+    abbreviations_table_data: &[u8],
+) -> crate::MidasSysResult<HashMap<u64, Vec<(Attribute, AttributeForm)>>> {
+    use super::leb128::decode_unsigned;
+    let mut map = HashMap::new();
+    let mut offset = 0;
+    loop {
+        let mut attrs_list = Vec::with_capacity(10);
+        let abbrev_code = decode_unsigned(abbreviations_table_data)?;
+        offset += abbrev_code.bytes_read;
+        let tag = decode_unsigned(&abbreviations_table_data[offset..])?;
+
+        attrs_list.shrink_to_fit();
+        map.insert(abbrev_code.value, attrs_list);
+    }
+    Ok(map)
+}
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Attribute {
     DW_AT_sibling = 0x01,
