@@ -1,3 +1,4 @@
+#![allow(unused, non_camel_case_types)]
 pub enum LineNumberOpEncodings {
     DW_LNS_copy = 0x01,
     DW_LNS_advance_pc = 0x02,

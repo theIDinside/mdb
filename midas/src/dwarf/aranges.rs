@@ -1,3 +1,4 @@
+#[allow(unused)]
 // Header for the entries in the table of address ranges; this (set of) data lives in .debug_aranges of the object file
 pub struct AddressRangeHeader {
     //

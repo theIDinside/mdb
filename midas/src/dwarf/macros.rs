@@ -1,3 +1,4 @@
+#![allow(unused, non_camel_case_types)]
 pub enum MacroEntryTypeEncoding {
     DW_MACRO_define = 0x01,
     DW_MACRO_undef = 0x02,

@@ -1,3 +1,4 @@
+#![allow(unused, non_camel_case_types)]
 pub enum Operation {
     Reserved1 = 0x01,
     Reserved2 = 0x02,

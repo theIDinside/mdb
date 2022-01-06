@@ -1,3 +1,5 @@
+#![allow(unused, non_camel_case_types)]
+
 pub struct Header {
     initial_length: super::InitialLengthField,
     version: u16,
@@ -9,7 +11,7 @@ pub struct Header {
 impl Header {
     pub fn from_bytes(bytes: &[u8]) -> Header {
         let initial_length = super::InitialLengthField::from_bytes(bytes);
-        let byte_offs = initial_length.length();
+        let byte_offs = initial_length.offsets_bytes();
         let version = unsafe {
             let mut buf = [0u8; 2];
             std::ptr::copy_nonoverlapping(bytes.as_ptr().offset(byte_offs as _), buf.as_mut_ptr(), 2);

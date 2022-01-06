@@ -1,4 +1,4 @@
-use nixwrap::MidasSysResult;
+use nixwrap::MidasSysResultDynamic;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
@@ -503,7 +503,7 @@ impl DataEncoding {
     }
 }
 
-pub fn parse_eident(data: &[u8]) -> MidasSysResult<(Class, DataEncoding, Version, OperatingSystemABI)> {
+pub fn parse_eident(data: &[u8]) -> MidasSysResultDynamic<(Class, DataEncoding, Version, OperatingSystemABI)> {
     if data[0..4] != ELFHeader::MAGIC {
         return Err(format!(
             "ELF Magic not found; binary blob possibly not in ELF format? ({:?})",
@@ -541,7 +541,7 @@ pub struct ELFHeader {
 
 impl ELFHeader {
     pub const MAGIC: [u8; 4] = [0x7F, 0x45, 0x4C, 0x46];
-    pub fn from(bytes: &[u8]) -> MidasSysResult<ELFHeader> {
+    pub fn from(bytes: &[u8]) -> MidasSysResultDynamic<ELFHeader> {
         use crate::utils::unchecked;
         let (architecture, encoding, elf_version, os_abi) = parse_eident(&bytes[0..16])?;
         let object_type = ObjectType::from_word(unsafe { unchecked::bytes_to_u16(&bytes[16..18]) });

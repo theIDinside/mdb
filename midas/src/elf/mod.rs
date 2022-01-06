@@ -1,3 +1,4 @@
+#![allow(unused, non_camel_case_types)]
 mod elf32;
 mod elf64;
 mod programheader;
@@ -10,7 +11,7 @@ pub use elf32::*;
 
 #[cfg(target_arch = "x86_64")]
 pub use elf64::*;
-use nixwrap::MidasSysResult;
+use nixwrap::MidasSysResultDynamic;
 
 use crate::utils::midas_err;
 
@@ -30,16 +31,18 @@ pub struct ELFParser<'a> {
     header: elf64::ELFHeader,
     section_names: HashMap<usize, String>,
     string_table: Option<StringTable<'a>>,
+    section_name_offset_mapping: HashMap<String, usize>,
 }
 
 impl<'a> ELFParser<'a> {
-    pub fn new_parser(obj: &'a Object) -> MidasSysResult<ELFParser<'a>> {
+    pub fn new_parser(obj: &'a Object) -> MidasSysResultDynamic<ELFParser<'a>> {
         let header = elf64::ELFHeader::from(&obj.data[..])?;
         Ok(ELFParser {
             object: obj,
             header,
             section_names: HashMap::new(),
             string_table: None,
+            section_name_offset_mapping: HashMap::new(),
         })
     }
 
@@ -76,7 +79,10 @@ impl<'a> ELFParser<'a> {
         }
     }
 
-    pub fn get_section_header_name(&'a self, section_header: &sectionheader::SectionHeader) -> MidasSysResult<&'a str> {
+    pub fn get_section_header_name(
+        &'a self,
+        section_header: &sectionheader::SectionHeader,
+    ) -> MidasSysResultDynamic<&'a str> {
         if self.section_names.len() == 0 {
             let idx = section_header.string_table_index as usize;
             let bytes = self.string_table_data()?;
@@ -171,7 +177,7 @@ impl<'a> ELFParser<'a> {
         }
     }
 
-    pub fn get_section_headers(&self) -> MidasSysResult<Vec<sectionheader::SectionHeader>> {
+    pub fn get_section_headers(&self) -> MidasSysResultDynamic<Vec<sectionheader::SectionHeader>> {
         let section_header_size = self.header.section_header_entry_size as usize;
         let sh_offs = self.header.section_header_offset as usize;
         let mut section_headers = vec![];
@@ -189,7 +195,7 @@ impl<'a> ELFParser<'a> {
         Ok(section_headers)
     }
 
-    pub fn get_interpreter(&'a self) -> MidasSysResult<&'a str> {
+    pub fn get_interpreter(&'a self) -> MidasSysResultDynamic<&'a str> {
         let interpreter_header = self
             .get_program_segment_headers_of(programheader::Type::ProgramInterpreter)
             .ok_or("Could not find interpreter headers".to_string())?;
@@ -199,7 +205,7 @@ impl<'a> ELFParser<'a> {
             .map_err(|err| err.to_string())
     }
 
-    pub fn string_table_data(&self) -> MidasSysResult<&'a [u8]> {
+    pub fn string_table_data(&self) -> MidasSysResultDynamic<&'a [u8]> {
         let section_headers = self.get_section_headers()?;
         let string_table_file_offset = section_headers
             .get(self.header.section_header_string_index as usize)
@@ -218,7 +224,7 @@ impl Object {
     }
 }
 
-pub fn load_object(path: &std::path::Path) -> MidasSysResult<Object> {
+pub fn load_object(path: &std::path::Path) -> MidasSysResultDynamic<Object> {
     let mut buf = vec![];
     let mut f = std::fs::OpenOptions::new()
         .read(true)
