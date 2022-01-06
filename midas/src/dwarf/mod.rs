@@ -1,14 +1,20 @@
+pub mod address_table;
 pub mod aranges;
 pub mod attributes;
 pub mod callframe;
+pub mod compilation_unit;
 pub mod die;
+pub mod leb128;
 pub mod linenumber;
+pub mod loclist;
 pub mod macros;
 pub mod operations;
+pub mod range_list;
 pub mod stack;
 pub mod stringoffset;
 pub mod tag;
 
+#[derive(Debug)]
 pub enum InitialLengthField {
     Dwarf32(u32),
     Dwarf64(u64),
@@ -46,10 +52,17 @@ impl InitialLengthField {
         }
     }
 
-    pub fn length(&self) -> usize {
+    pub fn offsets_bytes(&self) -> usize {
         match self {
-            InitialLengthField::Dwarf32(len) => *len as usize,
-            InitialLengthField::Dwarf64(len) => *len as usize,
+            InitialLengthField::Dwarf32(len) => 4,
+            InitialLengthField::Dwarf64(len) => 12,
+        }
+    }
+
+    pub fn is_32bit(&self) -> bool {
+        match &self {
+            InitialLengthField::Dwarf32(_) => true,
+            InitialLengthField::Dwarf64(_) => false,
         }
     }
 }
