@@ -101,3 +101,16 @@ pub fn print_program_headers_of_helloworld() {
         parser.cache_section_names();
     })
 }
+
+#[test]
+pub fn print_ddump_headers() {
+    run_test(|| {
+        let program_path = subjects!("ddump_analysis");
+        let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
+        let mut parser = elf::ELFParser::new_parser(&object).unwrap();
+        parser.print_program_segments();
+        println!("Interpreter: {}", parser.get_interpreter().unwrap());
+        parser.print_section_headers();
+        parser.cache_section_names();
+    })
+}
