@@ -1,31 +1,72 @@
 #![allow(unused, non_camel_case_types)]
+#[derive(Debug)]
 pub struct AbbreviationsTableEntry {
-    entry_id: usize,
+    tag: DwarfTag,
     attrs_list: Vec<(Attribute, AttributeForm)>,
     has_children: bool,
 }
 
+impl AbbreviationsTableEntry {
+    pub fn new(tag: DwarfTag, attrs_list: Vec<(Attribute, AttributeForm)>, has_children: bool) -> Self {
+        Self {
+            tag,
+            attrs_list,
+            has_children,
+        }
+    }
+}
+
 use std::collections::HashMap;
+
+use super::tag::DwarfTag;
 type AttributeIndex = usize;
 pub fn parse_attributes(
     abbreviations_table_data: &[u8],
-) -> crate::MidasSysResult<HashMap<u64, Vec<(Attribute, AttributeForm)>>> {
+) -> crate::MidasSysResult<HashMap<u64, AbbreviationsTableEntry>> {
     use super::leb128::decode_unsigned;
     let mut map = HashMap::new();
     let mut offset = 0;
+
     loop {
-        let mut attrs_list = Vec::with_capacity(10);
-        let abbrev_code = decode_unsigned(abbreviations_table_data)?;
+        let abbrev_code = decode_unsigned(&abbreviations_table_data[offset..])?;
+        if abbrev_code.value == 0 {
+            break;
+        }
+        let mut attrs_list = Vec::with_capacity(6);
         offset += abbrev_code.bytes_read;
         let tag = decode_unsigned(&abbreviations_table_data[offset..])?;
-
+        offset += tag.bytes_read;
+        let has_children = abbreviations_table_data[offset] == 1;
+        offset += 1;
+        let tag = unsafe { std::mem::transmute(tag.value as u16) };
+        'attr_list: loop {
+            let attr = decode_unsigned(&abbreviations_table_data[offset..])?;
+            offset += attr.bytes_read;
+            let form = decode_unsigned(&abbreviations_table_data[offset..])?;
+            offset += form.bytes_read;
+            if attr.value == 0 && form.value == 0 {
+                break 'attr_list;
+            }
+            let (attr, form) = unsafe {
+                (
+                    std::mem::transmute(attr.value as u16),
+                    std::mem::transmute(form.value as u8),
+                )
+            };
+            attrs_list.push((attr, form));
+        }
         attrs_list.shrink_to_fit();
-        map.insert(abbrev_code.value, attrs_list);
+
+        map.insert(
+            abbrev_code.value,
+            AbbreviationsTableEntry::new(tag, attrs_list, has_children),
+        );
     }
     Ok(map)
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u16)]
 pub enum Attribute {
     DW_AT_sibling = 0x01,
     DW_AT_location = 0x02,
@@ -171,6 +212,7 @@ pub enum Attribute {
     DW_AT_hi_user = 0x3fff,
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u8)]
 pub enum AttributeForm {
     DW_FORM_addr = 0x01,
     Reserved = 0x02,
