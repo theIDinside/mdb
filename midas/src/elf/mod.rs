@@ -2,7 +2,8 @@
 mod elf32;
 mod elf64;
 mod programheader;
-mod sectionheader;
+mod section;
+use super::dwarf;
 
 use std::{collections::HashMap, io::Read};
 
@@ -13,7 +14,7 @@ pub use elf32::*;
 pub use elf64::*;
 use nixwrap::MidasSysResultDynamic;
 
-use crate::utils::midas_err;
+use crate::{utils::midas_err, MidasSysResult};
 
 use self::programheader::ProgramHeader;
 
@@ -26,77 +27,84 @@ pub struct StringTable<'a> {
     table: &'a [u8],
 }
 
-pub struct ELFParser<'a> {
+pub struct ParsedELF<'a> {
     object: &'a Object,
     header: elf64::ELFHeader,
-    section_names: HashMap<usize, String>,
-    string_table: Option<StringTable<'a>>,
-    section_name_offset_mapping: HashMap<String, usize>,
+    section_names: Vec<String>,
+    dwarf_sections: HashMap<dwarf::Section, &'a [u8]>,
+    sections: HashMap<&'a str, section::Section<'a>>,
 }
 
-impl<'a> ELFParser<'a> {
-    pub fn new_parser(obj: &'a Object) -> MidasSysResultDynamic<ELFParser<'a>> {
+impl<'a> ParsedELF<'a> {
+    pub fn parse_elf(obj: &'a Object) -> MidasSysResultDynamic<ParsedELF<'a>> {
         let header = elf64::ELFHeader::from(&obj.data[..])?;
-        Ok(ELFParser {
+        let mut sections = HashMap::new();
+
+        let section_headers = Self::parse_section_headers(&header, obj)?;
+
+        let mut dwarf_sections = HashMap::new();
+        let mut section_name_offset_mapping = HashMap::new();
+
+        let string_table_file_offset = section_headers
+            .get(header.section_header_string_index as usize)
+            .unwrap()
+            .section_data_offset;
+
+        let string_table = &obj.data[string_table_file_offset as usize..];
+        let sh_ent_sz = header.section_header_entry_size as usize;
+        let mut section_names = Vec::new();
+        for (index, sh) in section_headers.iter().enumerate() {
+            let idx = sh.string_table_index as usize;
+            let str_term = string_table
+                .iter()
+                .skip(idx)
+                .position(|&b| b == 0)
+                .expect("string table entry null terminator expected.");
+            let section_name =
+                std::str::from_utf8(&string_table[idx..idx + str_term]).map_err(|err| err.to_string())?;
+            let section_data_in_obj_f = &obj.data[sh.address_range()];
+            if let Ok(section_id) = dwarf::Section::try_from(section_name) {
+                dwarf_sections.insert(section_id, section_data_in_obj_f);
+            }
+            section_name_offset_mapping.insert(section_name.to_owned(), section_data_in_obj_f);
+            section_names.push(section_name.to_string());
+            sections.insert(
+                section_name,
+                section::Section::from_object_file(index, &obj, sh),
+            );
+        }
+        // todo(simon): this is hacky as shit. I've done this, because I had to figure out how dwarf elf etc actually works first
+        // when it's functioning, this *will* be refactored, so that we don't create unnecessary hashmaps
+        let pe = ParsedELF {
             object: obj,
             header,
-            section_names: HashMap::new(),
-            string_table: None,
-            section_name_offset_mapping: HashMap::new(),
-        })
+            section_names,
+            dwarf_sections,
+            sections,
+        };
+        Ok(pe)
     }
 
-    pub fn cache_section_names(&mut self) {
-        let mut section_headers = self
-            .get_section_headers()
-            .expect("expected section header data to be intepretable");
-        let string_table_file_offset = section_headers
-            .get(self.header.section_header_string_index as usize)
-            .unwrap()
-            .offset;
-        section_headers.sort_by(|a, b| a.string_table_index.cmp(&b.string_table_index));
+    pub fn get_section_data(&self, name: &str) -> Option<&[u8]> {
+        self.sections.get(name).map(|sec| sec.data())
+    }
 
-        let string_table_data = &self.object.data[string_table_file_offset as usize..];
-        debug_assert_eq!(string_table_data[0], 0);
-        self.section_names.reserve(section_headers.len());
-
-        for sh in section_headers.iter() {
-            let mut name = String::with_capacity(100);
-            let idx = sh.string_table_index;
-            let name_ = string_table_data
-                .iter()
-                .skip(idx as usize)
-                .take_while(|c| **c != 0)
-                .map(|&c| c as char)
-                .collect();
-
-            name.shrink_to_fit();
-            self.section_names.insert(idx as usize, name_);
-        }
-
-        for (k, v) in self.section_names.iter() {
-            println!("Key: {} => {}", k, v);
-        }
+    // a bit more optimized search, we don't have to hash a string first
+    pub fn get_dwarf_section_data(&self, dwarf_section: dwarf::Section) -> Option<&[u8]> {
+        self.dwarf_sections.get(&dwarf_section).map(|&slice| slice)
     }
 
     pub fn get_section_header_name(
         &'a self,
-        section_header: &sectionheader::SectionHeader,
+        section_header: &section::SectionHeader,
     ) -> MidasSysResultDynamic<&'a str> {
-        if self.section_names.len() == 0 {
-            let idx = section_header.string_table_index as usize;
-            let bytes = self.string_table_data()?;
-            let str_term = bytes.iter().skip(idx).position(|&b| b == 0);
-            if let Some(pos) = str_term {
-                std::str::from_utf8(&bytes[idx..idx + pos]).map_err(|err| err.to_string())
-            } else {
-                Err("Could not find string null terminator in string table".to_string())
-            }
+        let idx = section_header.string_table_index as usize;
+        let bytes = self.string_table_data()?;
+        let str_term = bytes.iter().skip(idx).position(|&b| b == 0);
+        if let Some(pos) = str_term {
+            std::str::from_utf8(&bytes[idx..idx + pos]).map_err(|err| err.to_string())
         } else {
-            self.section_names
-                .get(&(section_header.string_table_index as usize))
-                .map(|s| s.as_ref())
-                .ok_or("Error retrieving cached string table name".into())
+            Err("Could not find string null terminator in string table".to_string())
         }
     }
 
@@ -165,19 +173,39 @@ impl<'a> ELFParser<'a> {
             "Section header entries: {}",
             self.header.section_header_entries
         );
-        let section_headers = self.get_section_headers().unwrap();
-        let symbol_table_data = self.string_table_data().unwrap();
-        for (index, sh) in section_headers.iter().enumerate() {
-            println!(
-                "Section Header Entry #{}: {}",
-                index,
-                self.get_section_header_name(sh).unwrap()
-            );
+        let shs = self
+            .get_section_headers()
+            .expect("failed to get section headers");
+        debug_assert_eq!(shs.len(), self.header.section_header_entries as usize);
+
+        for (index, (name, sh)) in self.section_names.iter().zip(shs).enumerate() {
+            println!("Section Header Entry #{}: {}", index, name);
             println!("{:#?}", sh);
         }
     }
 
-    pub fn get_section_headers(&self) -> MidasSysResultDynamic<Vec<sectionheader::SectionHeader>> {
+    pub fn parse_section_headers(
+        elf_header: &elf64::ELFHeader,
+        object: &'a Object,
+    ) -> MidasSysResultDynamic<Vec<section::SectionHeader>> {
+        let section_header_size = elf_header.section_header_entry_size as usize;
+        let sh_offs = elf_header.section_header_offset as usize;
+        let mut section_headers = vec![];
+        for x in 0..elf_header.section_header_entries as usize {
+            let stride = x * section_header_size;
+            let start = sh_offs + stride;
+            let end = sh_offs + stride + section_header_size;
+            let slice = &object.data[start..end];
+            unsafe {
+                let ptr = slice.as_ptr() as *const libc::Elf64_Shdr;
+                let section_header = section::SectionHeader::from_libc_repr(&*ptr);
+                section_headers.push(section_header);
+            }
+        }
+        Ok(section_headers)
+    }
+
+    pub fn get_section_headers(&self) -> MidasSysResultDynamic<Vec<section::SectionHeader>> {
         let section_header_size = self.header.section_header_entry_size as usize;
         let sh_offs = self.header.section_header_offset as usize;
         let mut section_headers = vec![];
@@ -188,7 +216,7 @@ impl<'a> ELFParser<'a> {
             let slice = &self.object.data[start..end];
             unsafe {
                 let ptr = slice.as_ptr() as *const libc::Elf64_Shdr;
-                let section_header = sectionheader::SectionHeader::from_libc_repr(&*ptr);
+                let section_header = section::SectionHeader::from_libc_repr(&*ptr);
                 section_headers.push(section_header);
             }
         }
@@ -210,8 +238,15 @@ impl<'a> ELFParser<'a> {
         let string_table_file_offset = section_headers
             .get(self.header.section_header_string_index as usize)
             .unwrap()
-            .offset;
+            .section_data_offset;
         Ok(&self.object.data[string_table_file_offset as usize..])
+    }
+
+    pub fn get_dwarf_section(&mut self, dwarf_section: super::dwarf::sections::Section) -> MidasSysResult<&[u8]> {
+        self.dwarf_sections
+            .get(&dwarf_section)
+            .map(|f| *f)
+            .ok_or(crate::MidasError::DwarfSectionNotRecognized)
     }
 }
 
