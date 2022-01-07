@@ -107,6 +107,32 @@ pub fn test_get_debug_sections() {
             .get_dwarf_section(midas::dwarf::Section::DebugStr)
             .expect("Failed to get .debug_info");
         assert_eq!(debug_str, DEBUG_STR);
+
+        assert!(elf
+            .get_dwarf_section(midas::dwarf::Section::DebugLine)
+            .is_ok());
+
+        assert!(elf.get_section_data(".bss").is_some());
+        assert!(elf.get_section_data(".rela.debug_info").is_some());
+        assert!(elf.get_section_data(".rela.debug_aranges").is_some());
+
+        assert_eq!(
+            elf.get_dwarf_section(midas::dwarf::Section::DebugLine)
+                .unwrap(),
+            elf.get_section_data(".debug_line").unwrap()
+        );
+
+        assert_eq!(
+            elf.get_dwarf_section(midas::dwarf::Section::DebugInfo)
+                .unwrap(),
+            elf.get_section_data(".debug_info").unwrap()
+        );
+
+        assert_eq!(
+            elf.get_dwarf_section(midas::dwarf::Section::DebugStr)
+                .unwrap(),
+            elf.get_section_data(".debug_str").unwrap()
+        );
     })
 }
 
