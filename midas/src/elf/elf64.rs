@@ -503,12 +503,9 @@ impl DataEncoding {
     }
 }
 
-pub fn parse_eident(data: &[u8]) -> MidasSysResultDynamic<(Class, DataEncoding, Version, OperatingSystemABI)> {
+pub fn parse_eident(data: &[u8]) -> crate::MidasSysResult<(Class, DataEncoding, Version, OperatingSystemABI)> {
     if data[0..4] != ELFHeader::MAGIC {
-        return Err(format!(
-            "ELF Magic not found; binary blob possibly not in ELF format? ({:?})",
-            &data[..4]
-        ));
+        return Err(crate::MidasError::ELFMagicNotFound);
     }
     let arch = Class::from_byte(data[4]);
     let encoding = DataEncoding::from_byte(data[5]);
@@ -541,7 +538,7 @@ pub struct ELFHeader {
 
 impl ELFHeader {
     pub const MAGIC: [u8; 4] = [0x7F, 0x45, 0x4C, 0x46];
-    pub fn from(bytes: &[u8]) -> MidasSysResultDynamic<ELFHeader> {
+    pub fn from(bytes: &[u8]) -> crate::MidasSysResult<ELFHeader> {
         use crate::utils::unchecked;
         let (architecture, encoding, elf_version, os_abi) = parse_eident(&bytes[0..16])?;
         let object_type = ObjectType::from_word(unsafe { unchecked::bytes_to_u16(&bytes[16..18]) });
@@ -579,12 +576,18 @@ impl ELFHeader {
         })
     }
 
+    #[inline(always)]
     pub fn ph_entry_size(&self) -> usize {
         self.program_header_entry_size as _
     }
-
+    #[inline(always)]
     pub fn sh_entry_size(&self) -> usize {
         self.section_header_entry_size as _
+    }
+
+    #[inline(always)]
+    pub fn sections_count(&self) -> usize {
+        self.section_header_entries as _
     }
 }
 

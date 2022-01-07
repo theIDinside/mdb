@@ -1,3 +1,5 @@
+use std::str::Utf8Error;
+
 extern crate linuxwrapper as nixwrap;
 
 pub mod bytereader;
@@ -19,6 +21,20 @@ pub enum MidasError {
     DwarfSectionNotFound(dwarf::sections::Section),
     DwarfSectionNotRecognized,
     EOFNotExpected,
+    ELFMagicNotFound,
+    UTF8Error {
+        valid_up_to: usize,
+        error_len: Option<usize>,
+    },
+}
+
+impl From<Utf8Error> for MidasError {
+    fn from(e: Utf8Error) -> Self {
+        Self::UTF8Error {
+            valid_up_to: e.valid_up_to(),
+            error_len: e.error_len(),
+        }
+    }
 }
 
 impl MidasError {
@@ -29,6 +45,8 @@ impl MidasError {
             Self::DwarfSectionNotFound(_) => "[DWARF] error: Section not found",
             Self::DwarfSectionNotRecognized => "[DWARF] error: Section name not recognized",
             Self::EOFNotExpected => "[READ] error: Unexpectedly saw EOF",
+            Self::ELFMagicNotFound => "[ELF] error: ELF magic number incorrect",
+            Self::UTF8Error { .. } => "[UTF8] error: Invalid stream of bytes",
         }
     }
 }

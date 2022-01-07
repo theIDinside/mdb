@@ -14,7 +14,7 @@ impl<'a> Reader<'a> {
         if self.data.len() >= len {
             let res = &self.data[..len];
             self.data = &self.data[len..];
-            return Ok(self.data);
+            return Ok(res);
         }
         Err(super::MidasError::EOFNotExpected)
     }
