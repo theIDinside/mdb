@@ -10,9 +10,12 @@ pub mod loclist;
 pub mod macros;
 pub mod operations;
 pub mod range_list;
+pub mod sections;
 pub mod stack;
 pub mod stringoffset;
 pub mod tag;
+
+pub use sections::*;
 
 #[derive(Debug)]
 pub enum InitialLengthField {
@@ -54,8 +57,8 @@ impl InitialLengthField {
 
     pub fn offsets_bytes(&self) -> usize {
         match self {
-            InitialLengthField::Dwarf32(len) => 4,
-            InitialLengthField::Dwarf64(len) => 12,
+            InitialLengthField::Dwarf32(_) => 4,
+            InitialLengthField::Dwarf64(_) => 12,
         }
     }
 

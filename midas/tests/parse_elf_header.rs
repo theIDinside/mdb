@@ -61,7 +61,7 @@ pub fn parse_elf_header() {
             file_version: midas::elf::Version::Current,
             entry_point_addr: 0x00_00_00_00_00_40_10_40,
             program_header_offset: 0x00_00_00_00_00_00_00_40,
-            section_header_offset: 0x00_00_00_00_00_00_4C_30,
+            section_header_offset: 26848,
             flags: 0x00_00_00_00,
             elf_header_size: 0x00_40,
             program_header_entry_size: 0x00_38,
@@ -94,11 +94,21 @@ pub fn print_program_headers_of_helloworld() {
     run_test(|| {
         let program_path = subjects!("helloworld");
         let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
-        let mut parser = elf::ELFParser::new_parser(&object).unwrap();
+        let parser = elf::ParsedELF::parse_elf(&object).unwrap();
         parser.print_program_segments();
         println!("Interpreter: {}", parser.get_interpreter().unwrap());
         parser.print_section_headers();
-        parser.cache_section_names();
+    })
+}
+
+#[test]
+pub fn print_program_headers_of_helloworld2() {
+    run_test(|| {
+        let program_path = subjects!("helloworld");
+        let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
+        let parser = elf::ParsedELF::parse_elf(&object).expect("Failed to parse ELF");
+        parser.print_program_segments();
+        parser.print_section_headers();
     })
 }
 
@@ -107,10 +117,20 @@ pub fn print_ddump_headers() {
     run_test(|| {
         let program_path = subjects!("ddump_analysis");
         let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
-        let mut parser = elf::ELFParser::new_parser(&object).unwrap();
+        let parser = elf::ParsedELF::parse_elf(&object).unwrap();
         parser.print_program_segments();
         println!("Interpreter: {}", parser.get_interpreter().unwrap());
         parser.print_section_headers();
-        parser.cache_section_names();
+    })
+}
+
+#[test]
+pub fn print_info_myfile1() {
+    run_test(|| {
+        let program_path = subjects!("myfile1.o");
+        let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
+        let parser = elf::ParsedELF::parse_elf(&object).unwrap();
+        parser.print_program_segments();
+        parser.print_section_headers();
     })
 }
