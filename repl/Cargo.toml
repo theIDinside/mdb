@@ -13,3 +13,8 @@ cli = { path = "../cli" }
 # changing these to better design, is possible.
 linuxwrapper = { path = "../linuxwrapper" }
 midas = { path = "../midas" }
+
+[[bin]]
+name = "repl"
+test = false
+doctest = false
