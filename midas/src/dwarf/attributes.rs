@@ -23,36 +23,26 @@ type AttributeIndex = usize;
 pub fn parse_attributes(
     abbreviations_table_data: &[u8],
 ) -> crate::MidasSysResult<HashMap<u64, AbbreviationsTableEntry>> {
-    use crate::leb128::decode_unsigned;
     let mut map = HashMap::new();
-    let mut offset = 0;
-
     let mut reader = crate::bytereader::Reader::wrap(abbreviations_table_data);
 
     loop {
-        let abbrev_code = decode_unsigned(&abbreviations_table_data[offset..])?;
-        if abbrev_code.value == 0 {
-            break;
-        }
+        let abbrev_code = reader.read_uleb128()?;
         let mut attrs_list = Vec::with_capacity(6);
-        offset += abbrev_code.bytes_read;
-        let tag = decode_unsigned(&abbreviations_table_data[offset..])?;
-        offset += tag.bytes_read;
-        let has_children = abbreviations_table_data[offset] == 1;
-        offset += 1;
-        let tag = unsafe { std::mem::transmute(tag.value as u16) };
+        let tag = reader.read_uleb128()?;
+        let has_children = reader.read_u8() == 1;
+        let tag = unsafe { std::mem::transmute(tag as u16) };
+
         'attr_list: loop {
-            let attr = decode_unsigned(&abbreviations_table_data[offset..])?;
-            offset += attr.bytes_read;
-            let form = decode_unsigned(&abbreviations_table_data[offset..])?;
-            offset += form.bytes_read;
-            if attr.value == 0 && form.value == 0 {
+            let attr = reader.read_uleb128()?;
+            let form = reader.read_uleb128()?;
+            if attr == 0 && form == 0 {
                 break 'attr_list;
             }
             let (attr, form) = unsafe {
                 (
-                    std::mem::transmute(attr.value as u16),
-                    std::mem::transmute(form.value as u8),
+                    std::mem::transmute(attr as u16),
+                    std::mem::transmute(form as u8),
                 )
             };
             attrs_list.push((attr, form));
@@ -60,7 +50,7 @@ pub fn parse_attributes(
         attrs_list.shrink_to_fit();
 
         map.insert(
-            abbrev_code.value,
+            abbrev_code,
             AbbreviationsTableEntry::new(tag, attrs_list, has_children),
         );
     }

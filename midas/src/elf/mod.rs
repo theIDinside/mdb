@@ -36,10 +36,9 @@ pub struct ParsedELF<'a> {
 }
 
 impl<'a> ParsedELF<'a> {
-    pub fn parse_elf(obj: &'a Object) -> MidasSysResultDynamic<ParsedELF<'a>> {
+    pub fn parse_elf(obj: &'a Object) -> MidasSysResult<ParsedELF<'a>> {
         let header = elf64::ELFHeader::from(&obj.data[..])?;
         let mut sections = HashMap::new();
-
         let section_headers = Self::parse_section_headers(&header, obj)?;
 
         let mut dwarf_sections = HashMap::new();
@@ -60,8 +59,7 @@ impl<'a> ParsedELF<'a> {
                 .skip(idx)
                 .position(|&b| b == 0)
                 .expect("string table entry null terminator expected.");
-            let section_name =
-                std::str::from_utf8(&string_table[idx..idx + str_term]).map_err(|err| err.to_string())?;
+            let section_name = std::str::from_utf8(&string_table[idx..idx + str_term])?;
             let section_data_in_obj_f = &obj.data[sh.address_range()];
             if let Ok(section_id) = dwarf::Section::try_from(section_name) {
                 dwarf_sections.insert(section_id, section_data_in_obj_f);
@@ -173,9 +171,7 @@ impl<'a> ParsedELF<'a> {
             "Section header entries: {}",
             self.header.section_header_entries
         );
-        let shs = self
-            .get_section_headers()
-            .expect("failed to get section headers");
+        let shs = ParsedELF::parse_section_headers(&self.header, &self.object).expect("failed to get section headers");
         debug_assert_eq!(shs.len(), self.header.section_header_entries as usize);
 
         for (index, (name, sh)) in self.section_names.iter().zip(shs).enumerate() {
@@ -187,33 +183,16 @@ impl<'a> ParsedELF<'a> {
     pub fn parse_section_headers(
         elf_header: &elf64::ELFHeader,
         object: &'a Object,
-    ) -> MidasSysResultDynamic<Vec<section::SectionHeader>> {
+    ) -> MidasSysResult<Vec<section::SectionHeader>> {
         let section_header_size = elf_header.section_header_entry_size as usize;
-        let sh_offs = elf_header.section_header_offset as usize;
-        let mut section_headers = vec![];
-        for x in 0..elf_header.section_header_entries as usize {
-            let stride = x * section_header_size;
-            let start = sh_offs + stride;
-            let end = sh_offs + stride + section_header_size;
-            let slice = &object.data[start..end];
-            unsafe {
-                let ptr = slice.as_ptr() as *const libc::Elf64_Shdr;
-                let section_header = section::SectionHeader::from_libc_repr(&*ptr);
-                section_headers.push(section_header);
-            }
-        }
-        Ok(section_headers)
-    }
+        let start = elf_header.section_header_offset as usize;
 
-    pub fn get_section_headers(&self) -> MidasSysResultDynamic<Vec<section::SectionHeader>> {
-        let section_header_size = self.header.section_header_entry_size as usize;
-        let sh_offs = self.header.section_header_offset as usize;
+        let end = start + (section_header_size * elf_header.sections_count());
+
+        let mut reader = crate::bytereader::Reader::wrap(&object.data[start..end]);
         let mut section_headers = vec![];
-        for x in 0..self.header.section_header_entries as usize {
-            let stride = x * section_header_size;
-            let start = sh_offs + stride;
-            let end = sh_offs + stride + section_header_size;
-            let slice = &self.object.data[start..end];
+        for x in 0..elf_header.sections_count() {
+            let slice = reader.read_slice(section_header_size)?;
             unsafe {
                 let ptr = slice.as_ptr() as *const libc::Elf64_Shdr;
                 let section_header = section::SectionHeader::from_libc_repr(&*ptr);
@@ -234,7 +213,8 @@ impl<'a> ParsedELF<'a> {
     }
 
     pub fn string_table_data(&self) -> MidasSysResultDynamic<&'a [u8]> {
-        let section_headers = self.get_section_headers()?;
+        let section_headers =
+            Self::parse_section_headers(&self.header, &self.object).expect("Failed to parse ELF header");
         let string_table_file_offset = section_headers
             .get(self.header.section_header_string_index as usize)
             .unwrap()
