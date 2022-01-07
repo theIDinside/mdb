@@ -3,6 +3,7 @@ mod elf32;
 mod elf64;
 mod programheader;
 mod section;
+pub mod symbol;
 use super::dwarf;
 
 use std::{collections::HashMap, io::Read};
