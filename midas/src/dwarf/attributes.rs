@@ -1,9 +1,9 @@
 #![allow(unused, non_camel_case_types)]
 #[derive(Debug)]
 pub struct AbbreviationsTableEntry {
-    tag: DwarfTag,
-    attrs_list: Vec<(Attribute, AttributeForm)>,
-    has_children: bool,
+    pub tag: DwarfTag,
+    pub attrs_list: Vec<(Attribute, AttributeForm)>,
+    pub has_children: bool,
 }
 
 impl AbbreviationsTableEntry {
