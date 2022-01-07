@@ -13,6 +13,8 @@ pub mod utils;
 pub enum MidasError {
     BadUnsignedLEB128Encoding(usize),
     BadSignedLEB128Encoding(usize),
+    DwarfSectionNotFound(dwarf::sections::Section),
+    DwarfSectionNotRecognized,
 }
 
 impl MidasError {
@@ -20,6 +22,8 @@ impl MidasError {
         match self {
             MidasError::BadUnsignedLEB128Encoding(_) => "[Bad format]: Decoding unsigned LEB128 failed",
             MidasError::BadSignedLEB128Encoding(_) => "[Bad format]: Decoding signed LEB128 failed",
+            MidasError::DwarfSectionNotFound(_) => "[DWARF Error]: Section not found",
+            MidasError::DwarfSectionNotRecognized => "[DWARF Error]: Section name not recognized",
         }
     }
 }
