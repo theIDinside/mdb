@@ -41,7 +41,9 @@ where
     let result = panic::catch_unwind(|| test());
     assert!(result.is_ok())
 }
-// binary data taken from myfile1.c
+
+/// binary data taken from myfile1.c
+/// .debug_info
 const DEBUG_INFO: &[u8] = &[
     // COMPILATION UNIT HEADER BEGIN
     0x21, 0x00, 0x00, 0x00, // unit_length, length of this entry, *excluding* the bytes of the initial_length field
@@ -61,12 +63,14 @@ const DEBUG_INFO: &[u8] = &[
     // CONTRIBUTION 1 END
 ];
 
+/// .debug_abbrev
 const DEBUG_ABBREV: &[u8] = &[
     0x01, 0x11, // DW_TAG_COMPILE_UNIT
     0x01, 0x25, 0x0E, 0x13, 0x0B, 0x03, 0x0E, 0x1B, 0x0E, 0x10, 0x17, 0x00, 0x00, 0x02, 0x24, 0x00, 0x0B, 0x0B, 0x3E,
     0x0B, 0x03, 0x0E, 0x00, 0x00, 0x00,
 ];
 
+/// .debug_str
 const DEBUG_STR: &[u8] = &[
     0x47, 0x4E, 0x55, 0x20, 0x43, 0x31, 0x37, 0x20, 0x31, 0x30, 0x2E, 0x33, 0x2E, 0x30, 0x20, 0x2D, 0x6D, 0x74, 0x75,
     0x6E, 0x65, 0x3D, 0x67, 0x65, 0x6E, 0x65, 0x72, 0x69, 0x63, 0x20, 0x2D, 0x6D, 0x61, 0x72, 0x63, 0x68, 0x3D, 0x78,
@@ -82,6 +86,29 @@ const DEBUG_STR: &[u8] = &[
     0x2F, 0x6D, 0x69, 0x64, 0x61, 0x73, 0x2F, 0x74, 0x65, 0x73, 0x74, 0x73, 0x2F, 0x73, 0x75, 0x62, 0x6A, 0x65, 0x63,
     0x74, 0x73, 0x00, 0x63, 0x68, 0x61, 0x72, 0x00,
 ];
+
+#[test]
+pub fn test_get_debug_sections() {
+    run_test(|| {
+        let program_path = subjects!("myfile1.o");
+        let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
+        let elf = midas::elf::ParsedELF::parse_elf(&object).expect("failed to parse ELF of myfile1.o");
+        let dbg_info = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugInfo)
+            .expect("Failed to get .debug_info");
+        assert_eq!(dbg_info, DEBUG_INFO);
+
+        let debug_abbrev = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugAbbrev)
+            .expect("Failed to get .debug_info");
+        assert_eq!(debug_abbrev, DEBUG_ABBREV);
+
+        let debug_str = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugStr)
+            .expect("Failed to get .debug_info");
+        assert_eq!(debug_str, DEBUG_STR);
+    })
+}
 
 // 0x11, 0x25
 #[test]

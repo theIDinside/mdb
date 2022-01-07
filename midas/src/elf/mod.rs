@@ -222,7 +222,7 @@ impl<'a> ParsedELF<'a> {
         Ok(&self.object.data[string_table_file_offset as usize..])
     }
 
-    pub fn get_dwarf_section(&mut self, dwarf_section: super::dwarf::sections::Section) -> MidasSysResult<&[u8]> {
+    pub fn get_dwarf_section(&self, dwarf_section: super::dwarf::sections::Section) -> MidasSysResult<&[u8]> {
         self.dwarf_sections
             .get(&dwarf_section)
             .map(|f| *f)
