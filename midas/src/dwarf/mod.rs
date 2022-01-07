@@ -4,7 +4,6 @@ pub mod attributes;
 pub mod callframe;
 pub mod compilation_unit;
 pub mod die;
-pub mod leb128;
 pub mod linenumber;
 pub mod loclist;
 pub mod macros;

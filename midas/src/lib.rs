@@ -1,9 +1,12 @@
 extern crate linuxwrapper as nixwrap;
 
+pub mod bytereader;
 pub mod commands;
 pub mod debugger;
 pub mod dwarf;
 pub mod elf;
+// used to live in /dwarf module, but moved here, due to wrapping reading operations in bytereader::Reader
+pub mod leb128;
 pub mod software_breakpoint;
 pub mod target;
 pub mod types;
@@ -15,15 +18,17 @@ pub enum MidasError {
     BadSignedLEB128Encoding(usize),
     DwarfSectionNotFound(dwarf::sections::Section),
     DwarfSectionNotRecognized,
+    EOFNotExpected,
 }
 
 impl MidasError {
     pub fn description(&self) -> &'static str {
         match self {
-            MidasError::BadUnsignedLEB128Encoding(_) => "[Bad format]: Decoding unsigned LEB128 failed",
-            MidasError::BadSignedLEB128Encoding(_) => "[Bad format]: Decoding signed LEB128 failed",
-            MidasError::DwarfSectionNotFound(_) => "[DWARF Error]: Section not found",
-            MidasError::DwarfSectionNotRecognized => "[DWARF Error]: Section name not recognized",
+            Self::BadUnsignedLEB128Encoding(_) => "[LEB128 FORMAT] error: Decoding unsigned LEB128 failed",
+            Self::BadSignedLEB128Encoding(_) => "[LEB128 FORMAT] error: Decoding signed LEB128 failed",
+            Self::DwarfSectionNotFound(_) => "[DWARF] error: Section not found",
+            Self::DwarfSectionNotRecognized => "[DWARF] error: Section name not recognized",
+            Self::EOFNotExpected => "[READ] error: Unexpectedly saw EOF",
         }
     }
 }

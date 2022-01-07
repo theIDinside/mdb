@@ -23,9 +23,11 @@ type AttributeIndex = usize;
 pub fn parse_attributes(
     abbreviations_table_data: &[u8],
 ) -> crate::MidasSysResult<HashMap<u64, AbbreviationsTableEntry>> {
-    use super::leb128::decode_unsigned;
+    use crate::leb128::decode_unsigned;
     let mut map = HashMap::new();
     let mut offset = 0;
+
+    let mut reader = crate::bytereader::Reader::wrap(abbreviations_table_data);
 
     loop {
         let abbrev_code = decode_unsigned(&abbreviations_table_data[offset..])?;

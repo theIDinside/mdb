@@ -1,7 +1,7 @@
 #![allow(unused, unused_macros)]
 use std::{panic, process::Command, sync::Once};
 
-use midas::dwarf::{attributes, leb128::decode_unsigned};
+use midas::{dwarf::attributes, leb128::decode_unsigned};
 
 static BUILT_TEST_DEBUGGEES: Once = Once::new();
 
