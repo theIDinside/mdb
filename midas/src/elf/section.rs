@@ -37,6 +37,7 @@ impl<'a> Section<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct SectionHeader {
     pub string_table_index: u32,
     pub segment_type: SectionType,
@@ -75,6 +76,14 @@ impl SectionHeader {
         let start = self.section_data_offset as usize;
         let end = start + self.size as usize;
         start..end
+    }
+
+    pub fn entries_count(&self) -> Option<usize> {
+        if self.entry_size != 0 {
+            Some(self.size as usize / self.entry_size as usize)
+        } else {
+            None
+        }
     }
 }
 

@@ -134,3 +134,13 @@ pub fn print_info_myfile1() {
         parser.print_section_headers();
     })
 }
+
+#[test]
+pub fn print_symbol_table() {
+    run_test(|| {
+        let program_path = subjects!("helloworld");
+        let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
+        let parser = elf::ParsedELF::parse_elf(&object).unwrap();
+        parser.symbol_table.print_unordered();
+    })
+}

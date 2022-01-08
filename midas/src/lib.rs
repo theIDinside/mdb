@@ -22,10 +22,24 @@ pub enum MidasError {
     DwarfSectionNotRecognized,
     EOFNotExpected,
     ELFMagicNotFound,
+    SymbolTableMalformed,
+    SectionNotFound(ELFSection),
+    ReaderOutOfBounds,
     UTF8Error {
         valid_up_to: usize,
         error_len: Option<usize>,
     },
+}
+
+#[derive(Debug)]
+pub enum ELFSection {
+    SymbolTable,
+}
+
+pub const fn tostr(elfsection: ELFSection) -> &'static str {
+    match elfsection {
+        ELFSection::SymbolTable => "Symbol table",
+    }
 }
 
 impl From<Utf8Error> for MidasError {
@@ -40,13 +54,16 @@ impl From<Utf8Error> for MidasError {
 impl MidasError {
     pub fn description(&self) -> &'static str {
         match self {
-            Self::BadUnsignedLEB128Encoding(_) => "[LEB128 FORMAT] error: Decoding unsigned LEB128 failed",
-            Self::BadSignedLEB128Encoding(_) => "[LEB128 FORMAT] error: Decoding signed LEB128 failed",
-            Self::DwarfSectionNotFound(_) => "[DWARF] error: Section not found",
-            Self::DwarfSectionNotRecognized => "[DWARF] error: Section name not recognized",
-            Self::EOFNotExpected => "[READ] error: Unexpectedly saw EOF",
-            Self::ELFMagicNotFound => "[ELF] error: ELF magic number incorrect",
-            Self::UTF8Error { .. } => "[UTF8] error: Invalid stream of bytes",
+            MidasError::BadUnsignedLEB128Encoding(_) => "[LEB128] error: Decoding unsigned LEB128 failed",
+            MidasError::BadSignedLEB128Encoding(_) => "[LEB128] error: Decoding signed LEB128 failed",
+            MidasError::DwarfSectionNotFound(_) => "[DWARF] error: Section not found",
+            MidasError::DwarfSectionNotRecognized => "[DWARF] error: Section name not recognized",
+            MidasError::EOFNotExpected => "[READ] error: Unexpectedly saw EOF",
+            MidasError::ELFMagicNotFound => "[ELF] error: ELF magic number incorrect",
+            MidasError::UTF8Error { .. } => "[STR] error: Invalid stream of bytes",
+            MidasError::SymbolTableMalformed => "[ELF] error: Symbol table data malformed",
+            MidasError::SectionNotFound(_) => "[ELF] error: Section not found.",
+            MidasError::ReaderOutOfBounds => "[BYTEREADER]: Position out of bounds of slice",
         }
     }
 }
