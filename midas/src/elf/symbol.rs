@@ -1,5 +1,5 @@
 use super::section;
-use crate::bytereader::{ByteReaderManager, ConsumeReader};
+use crate::bytereader::{ConsumeReader, NonConsumingReader};
 use std::collections::HashMap;
 
 pub struct SymbolTable<'object> {
@@ -15,7 +15,7 @@ impl<'object> SymbolTable<'object> {
     pub fn parse_symbol_table(
         section_header: &section::SectionHeader,
         mut symbol_table_reader: ConsumeReader<'object>,
-        string_table_data_reader: &ByteReaderManager<'object>,
+        string_table_data_reader: &NonConsumingReader<'object>,
     ) -> crate::MidasSysResult<SymbolTable<'object>> {
         let entries = section_header.entries_count().unwrap();
         let entry_sz = section_header.entry_size as usize;

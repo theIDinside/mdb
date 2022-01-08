@@ -1,5 +1,5 @@
 use linuxwrapper as nixwrap;
-use midas::{self, target};
+use midas::{self, software_breakpoint, target};
 use nixwrap::WaitStatus;
 use std::{panic, process::Command, sync::Once};
 
@@ -78,16 +78,43 @@ pub fn is_stopped_after_launch() {
     })
 }
 
+// todo(simon): this should be a success-test not a should fail; but for now the functionality is not there yet.
+#[test]
+pub fn set_bp_at_main_and_stops() {
+    use midas::target::Target;
+    run_test(|| {
+        let main_address_of_helloworld = 0x401130;
+        let program_path = subjects!("helloworld");
+        let (target, waitstatus) = midas::target::linux::LinuxTarget::launch(
+            &mut target::make_command(program_path, vec!["is_stopped_after_launch"]).unwrap(),
+        )
+        .unwrap();
+
+        let bp = software_breakpoint::Breakpoint::set_enabled(target.process_id(), main_address_of_helloworld);
+        let ws = target.continue_execution().unwrap();
+        match ws {
+            WaitStatus::Stopped(pid, signal) => {
+                assert_eq!(signal, nixwrap::signals::Signal::Trap);
+                let regs = nixwrap::ptrace::get_regs(pid);
+                assert_eq!(regs.rip - 1, main_address_of_helloworld as _);
+            }
+            _ => assert!(
+                false,
+                "Wrong wait status encountered after hitting breakpoint"
+            ),
+        }
+    })
+}
+
 #[test]
 pub fn exited() {
     run_test(|| {
         use midas::target::Target;
         let program_path = subjects!("helloworld");
         compile_subjects();
-        let (target, waitstatus) = midas::target::linux::LinuxTarget::launch(
-            &mut target::make_command(program_path, vec!["exited"]).unwrap(),
-        )
-        .unwrap();
+        let (target, waitstatus) =
+            midas::target::linux::LinuxTarget::launch(&mut target::make_command(program_path, vec!["exited"]).unwrap())
+                .unwrap();
         assert_eq!(
             waitstatus,
             WaitStatus::Stopped(target.process_id(), nixwrap::signals::Signal::Trap)

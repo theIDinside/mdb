@@ -15,9 +15,13 @@ pub use elf32::*;
 pub use elf64::*;
 use nixwrap::MidasSysResultDynamic;
 
-use crate::{utils::midas_err, MidasSysResult};
+use crate::{
+    bytereader::{self, NonConsumingReader},
+    utils::midas_err,
+    ELFSection, MidasError, MidasSysResult,
+};
 
-use self::programheader::ProgramHeader;
+use self::{programheader::ProgramHeader, symbol::SymbolTable};
 
 pub struct Object {
     pub data: Vec<u8>,
@@ -28,16 +32,17 @@ pub struct StringTable<'a> {
     table: &'a [u8],
 }
 
-pub struct ParsedELF<'a> {
-    object: &'a Object,
+pub struct ParsedELF<'object> {
+    object: &'object Object,
     header: elf64::ELFHeader,
     section_names: Vec<String>,
-    dwarf_sections: HashMap<dwarf::Section, &'a [u8]>,
-    sections: HashMap<&'a str, section::Section<'a>>,
+    dwarf_sections: HashMap<dwarf::Section, &'object [u8]>,
+    sections: HashMap<&'object str, (section::SectionHeader, section::Section<'object>)>,
+    pub symbol_table: SymbolTable<'object>,
 }
 
-impl<'a> ParsedELF<'a> {
-    pub fn parse_elf(obj: &'a Object) -> MidasSysResult<ParsedELF<'a>> {
+impl<'object> ParsedELF<'object> {
+    pub fn parse_elf(obj: &'object Object) -> MidasSysResult<ParsedELF<'object>> {
         let header = elf64::ELFHeader::from(&obj.data[..])?;
         let mut sections = HashMap::new();
         let section_headers = Self::parse_section_headers(&header, obj)?;
@@ -45,33 +50,39 @@ impl<'a> ParsedELF<'a> {
         let mut dwarf_sections = HashMap::new();
         let mut section_name_offset_mapping = HashMap::new();
 
-        let string_table_file_offset = section_headers
+        let section_header_string_table_file_offset = section_headers
             .get(header.section_header_string_index as usize)
             .unwrap()
             .section_data_offset;
 
-        let string_table = &obj.data[string_table_file_offset as usize..];
+        let section_header_string_table = &obj.data[section_header_string_table_file_offset as usize..];
         let sh_ent_sz = header.section_header_entry_size as usize;
         let mut section_names = Vec::new();
-        for (index, sh) in section_headers.iter().enumerate() {
+        for (index, sh) in section_headers.into_iter().enumerate() {
             let idx = sh.string_table_index as usize;
-            let str_term = string_table
+            let str_term = section_header_string_table
                 .iter()
                 .skip(idx)
                 .position(|&b| b == 0)
                 .expect("string table entry null terminator expected.");
-            let section_name = std::str::from_utf8(&string_table[idx..idx + str_term])?;
+            let section_name = std::str::from_utf8(&section_header_string_table[idx..idx + str_term])?;
             let section_data_in_obj_f = &obj.data[sh.address_range()];
             if let Ok(section_id) = dwarf::Section::try_from(section_name) {
                 dwarf_sections.insert(section_id, section_data_in_obj_f);
             }
             section_name_offset_mapping.insert(section_name.to_owned(), section_data_in_obj_f);
             section_names.push(section_name.to_string());
-            sections.insert(
-                section_name,
-                section::Section::from_object_file(index, &obj, sh),
-            );
+            let section = section::Section::from_object_file(index, &obj, &sh);
+            sections.insert(section_name, (sh, section));
         }
+
+        let (strtab_header, strtab_sec) = sections.get(".strtab").as_ref().unwrap();
+        let (symtab_header, symtab_sec) = sections.get(".symtab").as_ref().unwrap();
+
+        let mut reader = bytereader::ConsumeReader::wrap(&obj.data[symtab_header.address_range()]);
+        let st_reader = NonConsumingReader::new(&obj.data[strtab_header.address_range()]);
+        let symbol_table = SymbolTable::parse_symbol_table(&symtab_header, reader, &st_reader)?;
+
         // todo(simon): this is hacky as shit. I've done this, because I had to figure out how dwarf elf etc actually works first
         // when it's functioning, this *will* be refactored, so that we don't create unnecessary hashmaps
         let pe = ParsedELF {
@@ -80,23 +91,24 @@ impl<'a> ParsedELF<'a> {
             section_names,
             dwarf_sections,
             sections,
+            symbol_table,
         };
         Ok(pe)
     }
 
-    pub fn get_section_data(&self, name: &str) -> Option<&[u8]> {
-        self.sections.get(name).map(|sec| sec.data())
+    pub fn get_section_data(&'object self, name: &str) -> Option<&'object [u8]> {
+        self.sections.get(name).map(|(header, sec)| sec.data())
     }
 
     // a bit more optimized search, we don't have to hash a string first
-    pub fn get_dwarf_section_data(&self, dwarf_section: dwarf::Section) -> Option<&[u8]> {
+    pub fn get_dwarf_section_data(&self, dwarf_section: dwarf::Section) -> Option<&'object [u8]> {
         self.dwarf_sections.get(&dwarf_section).map(|&slice| slice)
     }
 
     pub fn get_section_header_name(
-        &'a self,
+        &'object self,
         section_header: &section::SectionHeader,
-    ) -> MidasSysResultDynamic<&'a str> {
+    ) -> MidasSysResultDynamic<&'object str> {
         let idx = section_header.string_table_index as usize;
         let bytes = self.string_table_data()?;
         let str_term = bytes.iter().skip(idx).position(|&b| b == 0);
@@ -138,7 +150,7 @@ impl<'a> ParsedELF<'a> {
         }
     }
 
-    pub fn get_raw_segment_headers_of(&'a self, segment_type: programheader::Type) -> Vec<&'a [u8]> {
+    pub fn get_raw_segment_headers_of(&'object self, segment_type: programheader::Type) -> Vec<&'object [u8]> {
         let mut v = vec![];
         for x in 0..self.header.program_header_entries {
             if let Some(ph) = self.get_program_segment_header(x as _) {
@@ -183,14 +195,14 @@ impl<'a> ParsedELF<'a> {
 
     pub fn parse_section_headers(
         elf_header: &elf64::ELFHeader,
-        object: &'a Object,
+        object: &'object Object,
     ) -> MidasSysResult<Vec<section::SectionHeader>> {
         let section_header_size = elf_header.section_header_entry_size as usize;
         let start = elf_header.section_header_offset as usize;
 
         let end = start + (section_header_size * elf_header.sections_count());
 
-        let mut reader = crate::bytereader::Reader::wrap(&object.data[start..end]);
+        let mut reader = crate::bytereader::ConsumeReader::wrap(&object.data[start..end]);
         let mut section_headers = vec![];
         for x in 0..elf_header.sections_count() {
             let slice = reader.read_slice(section_header_size)?;
@@ -203,7 +215,7 @@ impl<'a> ParsedELF<'a> {
         Ok(section_headers)
     }
 
-    pub fn get_interpreter(&'a self) -> MidasSysResultDynamic<&'a str> {
+    pub fn get_interpreter(&'object self) -> MidasSysResultDynamic<&'object str> {
         let interpreter_header = self
             .get_program_segment_headers_of(programheader::Type::ProgramInterpreter)
             .ok_or("Could not find interpreter headers".to_string())?;
@@ -213,7 +225,7 @@ impl<'a> ParsedELF<'a> {
             .map_err(|err| err.to_string())
     }
 
-    pub fn string_table_data(&self) -> MidasSysResultDynamic<&'a [u8]> {
+    pub fn string_table_data(&self) -> MidasSysResultDynamic<&'object [u8]> {
         let section_headers =
             Self::parse_section_headers(&self.header, &self.object).expect("Failed to parse ELF header");
         let string_table_file_offset = section_headers
@@ -228,6 +240,19 @@ impl<'a> ParsedELF<'a> {
             .get(&dwarf_section)
             .map(|f| *f)
             .ok_or(crate::MidasError::DwarfSectionNotRecognized)
+    }
+
+    pub fn parse_symbol_table(&'object self) -> MidasSysResult<SymbolTable<'object>> {
+        let (header, section) = self
+            .sections
+            .get(".symtab")
+            .ok_or(MidasError::SectionNotFound(ELFSection::SymbolTable))?;
+
+        let mut reader = bytereader::ConsumeReader::wrap(section.data());
+
+        let st_reader = NonConsumingReader::new(self.string_table_data().unwrap());
+        let symtab = SymbolTable::parse_symbol_table(&header, reader, &st_reader)?;
+        Ok(symtab)
     }
 }
 

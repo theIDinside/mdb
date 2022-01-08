@@ -1,13 +1,15 @@
 use crate::MidasSysResult;
 
-pub struct Reader<'a> {
-    data: &'a [u8],
+// Reader that "consumes" the data it points to, meaning, it's not a seekable reader.
+pub struct ConsumeReader<'data> {
+    data: &'data [u8],
 }
 
 // I'm actually pretty happy with this interface.
-impl<'a> Reader<'a> {
-    pub fn wrap(data: &'a [u8]) -> Reader<'a> {
-        Reader { data }
+/// All read operations move the pointer to the data forwards and can not be moved backwards.
+impl<'data> ConsumeReader<'data> {
+    pub fn wrap(data: &'data [u8]) -> ConsumeReader<'data> {
+        ConsumeReader { data }
     }
 
     pub fn read_slice(&mut self, len: usize) -> MidasSysResult<&[u8]> {
@@ -71,7 +73,54 @@ impl<'a> Reader<'a> {
         self.data.len()
     }
 
+    pub fn read_str(&mut self) -> MidasSysResult<&str> {
+        let end = self.data.iter().position(|b| *b == 0);
+        if let Some(pos) = end {
+            let s = std::str::from_utf8(&self.data[..pos]);
+            self.flow(pos);
+            s.map_err(|e| crate::MidasError::from(e))
+        } else {
+            Err(crate::MidasError::UTF8Error {
+                valid_up_to: self.data.len(),
+                error_len: None,
+            })
+        }
+    }
+
     fn flow(&mut self, offset: usize) {
         self.data = &self.data[offset..];
+    }
+}
+
+pub struct NonConsumingReader<'data> {
+    data: &'data [u8],
+}
+
+impl<'data> NonConsumingReader<'data> {
+    pub fn new(storage: &'data [u8]) -> NonConsumingReader {
+        NonConsumingReader { data: storage }
+    }
+
+    pub fn seek(&self, offset: usize) -> MidasSysResult<ConsumeReader> {
+        if offset >= self.data.len() {
+            Err(crate::MidasError::ReaderOutOfBounds)
+        } else {
+            Ok(ConsumeReader {
+                data: &self.data[offset..],
+            })
+        }
+    }
+
+    pub fn read_str_from(&self, offset: usize) -> MidasSysResult<&'data str> {
+        let end = self.data.iter().skip(offset).position(|b| *b == 0);
+        if let Some(pos) = end {
+            let s = std::str::from_utf8(&self.data[offset..offset + pos]);
+            s.map_err(|e| crate::MidasError::from(e))
+        } else {
+            Err(crate::MidasError::UTF8Error {
+                valid_up_to: self.data.len(),
+                error_len: None,
+            })
+        }
     }
 }

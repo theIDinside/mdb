@@ -24,7 +24,7 @@ pub fn parse_attributes(
     abbreviations_table_data: &[u8],
 ) -> crate::MidasSysResult<HashMap<u64, AbbreviationsTableEntry>> {
     let mut map = HashMap::new();
-    let mut reader = crate::bytereader::Reader::wrap(abbreviations_table_data);
+    let mut reader = crate::bytereader::ConsumeReader::wrap(abbreviations_table_data);
 
     loop {
         let abbrev_code = reader.read_uleb128()?;
