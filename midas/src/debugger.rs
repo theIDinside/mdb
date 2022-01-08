@@ -1,4 +1,6 @@
 use super::commands::Command;
+use crate::target::linux::LinuxTarget;
+use crate::target::Target;
 use crate::{software_breakpoint::Breakpoint, types::Address};
 use nixwrap::MidasSysResultDynamic;
 use nixwrap::{Pid, WaitStatus};
@@ -8,6 +10,7 @@ pub struct Debugger {
     _binary: String,
     pid: Pid,
     _software_breakpoints: HashMap<Address, HashSet<Breakpoint>>,
+    target: Option<Box<dyn Target<OSTarget = LinuxTarget>>>,
 }
 
 impl Debugger {
@@ -16,6 +19,7 @@ impl Debugger {
             _binary: binary,
             pid,
             _software_breakpoints: HashMap::new(),
+            target: None,
         }
     }
 
