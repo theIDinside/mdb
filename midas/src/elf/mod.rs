@@ -64,7 +64,6 @@ pub struct ParsedELF<'object> {
     // the Rc around, to make sure it never dies.
     object: std::rc::Rc<Object>,
     header: elf64::ELFHeader,
-    section_names: Vec<String>,
     dwarf_sections: ParsedSections,
     sections: HashMap<String, (section::SectionHeader, section::Section)>,
     pub symbol_table: SymbolTable<'object>,
@@ -79,8 +78,6 @@ impl<'object> ParsedELF<'object> {
 
         let mut dwarf_sections = ParsedSections::default();
 
-        let mut section_name_offset_mapping = HashMap::new();
-
         let section_header_string_table_file_offset = section_headers
             .get(header.section_header_string_index as usize)
             .unwrap()
@@ -88,7 +85,6 @@ impl<'object> ParsedELF<'object> {
 
         let section_header_string_table = &obj_ref.data[section_header_string_table_file_offset as usize..];
         let sh_ent_sz = header.section_header_entry_size as usize;
-        let mut section_names = Vec::new();
         for (index, sh) in section_headers.into_iter().enumerate() {
             let idx = sh.string_table_index as usize;
             let str_term = section_header_string_table
@@ -101,8 +97,6 @@ impl<'object> ParsedELF<'object> {
             if let Ok(section_id) = dwarf::Section::try_from(section_name) {
                 dwarf_sections.insert(section_id, section_data_in_obj_f);
             }
-            section_name_offset_mapping.insert(section_name.to_owned(), section_data_in_obj_f);
-            section_names.push(section_name.to_string());
             let section = section::Section::from_object_file(index, &obj_ref, &sh);
             sections.insert(section_name.to_owned(), (sh, section));
         }
@@ -119,7 +113,6 @@ impl<'object> ParsedELF<'object> {
         let pe = ParsedELF {
             object: obj.clone(),
             header,
-            section_names,
             dwarf_sections,
             sections,
             symbol_table,
@@ -218,9 +211,12 @@ impl<'object> ParsedELF<'object> {
         let shs = ParsedELF::parse_section_headers(&self.header, &self.object).expect("failed to get section headers");
         debug_assert_eq!(shs.len(), self.header.section_header_entries as usize);
 
-        for (index, (name, sh)) in self.section_names.iter().zip(shs).enumerate() {
-            println!("Section Header Entry #{}: {}", index, name);
-            println!("{:#?}", sh);
+        let mut ref_vec: Vec<(&String, &(section::SectionHeader, section::Section))> = self.sections.iter().collect();
+        ref_vec.sort_by(|(_, (_, asec)), (_, (_, bsec))| asec.section_index.cmp(&bsec.section_index));
+
+        for (name, (hdr, sec)) in ref_vec {
+            println!("Section Header Entry #{}: {}", sec.section_index, name);
+            println!("{:#?}", hdr);
         }
     }
 
