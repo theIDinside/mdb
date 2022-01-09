@@ -1,6 +1,7 @@
 use crate::{MidasSysResultDynamic, Pid};
 pub(in crate) use libc::ptrace;
-#[derive(Debug)]
+// todo(simon): this should probably be removed in release
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct UserRegisters {
     pub r15: u64,
     pub r14: u64,
