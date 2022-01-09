@@ -4,6 +4,7 @@ pub mod linux;
 
 use nixwrap::MidasSysResultDynamic;
 
+use crate::software_breakpoint::BreakpointRequest;
 use crate::types::Address;
 
 pub struct MemoryRead {
@@ -56,16 +57,16 @@ impl MemoryRead {
 
 // represents the state operations we can do on the debuggeee
 pub trait Target {
-    type OSTarget;
-    fn launch(
-        command: &mut std::process::Command,
-    ) -> MidasSysResultDynamic<(Box<<Self as Target>::OSTarget>, WaitStatus)>;
+    fn launch(command: &mut std::process::Command) -> MidasSysResultDynamic<(Box<dyn Target>, WaitStatus)>
+    where
+        Self: Sized;
     fn process_id(&self) -> Pid;
-    fn step(&self, steps: usize);
-    fn continue_execution(&self) -> MidasSysResultDynamic<WaitStatus>;
-    fn kill(&self) -> MidasSysResultDynamic<WaitStatus>;
+    fn step(&mut self, steps: usize);
+    fn continue_execution(&mut self) -> MidasSysResultDynamic<WaitStatus>;
+    fn kill(&mut self) -> MidasSysResultDynamic<WaitStatus>;
     fn read_memory(&self, address: usize, bytes: usize) -> Vec<u8>;
-    fn kill_on_tracer_exit(&self) -> MidasSysResultDynamic<()>;
+    fn kill_on_tracer_exit(&mut self) -> MidasSysResultDynamic<()>;
+    fn set_breakpoint(&mut self, bp: BreakpointRequest) -> MidasSysResultDynamic<()>;
 }
 
 pub fn make_command(program_path: &str, args: Vec<&str>) -> MidasSysResultDynamic<std::process::Command> {

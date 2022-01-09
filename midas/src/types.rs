@@ -1,6 +1,6 @@
 use std::fmt;
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
 pub struct Address(pub usize);
 
 impl Address {
@@ -10,10 +10,17 @@ impl Address {
     }
 }
 
+impl std::fmt::Debug for Address {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let val = self.0;
+        write!(f, "Address(0x{:X})", val)
+    }
+}
+
 impl fmt::LowerHex for Address {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let val = self.0;
-        fmt::LowerHex::fmt(&val, f) // delegate to i32's implementation
+        fmt::UpperHex::fmt(&val, f) // delegate to i32's implementation
     }
 }
 

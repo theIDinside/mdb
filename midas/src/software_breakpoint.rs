@@ -9,6 +9,7 @@ pub enum BreakpointRequest {
     Function { name: String, file: Option<String> },
 }
 
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Breakpoint {
     pub address: Address,
     pub enabled: bool,
@@ -38,14 +39,26 @@ impl Breakpoint {
             let swap_in = (instruction & !0xff) | interrupt_3;
             ptrace::poke_data(pid, addr, swap_in)?;
         }
-        Ok(Breakpoint::new(Address(addr), enabled, pid, instruction))
+        Ok(Breakpoint::new(
+            Address(addr),
+            enabled,
+            pid,
+            instruction & 0xff,
+        ))
     }
 
     pub fn disable(&mut self) {
         if self.enabled {
-            ptrace::poke_data(self.pid, self.address.value(), self.instruction_encoding).unwrap();
+            let instruction = nixwrap::ptrace::peek_data(self.pid, self.address.value()).unwrap();
+            let restored = (instruction & !0xff) | self.instruction_encoding;
+            ptrace::poke_data(self.pid, self.address.value(), restored).unwrap();
         }
         self.enabled = false;
+    }
+
+    // for when we might have a set of breakpoints, we don't want to keep poke_data'ing if we disable them all
+    pub fn set_is_enabled(&mut self, value: bool) {
+        self.enabled = value;
     }
 }
 
