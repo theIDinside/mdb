@@ -155,15 +155,39 @@ impl<'object> SymbolTable<'object> {
             println!("|  {:^50}  | => [  {:?}  ]", name, sym)
         }
     }
+
+    pub fn get_symbol(&self, name: &str) -> Option<&Symbol> {
+        // todo(simon): place all these in the same hashmap and create sub-maps for types, that has pointers to the elements in this master map
+        if let Some(s) = self.no_type.get(name) {
+            return Some(s);
+        }
+        if let Some(s) = self.objects.get(name) {
+            return Some(s);
+        }
+        if let Some(s) = self.functions.get(name) {
+            return Some(s);
+        }
+        if let Some(s) = self.sections.get(name) {
+            return Some(s);
+        }
+        if let Some(s) = self.files.get(name) {
+            return Some(s);
+        }
+        None
+    }
+
+    pub fn get_function_symbol(&self, name: &str) -> Option<&Symbol> {
+        self.functions.get(name)
+    }
 }
 
 pub struct Symbol {
     // optimizations go boom! j/k. This allows for the value = 0, to be "seen" by us as Option<..>::None
-    address: Option<std::num::NonZeroUsize>,
-    size: usize,
-    binding: Binding,
-    section_index: usize,
-    entry_index: usize,
+    pub value: Option<std::num::NonZeroUsize>, // renamed from address; as the symbols can hold things other than addressess although it's the most occuring
+    pub size: usize,
+    pub binding: Binding,
+    pub section_index: usize,
+    pub entry_index: usize,
 }
 
 impl Symbol {
@@ -176,7 +200,7 @@ impl Symbol {
     ) -> Symbol {
         Symbol {
             entry_index,
-            address,
+            value: address,
             size,
             binding,
             section_index,
@@ -193,7 +217,7 @@ impl std::fmt::Debug for Symbol {
             f,
             "#{:>8} 0x{:016X?}, {:>32} bytes. {:>10?}. Index #{:>3}",
             idx,
-            &self.address.map(|v| v.get()).unwrap_or(0),
+            &self.value.map(|v| v.get()).unwrap_or(0),
             &self.size,
             &self.binding,
             &self.section_index

@@ -261,7 +261,7 @@ impl Prompt {
     }
 
     pub fn display_output(&mut self, output: &str) {
-        println!("{}\r", output);
+        println!("\r{}\r", output);
     }
 
     pub fn pop_history(&mut self) -> Option<String> {

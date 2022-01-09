@@ -75,10 +75,6 @@ impl super::Target for LinuxTarget {
             _ => false,
         };
         if hit_breakpoint {
-            println!(
-                "Breakpoint was hit prior to continue; 0x{:X}, continuing",
-                pc
-            );
             nixwrap::ptrace::set_pc(self.process_id(), pc as usize);
         }
         nixwrap::continue_execution(*self.pid).unwrap();
@@ -112,6 +108,21 @@ impl super::Target for LinuxTarget {
             }
             crate::software_breakpoint::BreakpointRequest::Line { number, file } => todo!(),
             crate::software_breakpoint::BreakpointRequest::Function { name, file } => todo!(),
+        }
+    }
+
+    fn stopped_at_breakpoint(&self) -> Option<Address> {
+        let pc = nixwrap::ptrace::get_regs(self.process_id())
+            .pc()
+            .saturating_sub(1);
+        if self
+            ._software_breakpoints
+            .get(&Address(pc as usize))
+            .is_some()
+        {
+            Some(Address(pc as _))
+        } else {
+            None
         }
     }
 }

@@ -67,6 +67,7 @@ pub trait Target {
     fn read_memory(&self, address: usize, bytes: usize) -> Vec<u8>;
     fn kill_on_tracer_exit(&mut self) -> MidasSysResultDynamic<()>;
     fn set_breakpoint(&mut self, bp: BreakpointRequest) -> MidasSysResultDynamic<()>;
+    fn stopped_at_breakpoint(&self) -> Option<Address>;
 }
 
 pub fn make_command(program_path: &str, args: Vec<&str>) -> MidasSysResultDynamic<std::process::Command> {

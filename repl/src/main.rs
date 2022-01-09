@@ -43,6 +43,7 @@ fn main() -> Result<(), String> {
     let mut p = cli::Prompt::new("midas> ")?;
     let object = std::rc::Rc::new(midas::elf::load_object(std::path::Path::new(program_path))?);
     let _elf = midas::elf::ParsedELF::parse_elf(&object).map_err(|e| format!("{}", e.description()))?;
+
     let (mut target_, _waitstatus) =
         midas::target::linux::LinuxTarget::launch(&mut target::make_command(program_path, vec!["exited"]).unwrap())
             .unwrap();
@@ -57,7 +58,11 @@ fn main() -> Result<(), String> {
                 return Ok(());
             }
             "r" | "run" => match target_.continue_execution() {
-                Ok(_status) => todo!(),
+                Ok(_status) => {
+                    if let Some(msg) = prepare_waitstatus_display_message(_status, target_.as_mut()) {
+                        p.display_output(&msg);
+                    }
+                }
                 Err(err) => p.display_output(&err),
             },
             "b" | "breakpoint" => {
@@ -78,13 +83,84 @@ fn main() -> Result<(), String> {
                             p.display_output("Failed to set breakpoint");
                         }
                     } else {
-                        p.display_output("Invalid address");
+                        if let Some(addr) = _elf
+                            .symbol_table
+                            .get_function_symbol(&params[0])
+                            .and_then(|s| s.value.map(|v| Address(v.get())))
+                        {
+                            if let Ok(_) =
+                                target_.set_breakpoint(midas::software_breakpoint::BreakpointRequest::Address(addr))
+                            {
+                                p.display_output(&format!("Breakpoint set @ {:X?}", addr))
+                            } else {
+                                p.display_output("Failed to set breakpoint");
+                            }
+                        }
                     }
                 }
             }
             _ => {
                 p.display_output(&format!("You wrote: {}", input));
             }
+        }
+    }
+}
+
+fn prepare_waitstatus_display_message(_status: nixwrap::WaitStatus, target: &dyn Target) -> Option<String> {
+    match _status {
+        nixwrap::WaitStatus::Continued(pid) => {
+            return Some(format!("Inferior continued"));
+        }
+        nixwrap::WaitStatus::ExitedNormally(pid, exit_code) => {
+            return Some(format!(
+                "Inferior exited normally with exit code {}",
+                exit_code
+            ));
+        }
+        nixwrap::WaitStatus::Stopped(pid, signal) => match signal {
+            nixwrap::signals::Signal::HangUp => todo!(),
+            nixwrap::signals::Signal::Interrupt => todo!(),
+            nixwrap::signals::Signal::Quit => todo!(),
+            nixwrap::signals::Signal::Ill => todo!(),
+            nixwrap::signals::Signal::Trap => {
+                if let Some(addr) = target.stopped_at_breakpoint() {
+                    return Some(format!("Hit breakpoint @ {:X?}", addr));
+                } else {
+                    return Some(format!("Caught trap signal"));
+                }
+            }
+            nixwrap::signals::Signal::Abort => todo!(),
+            nixwrap::signals::Signal::BusError => todo!(),
+            nixwrap::signals::Signal::FloatingPointException => todo!(),
+            nixwrap::signals::Signal::Kill => todo!(),
+            nixwrap::signals::Signal::UserDefined1 => todo!(),
+            nixwrap::signals::Signal::SegmentationFault => todo!(),
+            nixwrap::signals::Signal::UserDefined2 => todo!(),
+            nixwrap::signals::Signal::BrokenPipe => todo!(),
+            nixwrap::signals::Signal::Alarm => todo!(),
+            nixwrap::signals::Signal::Termination => todo!(),
+            nixwrap::signals::Signal::StackFault => todo!(),
+            nixwrap::signals::Signal::ChildStopped => todo!(),
+            nixwrap::signals::Signal::Continued => todo!(),
+            nixwrap::signals::Signal::Stopped => todo!(),
+            nixwrap::signals::Signal::SignalTerminalStop => todo!(),
+            nixwrap::signals::Signal::TTYIn => todo!(),
+            nixwrap::signals::Signal::TTYOut => todo!(),
+            nixwrap::signals::Signal::UrgentOutOfBand => todo!(),
+            nixwrap::signals::Signal::CPUTimeLimitExceeded => todo!(),
+            nixwrap::signals::Signal::FileSizeExceeded => todo!(),
+            nixwrap::signals::Signal::VirtualTimeAlarm => todo!(),
+            nixwrap::signals::Signal::ProfilingTimerExpired => todo!(),
+            nixwrap::signals::Signal::WindowsChange => todo!(),
+            nixwrap::signals::Signal::InputOutputPoll => todo!(),
+            nixwrap::signals::Signal::PowerFailure => todo!(),
+            nixwrap::signals::Signal::BadSystemCallArgument => todo!(),
+        },
+        nixwrap::WaitStatus::Killed(pid, signal) => {
+            return Some(format!("Inferior killed with signal {:?}", signal));
+        }
+        nixwrap::WaitStatus::CoreDumped(pid) => {
+            return Some(format!("Core dumped"));
         }
     }
 }
