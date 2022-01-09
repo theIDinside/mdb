@@ -1,21 +1,26 @@
 use super::Object;
 
-pub struct Section<'a> {
+pub struct Section {
     pub section_index: usize,
     pub section_type: SectionType,
     pub flags: u64,
     pub address: usize,
     pub entry_size: Option<usize>,
-    data: &'a [u8],
+    data: (*const u8, usize),
 }
 
-impl<'a> Section<'a> {
-    pub fn from_object_file(section_index: usize, obj: &'a Object, section_header: &SectionHeader) -> Section<'a> {
+impl Section {
+    pub fn from_object_file(section_index: usize, obj: &Object, section_header: &SectionHeader) -> Section {
         let ent_sz = if section_header.entry_size != 0 {
             Some(section_header.entry_size as usize)
         } else {
             None
         };
+
+        let slice = &obj.data[section_header.section_data_offset as usize
+            ..section_header.section_data_offset as usize + section_header.size as usize];
+
+        let data = (slice.as_ptr(), slice.len());
 
         Section {
             section_index,
@@ -23,17 +28,17 @@ impl<'a> Section<'a> {
             flags: section_header.flags,
             address: section_header.address as usize,
             entry_size: ent_sz,
-            data: &obj.data[section_header.section_data_offset as usize
-                ..section_header.section_data_offset as usize + section_header.size as usize],
+            data,
         }
     }
 
     pub fn size(&self) -> usize {
-        self.data.len()
+        let (_, len) = self.data;
+        len
     }
 
     pub fn data(&self) -> &[u8] {
-        self.data
+        super::cheat(self.data)
     }
 }
 
