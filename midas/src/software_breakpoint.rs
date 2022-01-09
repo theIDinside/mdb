@@ -2,6 +2,10 @@ use super::types::Address;
 use nixwrap::ptrace;
 use nixwrap::{MidasSysResultDynamic, Pid};
 
+// todo(simon): implement hardware breakpoints. a bit more involved and platform-dependent to the MAX(nth) degree.
+pub struct HWBreakpoint {}
+impl HWBreakpoint {}
+
 #[allow(dead_code)]
 pub enum BreakpointRequest {
     Address(Address),
@@ -16,8 +20,6 @@ pub struct Breakpoint {
     pid: Pid,
     instruction_encoding: i64,
 }
-
-pub struct HWBreakpoint {}
 
 impl Breakpoint {
     fn new(address: Address, enabled: bool, pid: Pid, instruction_encoding: i64) -> Breakpoint {
@@ -61,5 +63,3 @@ impl Breakpoint {
         self.enabled = value;
     }
 }
-
-impl HWBreakpoint {}

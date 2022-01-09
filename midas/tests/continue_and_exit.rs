@@ -96,7 +96,6 @@ pub fn set_bp_at_main_and_stops() {
         )
         .unwrap();
         let regs = nixwrap::ptrace::get_regs(target.process_id());
-        println!("user registers at current: {:#X?}", regs);
         target
             .set_breakpoint(BreakpointRequest::Address(Address(
                 main_address_of_helloworld,
@@ -106,17 +105,22 @@ pub fn set_bp_at_main_and_stops() {
             .set_breakpoint(BreakpointRequest::Address(Address(before_print)))
             .unwrap();
 
-        let waitstatus = target.continue_execution().unwrap();
+        let waitstatus = target
+            .continue_execution()
+            .expect("failed to continue execution");
         match waitstatus {
             WaitStatus::Stopped(pid, signal) => {
                 assert_eq!(signal, nixwrap::signals::Signal::Trap);
                 let regs = nixwrap::ptrace::get_regs(pid);
-                println!("user registers at current: {:#X?}", regs);
                 assert_eq!(regs.rip - 1, main_address_of_helloworld as _);
-                target.continue_execution();
+                target
+                    .continue_execution()
+                    .expect("failed to continue execution");
                 let regs = nixwrap::ptrace::get_regs(target.process_id());
-                println!("user registers at current: {:#X?}", regs);
-                target.continue_execution();
+                assert_eq!(regs.rip - 1, before_print as _);
+                target
+                    .continue_execution()
+                    .expect("failed to continue execution");
                 let regs = nixwrap::ptrace::get_regs(target.process_id());
                 // process should have exited at this point, thus, all registers should be = 0
                 assert_eq!(
