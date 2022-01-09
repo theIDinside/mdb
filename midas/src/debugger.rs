@@ -10,7 +10,7 @@ pub struct Debugger {
     _binary: String,
     pid: Pid,
     _software_breakpoints: HashMap<Address, HashSet<Breakpoint>>,
-    target: Option<Box<dyn Target<OSTarget = LinuxTarget>>>,
+    target: Option<Box<dyn Target>>,
 }
 
 impl Debugger {
