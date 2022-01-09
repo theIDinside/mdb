@@ -42,8 +42,8 @@ fn main() -> Result<(), String> {
         .ok_or("You did not provide a binary".to_owned())?;
     let mut p = cli::Prompt::new("midas> ")?;
     let object = std::rc::Rc::new(midas::elf::load_object(std::path::Path::new(program_path))?);
-    let elf = midas::elf::ParsedELF::parse_elf(&object).map_err(|e| format!("{}", e.description()))?;
-    let (mut target_, waitstatus) =
+    let _elf = midas::elf::ParsedELF::parse_elf(&object).map_err(|e| format!("{}", e.description()))?;
+    let (mut target_, _waitstatus) =
         midas::target::linux::LinuxTarget::launch(&mut target::make_command(program_path, vec!["exited"]).unwrap())
             .unwrap();
     println!("spawned {}", *target_.process_id());
@@ -56,9 +56,10 @@ fn main() -> Result<(), String> {
                 p.display_output("quitting");
                 return Ok(());
             }
-            "r" | "run" => {
-                target_.continue_execution();
-            }
+            "r" | "run" => match target_.continue_execution() {
+                Ok(_status) => todo!(),
+                Err(err) => p.display_output(&err),
+            },
             "b" | "breakpoint" => {
                 let params = &parts[1..];
                 if params.len() < 1 {

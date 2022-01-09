@@ -1,12 +1,7 @@
 use linuxwrapper as nixwrap;
-use midas::{
-    self,
-    software_breakpoint::{self, BreakpointRequest},
-    target,
-    types::Address,
-};
+use midas::{self, software_breakpoint::BreakpointRequest, target, types::Address};
 use nixwrap::WaitStatus;
-use std::{panic, process::Command, sync::Once, time::Duration};
+use std::{panic, process::Command, sync::Once};
 
 static BUILT_TEST_DEBUGGEES: Once = Once::new();
 
@@ -91,11 +86,10 @@ pub fn set_bp_at_main_and_stops() {
         let main_address_of_helloworld = 0x401130;
         let before_print = 0x401162;
         let program_path = subjects!("helloworld");
-        let (mut target, waitstatus) = midas::target::linux::LinuxTarget::launch(
+        let (mut target, _waitstatus) = midas::target::linux::LinuxTarget::launch(
             &mut target::make_command(program_path, vec!["is_stopped_after_launch"]).unwrap(),
         )
         .unwrap();
-        let regs = nixwrap::ptrace::get_regs(target.process_id());
         target
             .set_breakpoint(BreakpointRequest::Address(Address(
                 main_address_of_helloworld,
