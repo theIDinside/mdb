@@ -16,18 +16,54 @@ impl AbbreviationsTableEntry {
     }
 }
 
+pub struct AbbreviationsTableIterator<'a> {
+    abbrev_table: &'a [u8],
+    cu_iterator: CompilationUnitHeaderIterator<'a>,
+}
+
+impl<'a> AbbreviationsTableIterator<'a> {
+    pub fn new(
+        abbrev_table: &'a [u8],
+        cu_iterator: CompilationUnitHeaderIterator<'a>,
+    ) -> AbbreviationsTableIterator<'a> {
+        AbbreviationsTableIterator {
+            abbrev_table,
+            cu_iterator,
+        }
+    }
+}
+
+impl<'a> Iterator for AbbreviationsTableIterator<'a> {
+    type Item = HashMap<u64, AbbreviationsTableEntry>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(cu_header) = self.cu_iterator.next() {
+            let offset = cu_header.abbreviation_offset;
+            let attrs = parse_cu_attributes(&self.abbrev_table[offset..]);
+            attrs.ok()
+        } else {
+            None
+        }
+    }
+}
+
 use std::collections::HashMap;
 
-use super::tag::DwarfTag;
+use super::{compilation_unit::CompilationUnitHeaderIterator, tag::DwarfTag};
 type AttributeIndex = usize;
-pub fn parse_attributes(
+
+// Parses the Abbreviations table entries for the compilation unit which references `abbreviations_table_data`
+pub fn parse_cu_attributes(
     abbreviations_table_data: &[u8],
 ) -> crate::MidasSysResult<HashMap<u64, AbbreviationsTableEntry>> {
     let mut map = HashMap::new();
     let mut reader = crate::bytereader::ConsumeReader::wrap(abbreviations_table_data);
 
-    loop {
+    while reader.has_more() {
         let abbrev_code = reader.read_uleb128()?;
+        if abbrev_code == 0 {
+            break;
+        }
         let mut attrs_list = Vec::with_capacity(6);
         let tag = reader.read_uleb128()?;
         let has_children = reader.read_u8() == 1;
