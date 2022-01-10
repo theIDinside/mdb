@@ -1,7 +1,13 @@
 #![allow(unused, unused_macros)]
 use std::{panic, process::Command, sync::Once};
 
-use midas::{dwarf::attributes, leb128::decode_unsigned};
+use midas::{
+    dwarf::{
+        attributes::{self, AbbreviationsTableIterator},
+        compilation_unit::CompilationUnitHeaderIterator,
+    },
+    leb128::decode_unsigned,
+};
 
 static BUILT_TEST_DEBUGGEES: Once = Once::new();
 
@@ -136,23 +142,107 @@ pub fn test_get_debug_sections() {
     })
 }
 
+#[test]
+pub fn parse_dwarf() {
+    run_test(|| {
+        let program_path = subjects!("ddump_analysis");
+        let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
+        let elf = midas::elf::ParsedELF::parse_elf(&object).expect("failed to parse ELF of myfile1.o");
+        let dbg_info = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugInfo)
+            .expect("Failed to get .debug_info");
+        let debug_abbrev = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugAbbrev)
+            .expect("Failed to get .debug_info");
+        let debug_str = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugStr)
+            .expect("Failed to get .debug_info");
+    })
+}
+
+#[test]
+pub fn ddump_analysis_cu_headers_is_2() {
+    run_test(|| {
+        let program_path = subjects!("ddump_analysis");
+        let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
+        let elf = midas::elf::ParsedELF::parse_elf(&object).expect("failed to parse ELF of myfile1.o");
+        let dbg_info = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugInfo)
+            .expect("Failed to get .debug_info");
+        let cus: Vec<_> = CompilationUnitHeaderIterator::new(&dbg_info).collect();
+        assert_eq!(cus.len(), 2);
+    })
+}
+
+#[test]
+pub fn parse_ddump_analysis_abbreviations() {
+    run_test(|| {
+        let program_path = subjects!("ddump_analysis");
+        let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
+        let elf = midas::elf::ParsedELF::parse_elf(&object).expect("failed to parse ELF of myfile1.o");
+        let dbg_info = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugInfo)
+            .expect("Failed to get .debug_info");
+        let dbg_abbr = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugAbbrev)
+            .expect("failed to get .debug_abbrev");
+
+        let cu_iterator = CompilationUnitHeaderIterator::new(&dbg_info);
+        let abbr_iterator = AbbreviationsTableIterator::new(&dbg_abbr, cu_iterator);
+        for entries in abbr_iterator {
+            println!("{:#?}", entries);
+        }
+    })
+}
+
+#[test]
+pub fn test_parse_line_number_program_header() {
+    run_test(|| {
+        let program_path = subjects!("ddump_analysis");
+        let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
+        let elf = midas::elf::ParsedELF::parse_elf(&object).expect("failed to parse ELF of myfile1.o");
+        let debug_line = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugLine)
+            .expect("failed to get .debug_line");
+        let lnp_header = midas::dwarf::linenumber::LineNumberProgramHeaderVersion4::from_bytes(&debug_line);
+        println!("{:#?}", lnp_header);
+    })
+}
+
+#[test]
+pub fn hardcoded_binary_test_iterators_produce_same_result() {
+    assert_eq!(DEBUG_STR.len(), 236);
+    let abbr_assert = attributes::parse_cu_attributes(&DEBUG_ABBREV).unwrap();
+
+    let cu_iterator = CompilationUnitHeaderIterator::new(&DEBUG_INFO);
+    let mut abbr_iterator = AbbreviationsTableIterator::new(&DEBUG_ABBREV, cu_iterator);
+
+    for entries in abbr_iterator {
+        assert!(abbr_assert
+            .iter()
+            .zip(entries.iter())
+            .all(|((ca, a), (cb, b))| { a.attrs_list == b.attrs_list && ca == cb }));
+        println!("{:#?}", entries);
+    }
+}
+
 // 0x11, 0x25
 #[test]
 pub fn parse_debug_info() {
-    /*
     assert_eq!(DEBUG_STR.len(), 236);
     let cu_header = midas::dwarf::compilation_unit::CompilationUnitHeader::from_bytes(DEBUG_INFO);
     println!("Compilation Unit Header #1:\n {:?}", cu_header);
     let contribution_begins = cu_header.stride();
     assert_eq!(contribution_begins, 11);
 
-    let abbr_entries = attributes::parse_attributes(&DEBUG_ABBREV).unwrap();
+    let abbr_entries = attributes::parse_cu_attributes(&DEBUG_ABBREV).unwrap();
     println!("{:#?}", abbr_entries);
     let encoding = decode_unsigned(&DEBUG_INFO[cu_header.stride()..]).unwrap();
     assert_eq!(encoding.value, 1);
     let entry = abbr_entries.get(&encoding.value).unwrap();
     let mut offset = cu_header.stride() + encoding.bytes_read;
     let mut string_entry_index = 0;
+    /*
     for (attribute, form) in entry.attrs_list.iter() {
         match form {
             attributes::AttributeForm::DW_FORM_addr => todo!(),
@@ -377,5 +467,5 @@ pub fn parse_debug_info() {
             attributes::AttributeForm::DW_FORM_addrx4 => todo!(),
         }
     }
-     */
+    */
 }
