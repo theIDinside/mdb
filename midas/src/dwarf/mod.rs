@@ -16,7 +16,9 @@ pub mod tag;
 
 pub use sections::*;
 
-#[derive(Debug)]
+
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum InitialLengthField {
     Dwarf32(u32),
     Dwarf64(u64),
@@ -67,4 +69,16 @@ impl InitialLengthField {
             InitialLengthField::Dwarf64(_) => false,
         }
     }
+}
+
+// "public API that we would need"
+
+pub fn evaluate_context(address: usize) -> () {
+    todo!("We should be able to say; build state from 0x0ffa293ff or something like that. Produce all locals, names, etc from that context.")
+}
+
+pub fn parse_abbreviations_table<'a>(dbg_info: &'a [u8], dbg_abbr: &'a [u8]) -> impl Iterator + 'a {
+    let cu_iterator = compilation_unit::CompilationUnitHeaderIterator::new(&dbg_info);
+    let abbr_iterator = attributes::AbbreviationsTableIterator::new(&dbg_abbr, cu_iterator);
+    abbr_iterator
 }
