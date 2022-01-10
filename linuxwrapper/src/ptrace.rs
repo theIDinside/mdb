@@ -1,6 +1,7 @@
 use crate::{MidasSysResultDynamic, Pid};
 pub(in crate) use libc::ptrace;
-#[derive(Debug)]
+// todo(simon): this should probably be removed in release
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct UserRegisters {
     pub r15: u64,
     pub r14: u64,
@@ -91,6 +92,10 @@ impl UserRegisters {
             fs,
             gs,
         }
+    }
+
+    pub fn pc(&self) -> u64 {
+        self.rip
     }
 }
 
@@ -204,4 +209,32 @@ pub fn get_regs(pid: Pid) -> UserRegisters {
         );
     }
     UserRegisters::from(regs)
+}
+
+pub fn set_pc(pid: Pid, address: usize) -> MidasSysResultDynamic<()> {
+    let mut regs = init_user_regs();
+    unsafe {
+        if libc::ptrace(
+            libc::PTRACE_GETREGS,
+            *pid,
+            std::ptr::null() as *const libc::c_void,
+            &mut regs as *mut _,
+        ) == -1
+        {
+            return Err(crate::errno::get_errno_msg());
+        }
+    };
+    regs.rip = address as _;
+    unsafe {
+        if libc::ptrace(
+            libc::PTRACE_SETREGS,
+            *pid,
+            std::ptr::null() as *const libc::c_void,
+            &regs,
+        ) == -1
+        {
+            return Err(crate::errno::get_errno_msg());
+        }
+    }
+    Ok(())
 }

@@ -4,7 +4,6 @@ extern crate linuxwrapper as nixwrap;
 
 pub mod bytereader;
 pub mod commands;
-pub mod debugger;
 pub mod dwarf;
 pub mod elf;
 // used to live in /dwarf module, but moved here, due to wrapping reading operations in bytereader::Reader

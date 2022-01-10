@@ -1,5 +1,5 @@
 use linuxwrapper as nixwrap;
-use midas::{self, software_breakpoint, target};
+use midas::{self, software_breakpoint::BreakpointRequest, target, types::Address};
 use nixwrap::WaitStatus;
 use std::{panic, process::Command, sync::Once};
 
@@ -48,7 +48,7 @@ pub fn exit_with_exit_status_1() {
         use midas::target::Target;
         let program_path = subjects!("helloworld_exit_status_1");
         compile_subjects();
-        let (target, waitstatus) = midas::target::linux::LinuxTarget::launch(
+        let (mut target, waitstatus) = midas::target::linux::LinuxTarget::launch(
             &mut target::make_command(program_path, vec!["exit_with_exit_status_1"]).unwrap(),
         )
         .unwrap();
@@ -84,19 +84,43 @@ pub fn set_bp_at_main_and_stops() {
     use midas::target::Target;
     run_test(|| {
         let main_address_of_helloworld = 0x401130;
+        let before_print = 0x401162;
         let program_path = subjects!("helloworld");
-        let (target, waitstatus) = midas::target::linux::LinuxTarget::launch(
+        let (mut target, _waitstatus) = midas::target::linux::LinuxTarget::launch(
             &mut target::make_command(program_path, vec!["is_stopped_after_launch"]).unwrap(),
         )
         .unwrap();
+        target
+            .set_breakpoint(BreakpointRequest::Address(Address(
+                main_address_of_helloworld,
+            )))
+            .unwrap();
+        target
+            .set_breakpoint(BreakpointRequest::Address(Address(before_print)))
+            .unwrap();
 
-        let bp = software_breakpoint::Breakpoint::set_enabled(target.process_id(), main_address_of_helloworld);
-        let ws = target.continue_execution().unwrap();
-        match ws {
+        let waitstatus = target
+            .continue_execution()
+            .expect("failed to continue execution");
+        match waitstatus {
             WaitStatus::Stopped(pid, signal) => {
                 assert_eq!(signal, nixwrap::signals::Signal::Trap);
                 let regs = nixwrap::ptrace::get_regs(pid);
                 assert_eq!(regs.rip - 1, main_address_of_helloworld as _);
+                target
+                    .continue_execution()
+                    .expect("failed to continue execution");
+                let regs = nixwrap::ptrace::get_regs(target.process_id());
+                assert_eq!(regs.rip - 1, before_print as _);
+                target
+                    .continue_execution()
+                    .expect("failed to continue execution");
+                let regs = nixwrap::ptrace::get_regs(target.process_id());
+                // process should have exited at this point, thus, all registers should be = 0
+                assert_eq!(
+                    regs,
+                    nixwrap::ptrace::UserRegisters::from(nixwrap::ptrace::init_user_regs())
+                );
             }
             _ => assert!(
                 false,
@@ -112,7 +136,7 @@ pub fn exited() {
         use midas::target::Target;
         let program_path = subjects!("helloworld");
         compile_subjects();
-        let (target, waitstatus) =
+        let (mut target, waitstatus) =
             midas::target::linux::LinuxTarget::launch(&mut target::make_command(program_path, vec!["exited"]).unwrap())
                 .unwrap();
         assert_eq!(

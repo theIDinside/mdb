@@ -87,6 +87,16 @@ impl<'data> ConsumeReader<'data> {
         }
     }
 
+    pub fn has_more(&self) -> bool {
+        self.data.len() != 0
+    }
+
+    pub fn release(&mut self) -> &[u8] {
+        let slice = self.data;
+        self.data = &[];
+        slice
+    }
+
     fn flow(&mut self, offset: usize) {
         self.data = &self.data[offset..];
     }

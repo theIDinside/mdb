@@ -31,33 +31,60 @@ pub struct Object {
 pub struct StringTable<'a> {
     table: &'a [u8],
 }
+pub fn cheat<'a>(ptr_and_len: (*const u8, usize)) -> &'a [u8] {
+    unsafe {
+        let (ptr, len) = ptr_and_len;
+        std::slice::from_raw_parts(ptr, len)
+    }
+}
+
+#[derive(Default)]
+pub struct ParsedSections {
+    sections: HashMap<dwarf::Section, (*const u8, usize)>,
+}
+
+impl ParsedSections {
+    pub fn insert(&mut self, section: dwarf::Section, section_data: &[u8]) {
+        self.sections
+            .insert(section, (section_data.as_ptr(), section_data.len()));
+    }
+
+    pub fn get(&self, section: dwarf::Section) -> Option<&[u8]> {
+        let opt = self.sections.get(&section);
+        if let Some(ptr_len) = opt {
+            Some(cheat(*ptr_len))
+        } else {
+            None
+        }
+    }
+}
 
 pub struct ParsedELF<'object> {
-    object: &'object Object,
+    // we take a reference counted pointer to the loaded object, but all operations, circumvent the access of it. We do it once and keep
+    // the Rc around, to make sure it never dies.
+    object: std::rc::Rc<Object>,
     header: elf64::ELFHeader,
-    section_names: Vec<String>,
-    dwarf_sections: HashMap<dwarf::Section, &'object [u8]>,
-    sections: HashMap<&'object str, (section::SectionHeader, section::Section<'object>)>,
+    dwarf_sections: ParsedSections,
+    sections: HashMap<String, (section::SectionHeader, section::Section)>,
     pub symbol_table: SymbolTable<'object>,
 }
 
 impl<'object> ParsedELF<'object> {
-    pub fn parse_elf(obj: &'object Object) -> MidasSysResult<ParsedELF<'object>> {
+    pub fn parse_elf(obj: &'object std::rc::Rc<Object>) -> MidasSysResult<ParsedELF<'object>> {
         let header = elf64::ELFHeader::from(&obj.data[..])?;
+        let obj_ref = std::rc::Rc::as_ref(&obj);
         let mut sections = HashMap::new();
-        let section_headers = Self::parse_section_headers(&header, obj)?;
+        let section_headers = Self::parse_section_headers(&header, obj_ref)?;
 
-        let mut dwarf_sections = HashMap::new();
-        let mut section_name_offset_mapping = HashMap::new();
+        let mut dwarf_sections = ParsedSections::default();
 
         let section_header_string_table_file_offset = section_headers
             .get(header.section_header_string_index as usize)
             .unwrap()
             .section_data_offset;
 
-        let section_header_string_table = &obj.data[section_header_string_table_file_offset as usize..];
+        let section_header_string_table = &obj_ref.data[section_header_string_table_file_offset as usize..];
         let sh_ent_sz = header.section_header_entry_size as usize;
-        let mut section_names = Vec::new();
         for (index, sh) in section_headers.into_iter().enumerate() {
             let idx = sh.string_table_index as usize;
             let str_term = section_header_string_table
@@ -66,29 +93,26 @@ impl<'object> ParsedELF<'object> {
                 .position(|&b| b == 0)
                 .expect("string table entry null terminator expected.");
             let section_name = std::str::from_utf8(&section_header_string_table[idx..idx + str_term])?;
-            let section_data_in_obj_f = &obj.data[sh.address_range()];
+            let section_data_in_obj_f = &obj_ref.data[sh.address_range()];
             if let Ok(section_id) = dwarf::Section::try_from(section_name) {
                 dwarf_sections.insert(section_id, section_data_in_obj_f);
             }
-            section_name_offset_mapping.insert(section_name.to_owned(), section_data_in_obj_f);
-            section_names.push(section_name.to_string());
-            let section = section::Section::from_object_file(index, &obj, &sh);
-            sections.insert(section_name, (sh, section));
+            let section = section::Section::from_object_file(index, &obj_ref, &sh);
+            sections.insert(section_name.to_owned(), (sh, section));
         }
 
         let (strtab_header, strtab_sec) = sections.get(".strtab").as_ref().unwrap();
         let (symtab_header, symtab_sec) = sections.get(".symtab").as_ref().unwrap();
 
-        let mut reader = bytereader::ConsumeReader::wrap(&obj.data[symtab_header.address_range()]);
-        let st_reader = NonConsumingReader::new(&obj.data[strtab_header.address_range()]);
+        let mut reader = bytereader::ConsumeReader::wrap(&obj_ref.data[symtab_header.address_range()]);
+        let st_reader = NonConsumingReader::new(&obj_ref.data[strtab_header.address_range()]);
         let symbol_table = SymbolTable::parse_symbol_table(&symtab_header, reader, &st_reader)?;
 
         // todo(simon): this is hacky as shit. I've done this, because I had to figure out how dwarf elf etc actually works first
         // when it's functioning, this *will* be refactored, so that we don't create unnecessary hashmaps
         let pe = ParsedELF {
-            object: obj,
+            object: obj.clone(),
             header,
-            section_names,
             dwarf_sections,
             sections,
             symbol_table,
@@ -101,8 +125,8 @@ impl<'object> ParsedELF<'object> {
     }
 
     // a bit more optimized search, we don't have to hash a string first
-    pub fn get_dwarf_section_data(&self, dwarf_section: dwarf::Section) -> Option<&'object [u8]> {
-        self.dwarf_sections.get(&dwarf_section).map(|&slice| slice)
+    pub fn get_dwarf_section_data(&self, dwarf_section: dwarf::Section) -> Option<&[u8]> {
+        self.dwarf_sections.get(dwarf_section)
     }
 
     pub fn get_section_header_name(
@@ -187,15 +211,18 @@ impl<'object> ParsedELF<'object> {
         let shs = ParsedELF::parse_section_headers(&self.header, &self.object).expect("failed to get section headers");
         debug_assert_eq!(shs.len(), self.header.section_header_entries as usize);
 
-        for (index, (name, sh)) in self.section_names.iter().zip(shs).enumerate() {
-            println!("Section Header Entry #{}: {}", index, name);
-            println!("{:#?}", sh);
+        let mut ref_vec: Vec<(&String, &(section::SectionHeader, section::Section))> = self.sections.iter().collect();
+        ref_vec.sort_by(|(_, (_, asec)), (_, (_, bsec))| asec.section_index.cmp(&bsec.section_index));
+
+        for (name, (hdr, sec)) in ref_vec {
+            println!("Section Header Entry #{}: {}", sec.section_index, name);
+            println!("{:#?}", hdr);
         }
     }
 
     pub fn parse_section_headers(
         elf_header: &elf64::ELFHeader,
-        object: &'object Object,
+        object: &Object,
     ) -> MidasSysResult<Vec<section::SectionHeader>> {
         let section_header_size = elf_header.section_header_entry_size as usize;
         let start = elf_header.section_header_offset as usize;
@@ -225,7 +252,7 @@ impl<'object> ParsedELF<'object> {
             .map_err(|err| err.to_string())
     }
 
-    pub fn string_table_data(&self) -> MidasSysResultDynamic<&'object [u8]> {
+    pub fn string_table_data(&self) -> MidasSysResultDynamic<&[u8]> {
         let section_headers =
             Self::parse_section_headers(&self.header, &self.object).expect("Failed to parse ELF header");
         let string_table_file_offset = section_headers
@@ -237,8 +264,7 @@ impl<'object> ParsedELF<'object> {
 
     pub fn get_dwarf_section(&self, dwarf_section: super::dwarf::sections::Section) -> MidasSysResult<&[u8]> {
         self.dwarf_sections
-            .get(&dwarf_section)
-            .map(|f| *f)
+            .get(dwarf_section)
             .ok_or(crate::MidasError::DwarfSectionNotRecognized)
     }
 
@@ -265,7 +291,7 @@ impl Object {
     }
 }
 
-pub fn load_object(path: &std::path::Path) -> MidasSysResultDynamic<Object> {
+pub fn load_object(path: &std::path::Path) -> MidasSysResultDynamic<std::rc::Rc<Object>> {
     let mut buf = vec![];
     let mut f = std::fs::OpenOptions::new()
         .read(true)
@@ -275,5 +301,5 @@ pub fn load_object(path: &std::path::Path) -> MidasSysResultDynamic<Object> {
     let file_size = f.metadata().map_err(midas_err)?.len();
     buf.reserve(file_size as _);
     let bytes_read = f.read_to_end(&mut buf).map_err(midas_err)?;
-    Ok(Object::new(buf, bytes_read))
+    Ok(std::rc::Rc::new(Object::new(buf, bytes_read)))
 }

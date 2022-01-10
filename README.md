@@ -42,6 +42,10 @@ Note: I've changed my mind, I'm going to try and write rudimentary libraries for
 
 The command line version of the debugger library. The functionality that this provides, as far as debugging goes, will be an exact 1-to-1 match with the server variant, what differs are the interfaces by which we communicate with the midas library. This idea was shamelessly stolen from headcrab.
 
+For now, extremely, ridiculously few features are implemented, but the repl binary, can produce this;
+
+![Example of setting a breakpoint on main, or symbols understood / visible by ELF](example_of_repl_progress.gif)
+
 #### server
 
 An interface against Midas that instead of taking commands from the commandline, solely takes commands from a socket or some other form of IPC.
