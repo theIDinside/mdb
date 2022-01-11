@@ -265,7 +265,9 @@ impl<'object> ParsedELF<'object> {
     pub fn get_dwarf_section(&self, dwarf_section: super::dwarf::sections::Section) -> MidasSysResult<&[u8]> {
         self.dwarf_sections
             .get(dwarf_section)
-            .ok_or(crate::MidasError::DwarfSectionNotRecognized)
+            .ok_or(MidasError::SectionNotFound(ELFSection::DWARF(
+                dwarf_section,
+            )))
     }
 
     pub fn parse_symbol_table(&'object self) -> MidasSysResult<SymbolTable<'object>> {

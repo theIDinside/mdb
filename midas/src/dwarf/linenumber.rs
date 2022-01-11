@@ -78,18 +78,18 @@ impl<'a> Iterator for FileEntryIterator<'a> {
 
 #[derive(Debug)]
 pub struct LineNumberProgramHeaderVersion4 {
-    unit_length: super::InitialLengthField,
-    version: u16,
-    header_length: usize, // 4 or 8 bytes long
-    instruction_length_minimum: u8,
-    max_operations_per_instruction: u8,
-    default_is_statement: u8,
-    line_base: i8,
-    line_range: u8,
-    opcode_base: u8,
-    standard_opcode_lengths: Vec<u8>,
-    include_directories: Vec<String>,
-    file_names: Vec<FileEntry>,
+    pub unit_length: super::InitialLengthField,
+    pub version: u16,
+    pub header_length: usize, // 4 or 8 bytes long
+    pub instruction_length_minimum: u8,
+    pub max_operations_per_instruction: u8,
+    pub default_is_statement: u8,
+    pub line_base: i8,
+    pub line_range: u8,
+    pub opcode_base: u8,
+    pub standard_opcode_lengths: Vec<u8>,
+    pub include_directories: Vec<String>,
+    pub file_names: Vec<FileEntry>,
 }
 
 impl LineNumberProgramHeaderVersion4 {
@@ -133,6 +133,7 @@ impl LineNumberProgramHeaderVersion4 {
                     break 'include_dirs;
                 } else {
                     include_directories.push(s.to_owned());
+                    // tood(simon): when reading strings, consume the nullbyte. this is error-prone. change this. add this todo at every place this has to be done
                     reader.read_u8();
                 }
             } else {
@@ -166,6 +167,13 @@ impl LineNumberProgramHeaderVersion4 {
     // The file & directory entries are 1-indexed
     pub fn get_file_by_index(&self, index: usize) -> Option<&FileEntry> {
         self.file_names.get(index.saturating_sub(1))
+    }
+
+    pub fn line_number_program_begins(&self) -> usize {
+        match self.unit_length {
+            super::InitialLengthField::Dwarf32(len) => todo!(),
+            super::InitialLengthField::Dwarf64(len) => todo!(),
+        }
     }
 }
 
@@ -232,7 +240,7 @@ pub struct LineNumberState {
     end_sequence: bool,
     prologue_end: bool,
     epilogue_begin: bool,
-    ISA: u16,
+    isa: u16,
     discriminator: Option<NonZeroU64>,
 }
 
@@ -248,7 +256,7 @@ impl Default for LineNumberState {
             end_sequence: false,
             prologue_end: false,
             epilogue_begin: false,
-            ISA: 0,
+            isa: 0,
             discriminator: None,
         }
     }

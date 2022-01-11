@@ -2,6 +2,7 @@
 use std::{panic, process::Command, sync::Once};
 
 use midas::{
+    bytereader,
     dwarf::{
         attributes::{self, AbbreviationsTableIterator},
         compilation_unit::CompilationUnitHeaderIterator,
@@ -29,6 +30,7 @@ macro_rules! subjects {
 pub fn compile_subjects() {
     BUILT_TEST_DEBUGGEES.call_once(|| {
         let status = Command::new("make")
+            .stdout(std::process::Stdio::null())
             .arg("all")
             .current_dir(tests_dir!())
             .spawn()
@@ -44,6 +46,9 @@ where
     T: FnOnce() -> () + panic::UnwindSafe,
 {
     compile_subjects();
+    unsafe {
+        bytereader::ConsumeReader::set_dwarf32();
+    }
     let result = panic::catch_unwind(|| test());
     assert!(result.is_ok())
 }
@@ -171,6 +176,7 @@ pub fn ddump_analysis_cu_headers_is_2() {
             .expect("Failed to get .debug_info");
         let cus: Vec<_> = CompilationUnitHeaderIterator::new(&dbg_info).collect();
         assert_eq!(cus.len(), 2);
+        println!("{:#?}", cus);
     })
 }
 
@@ -205,7 +211,20 @@ pub fn test_parse_line_number_program_header() {
             .get_dwarf_section(midas::dwarf::Section::DebugLine)
             .expect("failed to get .debug_line");
         let lnp_header = midas::dwarf::linenumber::LineNumberProgramHeaderVersion4::from_bytes(&debug_line);
+
         println!("{:#?}", lnp_header);
+    })
+}
+
+#[test]
+pub fn get_program_main_address_of_ddump_analysis() {
+    run_test(|| {
+        let program_path = subjects!("ddump_analysis");
+        let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
+        let elf = midas::elf::ParsedELF::parse_elf(&object).expect("failed to parse ELF of myfile1.o");
+        let debug_line = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugLine)
+            .expect("failed to get .debug_line");
     })
 }
 
@@ -226,6 +245,75 @@ pub fn hardcoded_binary_test_iterators_produce_same_result() {
     }
 }
 
+#[test]
+pub fn parse_pubname_section_ddump_analysis() {
+    run_test(|| {
+        let program_path = subjects!("ddump_analysis");
+        let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
+        let elf = midas::elf::ParsedELF::parse_elf(&object).expect("failed to parse ELF of ddump_analysis");
+        let pub_names = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugPubNames)
+            .expect("failed to get .debug_line");
+
+        let mut headers = midas::dwarf::pubnames::PubNameHeaderIterator::new(pub_names);
+
+        for header in headers {
+            let data_offset = header.header_bytes();
+            let mut entries = midas::dwarf::pubnames::PubNameEntryIterator::new(bytereader::ConsumeReader::wrap(
+                &pub_names[header.section_offset + data_offset..],
+            ));
+            for entry in entries {}
+        }
+    });
+}
+
+#[test]
+pub fn find_symbol_make_todo_in_ddump_analysis() {
+    run_test(|| {
+        let program_path = subjects!("ddump_analysis");
+        let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
+        let elf = midas::elf::ParsedELF::parse_elf(&object).expect("failed to parse ELF of ddump_analysis");
+        let pub_names = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugPubNames)
+            .expect("failed to get .debug_line");
+
+        let debug_info = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugInfo)
+            .expect("failed to get .debug_line");
+
+        let abbrev_table = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugAbbrev)
+            .expect("failed to get .debug_line");
+        let low_pc = midas::dwarf::compilation_unit::find_low_pc_of("make_todo", debug_info, pub_names, abbrev_table);
+        println!("Low PC possibly found at {:#X?}", low_pc);
+        assert_eq!(low_pc, Some(0x401180));
+    });
+}
+
+#[test]
+pub fn find_symbol_main_in_ddump_analysis() {
+    run_test(|| {
+        let program_path = subjects!("ddump_analysis");
+        let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
+        let elf = midas::elf::ParsedELF::parse_elf(&object).expect("failed to parse ELF of ddump_analysis");
+        let pub_names = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugPubNames)
+            .expect("failed to get .debug_line");
+
+        let debug_info = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugInfo)
+            .expect("failed to get .debug_line");
+
+        let abbrev_table = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugAbbrev)
+            .expect("failed to get .debug_line");
+        assert!(midas::dwarf::pubnames::find_name("motherfucker", pub_names).is_none());
+        let low_pc = midas::dwarf::compilation_unit::find_low_pc_of("main", debug_info, pub_names, abbrev_table);
+        println!("Low PC possibly found at {:#X?}", low_pc);
+        assert_eq!(low_pc, Some(0x401130));
+    });
+}
+
 // 0x11, 0x25
 #[test]
 pub fn parse_debug_info() {
@@ -242,6 +330,10 @@ pub fn parse_debug_info() {
     let entry = abbr_entries.get(&encoding.value).unwrap();
     let mut offset = cu_header.stride() + encoding.bytes_read;
     let mut string_entry_index = 0;
+
+    // let state_fn = |offs, data| {};
+    let lang: attributes::SourceLanguage =
+        unsafe { std::mem::transmute([*&DEBUG_INFO[offset], *&DEBUG_INFO[offset + 1]]) };
     /*
     for (attribute, form) in entry.attrs_list.iter() {
         match form {

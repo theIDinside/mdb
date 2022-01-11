@@ -1,4 +1,9 @@
-use crate::bytereader;
+use crate::{
+    bytereader,
+    dwarf::{attributes::parse_attribute, Encoding},
+};
+
+use super::{attributes::parse_cu_attributes, pubnames::DIEOffset, Format};
 #[allow(unused, non_camel_case_types)]
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CompilationUnitHeader {
@@ -31,7 +36,7 @@ const fn header_size_bytes(format: DWARF) -> usize {
         },
     }
 }
-
+#[allow(unused)]
 impl CompilationUnitHeader {
     const DWARF4_32_SIZE: usize = header_size_bytes(DWARF::Version4(DWARFEncoding::BITS32));
     const DWARF5_32_SIZE: usize = header_size_bytes(DWARF::Version5(DWARFEncoding::BITS32));
@@ -39,8 +44,8 @@ impl CompilationUnitHeader {
     const DWARF5_64_SIZE: usize = header_size_bytes(DWARF::Version5(DWARFEncoding::BITS64));
 
     pub fn from_bytes(bytes: &[u8]) -> CompilationUnitHeader {
-        let unit_length = super::InitialLengthField::from_bytes(bytes);
-        let mut reader = bytereader::ConsumeReader::wrap(&bytes[unit_length.offsets_bytes()..]);
+        let mut reader = bytereader::ConsumeReader::wrap(&bytes);
+        let unit_length = reader.read_initial_length();
         let version = reader.read_u16();
 
         let unit_type = if version == 5 {
@@ -86,6 +91,13 @@ impl CompilationUnitHeader {
             super::InitialLengthField::Dwarf64(section_size) => section_size as usize + 12,
         }
     }
+
+    pub fn encoding(&self) -> Encoding {
+        match self.unit_length {
+            super::InitialLengthField::Dwarf32(_) => Encoding::new(self.address_size, Format::DWARF32, self.version),
+            super::InitialLengthField::Dwarf64(_) => Encoding::new(self.address_size, Format::DWARF64, self.version),
+        }
+    }
 }
 
 pub struct CompilationUnitHeaderIterator<'a> {
@@ -111,4 +123,32 @@ impl<'a> Iterator for CompilationUnitHeaderIterator<'a> {
             None
         }
     }
+}
+
+pub fn find_low_pc_of(name: &str, debug_info: &[u8], debug_names: &[u8], abbr_table: &[u8]) -> Option<usize> {
+    super::pubnames::find_name(name, debug_names).and_then(
+        |DIEOffset {
+             header_offset,
+             relative_entry_offset,
+         }| {
+            let cu_header = CompilationUnitHeader::from_bytes(&debug_info[header_offset..]);
+            let mut die_reader = bytereader::ConsumeReader::wrap(&debug_info[header_offset + relative_entry_offset..]);
+            let abbrev_code = die_reader.read_uleb128().unwrap();
+            let attr = parse_cu_attributes(&abbr_table[cu_header.abbreviation_offset..]).unwrap();
+
+            let encoding = cu_header.encoding();
+            attr.get(&abbrev_code).and_then(|item| {
+                let mut res = None;
+                for (attribute, form) in item.attrs_list.iter() {
+                    let parsed_attr = parse_attribute(&mut die_reader, encoding, (*attribute, *form));
+                    if parsed_attr.attribute == crate::dwarf::attributes::Attribute::DW_AT_low_pc {
+                        if let crate::dwarf::attributes::AttributeValue::Address(addr) = parsed_attr.value {
+                            res = Some(addr);
+                        }
+                    }
+                }
+                res
+            })
+        },
+    )
 }

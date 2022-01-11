@@ -8,6 +8,7 @@ pub mod linenumber;
 pub mod loclist;
 pub mod macros;
 pub mod operations;
+pub mod pubnames;
 pub mod range_list;
 pub mod sections;
 pub mod stack;
@@ -16,12 +17,34 @@ pub mod tag;
 
 pub use sections::*;
 
-
-
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum InitialLengthField {
     Dwarf32(u32),
     Dwarf64(u64),
+}
+
+#[derive(Copy, Clone)]
+#[repr(u8)]
+pub enum Format {
+    DWARF32 = 4,
+    DWARF64 = 8,
+}
+
+#[derive(Clone, Copy)]
+pub struct Encoding {
+    pub pointer_width: u8,
+    pub format: Format,
+    pub version: u16,
+}
+
+impl Encoding {
+    pub fn new(pointer_width: u8, format: Format, version: u16) -> Encoding {
+        Encoding {
+            pointer_width,
+            format,
+            version,
+        }
+    }
 }
 
 impl InitialLengthField {
@@ -69,10 +92,17 @@ impl InitialLengthField {
             InitialLengthField::Dwarf64(_) => false,
         }
     }
+
+    pub fn entry_length(&self) -> usize {
+        match &self {
+            InitialLengthField::Dwarf32(len) => *len as usize,
+            InitialLengthField::Dwarf64(len) => *len as usize,
+        }
+    }
 }
 
 // "public API that we would need"
-
+#[allow(unused)]
 pub fn evaluate_context(address: usize) -> () {
     todo!("We should be able to say; build state from 0x0ffa293ff or something like that. Produce all locals, names, etc from that context.")
 }

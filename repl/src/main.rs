@@ -4,8 +4,21 @@ extern crate midas;
 use midas::{
     target::{self, Target},
     types::Address,
+    ELFSection,
 };
 mod commands;
+
+#[derive(Debug)]
+pub enum CommandResultError {
+    SymbolNotFound(String),
+    MidasLibraryError(String),
+}
+
+impl From<midas::MidasError> for CommandResultError {
+    fn from(e: midas::MidasError) -> Self {
+        CommandResultError::MidasLibraryError(format!("Error: {}", e.description()))
+    }
+}
 
 pub fn parse_hex_string(s: &str) -> Result<usize, &str> {
     let mut value = 0;
@@ -83,6 +96,19 @@ fn main() -> Result<(), String> {
                             p.display_output("Failed to set breakpoint");
                         }
                     } else {
+                        let find_address_of_symbol = |name| {
+                            midas::find_low_pc_of(
+                                name,
+                                _elf.get_dwarf_section(midas::dwarf::Section::DebugInfo)?,
+                                _elf.get_dwarf_section(midas::dwarf::Section::DebugPubNames)?,
+                                _elf.get_dwarf_section(midas::dwarf::Section::DebugAbbrev)?,
+                            )
+                            .ok_or(CommandResultError::SymbolNotFound(format!(
+                                "{} not found",
+                                &name
+                            )))
+                        };
+
                         if let Some(addr) = _elf
                             .symbol_table
                             .get_function_symbol(&params[0])
@@ -95,6 +121,21 @@ fn main() -> Result<(), String> {
                             } else {
                                 p.display_output("Failed to set breakpoint");
                             }
+                        } else {
+                            match find_address_of_symbol(&params[0]) {
+                                Ok(addr) => {
+                                    if let Ok(_) = target_.set_breakpoint(
+                                        midas::software_breakpoint::BreakpointRequest::Address(Address(addr)),
+                                    ) {
+                                        p.display_output(&format!("Breakpoint set @ {:X?}", addr))
+                                    } else {
+                                        p.display_output("Failed to set breakpoint");
+                                    }
+                                }
+                                Err(err) => {
+                                    p.display_output(&format!("Failed: {:?}", err));
+                                }
+                            }
                         }
                     }
                 }
@@ -105,7 +146,7 @@ fn main() -> Result<(), String> {
         }
     }
 }
-
+#[allow(unused)]
 fn prepare_waitstatus_display_message(_status: nixwrap::WaitStatus, target: &dyn Target) -> Option<String> {
     match _status {
         nixwrap::WaitStatus::Continued(pid) => {
