@@ -24,20 +24,48 @@ pub enum MidasError {
     SymbolTableMalformed,
     SectionNotFound(ELFSection),
     ReaderOutOfBounds,
+    AttributeParseError,
     UTF8Error {
         valid_up_to: usize,
         error_len: Option<usize>,
     },
 }
 
+pub use dwarf::compilation_unit::find_low_pc_of;
+
 #[derive(Debug)]
 pub enum ELFSection {
     SymbolTable,
+    DWARF(dwarf::Section),
 }
 
 pub const fn tostr(elfsection: ELFSection) -> &'static str {
     match elfsection {
         ELFSection::SymbolTable => "Symbol table",
+        ELFSection::DWARF(section) => match section {
+            dwarf::Section::DebugAbbrev => ".debug_abbrev",
+            dwarf::Section::DebugAddr => ".debug_addr",
+            dwarf::Section::DebugAranges => ".debug_aranges",
+            dwarf::Section::DebugCuIndex => ".debug_cu_index",
+            dwarf::Section::DebugFrame => ".debug_frame",
+            dwarf::Section::EhFrame => ".eh_frame",
+            dwarf::Section::EhFrameHeader => ".eh_frame_hdr",
+            dwarf::Section::DebugInfo => ".debug_info",
+            dwarf::Section::DebugLine => ".debug_line",
+            dwarf::Section::DebugLineStr => ".debug_line_str",
+            dwarf::Section::DebugLoc => ".debug_loc",
+            dwarf::Section::DebugLocLists => ".debug_loclists",
+            dwarf::Section::DebugMacinfo => ".debug_macinfo",
+            dwarf::Section::DebugMacro => ".debug_macro",
+            dwarf::Section::DebugPubNames => ".debug_pubnames",
+            dwarf::Section::DebugPubTypes => ".debug_pubtypes",
+            dwarf::Section::DebugRanges => ".debug_ranges",
+            dwarf::Section::DebugRngLists => ".debug_rnglists",
+            dwarf::Section::DebugStr => ".debug_str",
+            dwarf::Section::DebugStrOffsets => ".debug_str_offsets",
+            dwarf::Section::DebugTuIndex => ".debug_tu_index",
+            dwarf::Section::DebugTypes => ".debug_types",
+        },
     }
 }
 
@@ -63,6 +91,7 @@ impl MidasError {
             MidasError::SymbolTableMalformed => "[ELF] error: Symbol table data malformed",
             MidasError::SectionNotFound(_) => "[ELF] error: Section not found.",
             MidasError::ReaderOutOfBounds => "[BYTEREADER]: Position out of bounds of slice",
+            MidasError::AttributeParseError => "[DWARF]: Parsing of attributes failed",
         }
     }
 }
