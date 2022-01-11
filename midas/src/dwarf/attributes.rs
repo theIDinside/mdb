@@ -1,4 +1,7 @@
 #![allow(unused, non_camel_case_types)]
+use crate::{bytereader, MidasError, MidasSysResult};
+use std::collections::HashMap;
+
 #[derive(Debug)]
 pub struct AbbreviationsTableEntry {
     pub tag: DwarfTag,
@@ -46,9 +49,6 @@ impl<'a> Iterator for AbbreviationsTableIterator<'a> {
         }
     }
 }
-
-use std::collections::HashMap;
-
 use super::{compilation_unit::CompilationUnitHeaderIterator, tag::DwarfTag};
 type AttributeIndex = usize;
 
@@ -93,7 +93,285 @@ pub fn parse_cu_attributes(
     Ok(map)
 }
 
+// this is marked as unsafe due to this; data *must* be correct. Thus, the hurdle of wrapping this in unsafe, ensures I never forget this.
+pub unsafe fn parse_attribute_list(data: &[u8]) -> MidasSysResult<(u64, AbbreviationsTableEntry)> {
+    let mut reader = crate::bytereader::ConsumeReader::wrap(data);
+
+    let abbrev_code = reader.read_uleb128()?;
+    if abbrev_code == 0 {
+        panic!("failed to parse attribute info");
+    }
+    let mut attrs_list = Vec::with_capacity(6);
+    let tag = reader.read_uleb128()?;
+    let has_children = reader.read_u8() == 1;
+    let tag = unsafe { std::mem::transmute(tag as u16) };
+
+    'attr_list: loop {
+        let attr = reader.read_uleb128()?;
+        let form = reader.read_uleb128()?;
+        if attr == 0 && form == 0 {
+            break 'attr_list;
+        }
+        let (attr, form) = unsafe {
+            (
+                std::mem::transmute(attr as u16),
+                std::mem::transmute(form as u8),
+            )
+        };
+        attrs_list.push((attr, form));
+    }
+    Ok((
+        abbrev_code,
+        AbbreviationsTableEntry::new(tag, attrs_list, has_children),
+    ))
+}
+
+#[derive(Debug)]
+pub struct ParsedAttribute {
+    pub attribute: Attribute,
+    pub value: AttributeValue,
+}
+
+impl ParsedAttribute {
+    pub fn new(attribute: Attribute, value: AttributeValue) -> ParsedAttribute {
+        ParsedAttribute { attribute, value }
+    }
+}
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum AttributeValue {
+    Address(usize),
+    Block(Vec<u8>),
+    Data1(u8),
+    Data2(u16),
+    Data4(u32),
+    Data8(u64),
+    SData(i64),
+    UData(u64),
+    // todo(simon): we might not want to copy around data like this... could be potentially a de-throttling situation. We'll see
+    Expression(Vec<u8>),
+    Flag(bool),
+    SectionOffset(usize), // we convert _all_ offsets to usize
+    DebugAddress(usize),
+    DebugAddressIndex(usize),
+    CompilationUnitOffset(usize),
+    DebugInfoOffset(usize),
+    DebugInfoSupplementaryOffset(usize),
+    DebugLineOffset(usize),
+    LocationListsOffset(usize),
+    DebugLocListsOffset(usize),
+    DebugLocListsIndex(usize),
+    DebugMacroInfoOffset(usize),
+    DebugMacroOffset(usize),
+    DebugRangesOffset(usize),
+    DebugRangesListsOffset(usize),
+    DebugRangesListIndex(usize),
+    DebugTypesSignature(usize),
+    DebugStrOffset(usize),
+    DebugStrSupplementaryOffset(usize),
+    DebugStrOffsetsOffset(usize),
+    DebugStrOffsetsIndex(usize),
+    DebugLineStrOffset(usize),
+    String(String),
+    AttributeEncoding(u8),
+    DecimalSign(u8),
+    /// The value of a `DW_AT_endianity` attribute.
+    Endianity(u8),
+    /// The value of a `DW_AT_accessibility` attribute.
+    Accessibility(u8),
+    /// The value of a `DW_AT_visibility` attribute.
+    Visibility(u8),
+    /// The value of a `DW_AT_virtuality` attribute.
+    Virtuality(u8),
+    /// The value of a `DW_AT_language` attribute.
+    Language(u16),
+    /// The value of a `DW_AT_address_class` attribute.
+    AddressClass(usize),
+    /// The value of a `DW_AT_identifier_case` attribute.
+    IdentifierCase(u8),
+    /// The value of a `DW_AT_calling_convention` attribute.
+    CallingConvention(u8),
+    /// The value of a `DW_AT_inline` attribute.
+    Inline(u8),
+    /// The value of a `DW_AT_ordering` attribute.
+    Ordering(u8),
+    /// An index into the filename entries from the line number information
+    /// table for the compilation unit containing this value.
+    FileIndex(u64),
+    /// An implementation-defined identifier uniquely identifying a compilation
+    /// unit.
+    DwoId(u64),
+}
+
+pub fn parse_attribute(
+    reader: &mut bytereader::ConsumeReader,
+    encoding: super::Encoding,
+    (atname, atform): (Attribute, AttributeForm),
+) -> ParsedAttribute {
+    use AttributeValue as AV;
+    use ParsedAttribute as PA;
+    let mut form = atform;
+    'possible_indirection: loop {
+        match form {
+            AttributeForm::DW_FORM_addr => match encoding.pointer_width {
+                1 => return PA::new(atname, AV::Address(reader.read_u8() as _)),
+                2 => return PA::new(atname, AV::Address(reader.read_u16() as usize)),
+                4 => return PA::new(atname, AV::Address(reader.read_u32() as usize)),
+                8 => return PA::new(atname, AV::Address(reader.read_u64() as usize)),
+                _ => panic!("invalid pointer width"),
+            },
+            AttributeForm::Reserved => todo!(),
+            AttributeForm::DW_FORM_block2 => {
+                let len = reader.read_u16() as usize;
+                let data: Vec<u8> = reader.clone_slice(len).expect("failed to read BLOCK data");
+                return PA::new(atname, AV::Block(data));
+            }
+            AttributeForm::DW_FORM_block4 => {
+                let len = reader.read_u32() as usize;
+                let data: Vec<u8> = reader.clone_slice(len).expect("failed to read BLOCK data");
+                return PA::new(atname, AV::Block(data));
+            }
+            AttributeForm::DW_FORM_data2 => {
+                return PA::new(atname, AV::Data2(reader.read_u16()));
+            }
+            AttributeForm::DW_FORM_data4 => {
+                return PA::new(atname, AV::Data4(reader.read_u32()));
+            }
+            AttributeForm::DW_FORM_data8 => {
+                return PA::new(atname, AV::Data8(reader.read_u64()));
+            }
+            AttributeForm::DW_FORM_string => {
+                let string = reader
+                    .read_str()
+                    .expect("failed to read null-terminated string")
+                    .to_owned();
+                reader.read_u8();
+                return PA::new(atname, AV::String(string));
+            }
+            AttributeForm::DW_FORM_block => {
+                let uleb = reader.read_uleb128().expect("failed to read uleb128");
+                let data = reader
+                    .clone_slice(uleb as _)
+                    .expect("failed to read block data");
+                return PA::new(atname, AV::Block(data));
+            }
+            AttributeForm::DW_FORM_block1 => {
+                let len = reader.read_u8();
+                let data: Vec<u8> = reader
+                    .clone_slice(len as _)
+                    .expect("failed to read BLOCK data");
+                return PA::new(atname, AV::Block(data));
+            }
+            AttributeForm::DW_FORM_data1 => return PA::new(atname, AV::Data1(reader.read_u8())),
+            AttributeForm::DW_FORM_flag => {
+                return PA::new(atname, AV::Flag(reader.read_u8() != 0));
+            }
+            AttributeForm::DW_FORM_sdata => {
+                return PA::new(
+                    atname,
+                    AV::SData(reader.read_ileb128().expect("failed to read ileb128")),
+                );
+            }
+            AttributeForm::DW_FORM_strp => match encoding.format {
+                crate::dwarf::Format::DWARF32 => {
+                    let offset = reader.read_u32();
+                    return PA::new(atname, AV::DebugStrOffset(offset as _));
+                }
+                crate::dwarf::Format::DWARF64 => {
+                    let offset = reader.read_u64();
+                    return PA::new(atname, AV::DebugStrOffset(offset as _));
+                }
+            },
+            AttributeForm::DW_FORM_udata => {
+                return PA::new(
+                    atname,
+                    AV::UData(reader.read_uleb128().expect("failed to read ileb128")),
+                );
+            }
+            AttributeForm::DW_FORM_ref_addr => {
+                // This is an offset, but DWARF version 2 specifies that DW_FORM_ref_addr
+                // has the same size as an address on the target system.  This was changed
+                // in DWARF version 3.
+                let offset = if encoding.version == 2 {
+                    match encoding.pointer_width {
+                        1 => reader.read_u8() as usize,
+                        2 => reader.read_u16() as usize,
+                        4 => reader.read_u32() as usize,
+                        8 => reader.read_u64() as usize,
+                        _ => panic!("invalid pointer width"),
+                    }
+                } else {
+                    match encoding.format {
+                        crate::dwarf::Format::DWARF32 => reader.read_u32() as usize,
+                        crate::dwarf::Format::DWARF64 => reader.read_u64() as usize,
+                    }
+                };
+                return PA::new(atname, AV::DebugInfoOffset(offset));
+            }
+            AttributeForm::DW_FORM_ref1 => {
+                let offset = reader.read_u8();
+                return PA::new(atname, AV::CompilationUnitOffset(offset as _));
+            }
+            AttributeForm::DW_FORM_ref2 => {
+                let offset = reader.read_u16() as usize;
+                return PA::new(atname, AV::CompilationUnitOffset(offset));
+            }
+            AttributeForm::DW_FORM_ref4 => {
+                let offset = reader.read_u32() as usize;
+                return PA::new(atname, AV::CompilationUnitOffset(offset));
+            }
+            AttributeForm::DW_FORM_ref8 => {
+                let offset = reader.read_u64() as usize;
+                return PA::new(atname, AV::CompilationUnitOffset(offset));
+            }
+            AttributeForm::DW_FORM_ref_udata => {
+                let offset = reader.read_uleb128().expect("failed to read uleb128") as usize;
+                return PA::new(atname, AV::CompilationUnitOffset(offset));
+            }
+            AttributeForm::DW_FORM_indirect => todo!("DW_FORM_indirect not handled yet"),
+            AttributeForm::DW_FORM_sec_offset => match encoding.format {
+                crate::dwarf::Format::DWARF32 => return PA::new(atname, AV::SectionOffset(reader.read_u32() as usize)),
+                crate::dwarf::Format::DWARF64 => return PA::new(atname, AV::SectionOffset(reader.read_u64() as usize)),
+            },
+            AttributeForm::DW_FORM_exprloc => {
+                let instruction_bytestream_len = reader
+                    .read_uleb128()
+                    .expect("failed to get length of DWARF expression");
+                let instructions = reader
+                    .clone_slice(instruction_bytestream_len as _)
+                    .expect("failed to read DWARF expression instructions");
+                return PA::new(atname, AV::Expression(instructions));
+            }
+            AttributeForm::DW_FORM_flag_present => return PA::new(atname, AV::Flag(true)),
+            AttributeForm::DW_FORM_strx => todo!("DWARF5 version of attribute form not handled yet (strx)"),
+            AttributeForm::DW_FORM_addrx => todo!("DWARF5 version of attribute form not handled yet (addrx)"),
+            AttributeForm::DW_FORM_ref_sup4 => todo!("DWARF5 version of attribute form not handled yet (ref_sup4)"),
+            AttributeForm::DW_FORM_strp_sup => todo!("DWARF5 version of attribute form not handled yet (strp_sup)"),
+            AttributeForm::DW_FORM_data16 => todo!("DWARF5 version of attribute form not handled yet (data16)"),
+            AttributeForm::DW_FORM_line_strp => todo!("DWARF5 version of attribute form not handled yet (line_strp)"),
+            AttributeForm::DW_FORM_ref_sig8 => {
+                let type_signature = reader.read_u64();
+                return PA::new(atname, AV::DebugTypesSignature(type_signature as usize));
+            }
+            AttributeForm::DW_FORM_implicit_const => {
+                todo!("DWARF5 version of attribute form not handled yet (implicit_const)")
+            }
+            AttributeForm::DW_FORM_loclistx => todo!("DWARF5 version of attribute form not handled yet (loclistx)"),
+            AttributeForm::DW_FORM_rnglistx => todo!("DWARF5 version of attribute form not handled yet (rnglistx)"),
+            AttributeForm::DW_FORM_ref_sup8 => todo!("DWARF5 version of attribute form not handled yet (ref_sup8)"),
+            AttributeForm::DW_FORM_strx1 => todo!("DWARF5 version of attribute form not handled yet (strx1)"),
+            AttributeForm::DW_FORM_strx2 => todo!("DWARF5 version of attribute form not handled yet (strx2)"),
+            AttributeForm::DW_FORM_strx3 => todo!("DWARF5 version of attribute form not handled yet (strx3)"),
+            AttributeForm::DW_FORM_strx4 => todo!("DWARF5 version of attribute form not handled yet (strx4)"),
+            AttributeForm::DW_FORM_addrx1 => todo!("DWARF5 version of attribute form not handled yet (addrx1)"),
+            AttributeForm::DW_FORM_addrx2 => todo!("DWARF5 version of attribute form not handled yet (addrx2)"),
+            AttributeForm::DW_FORM_addrx3 => todo!("DWARF5 version of attribute form not handled yet (addrx3)"),
+            AttributeForm::DW_FORM_addrx4 => todo!("DWARF5 version of attribute form not handled yet (addrx4)"),
+        }
+        // means we did not encounter indirection
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 #[repr(u16)]
 pub enum Attribute {
     DW_AT_sibling = 0x01,
@@ -239,7 +517,7 @@ pub enum Attribute {
     DW_AT_lo_user = 0x2000,
     DW_AT_hi_user = 0x3fff,
 }
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 #[repr(u8)]
 pub enum AttributeForm {
     DW_FORM_addr = 0x01,
