@@ -61,14 +61,14 @@ pub fn parse_elf_header() {
             file_version: midas::elf::Version::Current,
             entry_point_addr: 0x00_00_00_00_00_40_10_40,
             program_header_offset: 0x00_00_00_00_00_00_00_40,
-            section_header_offset: 26848,
+            section_header_offset: 30032,
             flags: 0x00_00_00_00,
             elf_header_size: 0x00_40,
             program_header_entry_size: 0x00_38,
             program_header_entries: 0x00_0B,
             section_header_entry_size: 0x00_40,
-            section_header_entries: 0x00_21,
-            section_header_string_index: 0x00_20,
+            section_header_entries: 0x00_23,
+            section_header_string_index: 0x00_22,
         };
 
         assert_eq!(elf_header.architecture, should_be.architecture);

@@ -99,55 +99,6 @@ const DEBUG_STR: &[u8] = &[
 ];
 
 #[test]
-pub fn test_get_debug_sections() {
-    run_test(|| {
-        let program_path = subjects!("myfile1.o");
-        let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
-        let elf = midas::elf::ParsedELF::parse_elf(&object).expect("failed to parse ELF of myfile1.o");
-        let dbg_info = elf
-            .get_dwarf_section(midas::dwarf::Section::DebugInfo)
-            .expect("Failed to get .debug_info");
-        assert_eq!(dbg_info, DEBUG_INFO);
-
-        let debug_abbrev = elf
-            .get_dwarf_section(midas::dwarf::Section::DebugAbbrev)
-            .expect("Failed to get .debug_info");
-        assert_eq!(debug_abbrev, DEBUG_ABBREV);
-
-        let debug_str = elf
-            .get_dwarf_section(midas::dwarf::Section::DebugStr)
-            .expect("Failed to get .debug_info");
-        assert_eq!(debug_str, DEBUG_STR);
-
-        assert!(elf
-            .get_dwarf_section(midas::dwarf::Section::DebugLine)
-            .is_ok());
-
-        assert!(elf.get_section_data(".bss").is_some());
-        assert!(elf.get_section_data(".rela.debug_info").is_some());
-        assert!(elf.get_section_data(".rela.debug_aranges").is_some());
-
-        assert_eq!(
-            elf.get_dwarf_section(midas::dwarf::Section::DebugLine)
-                .unwrap(),
-            elf.get_section_data(".debug_line").unwrap()
-        );
-
-        assert_eq!(
-            elf.get_dwarf_section(midas::dwarf::Section::DebugInfo)
-                .unwrap(),
-            elf.get_section_data(".debug_info").unwrap()
-        );
-
-        assert_eq!(
-            elf.get_dwarf_section(midas::dwarf::Section::DebugStr)
-                .unwrap(),
-            elf.get_section_data(".debug_str").unwrap()
-        );
-    })
-}
-
-#[test]
 pub fn parse_dwarf() {
     run_test(|| {
         let program_path = subjects!("ddump_analysis");
@@ -231,17 +182,26 @@ pub fn get_program_main_address_of_ddump_analysis() {
 #[test]
 pub fn hardcoded_binary_test_iterators_produce_same_result() {
     assert_eq!(DEBUG_STR.len(), 236);
-    let abbr_assert = attributes::parse_cu_attributes(&DEBUG_ABBREV).unwrap();
+    let abbr_assert: std::collections::HashMap<u64, _> = attributes::parse_cu_attributes(&DEBUG_ABBREV).unwrap();
+
+    let mut assert_coll: Vec<_> = abbr_assert.iter().map(|i| i).collect();
+    assert_coll.sort_by(|(&a, _), (&b, _)| a.cmp(&b));
 
     let cu_iterator = CompilationUnitHeaderIterator::new(&DEBUG_INFO);
-    let mut abbr_iterator = AbbreviationsTableIterator::new(&DEBUG_ABBREV, cu_iterator);
+    let abbr_iterator: Vec<_> = AbbreviationsTableIterator::new(&DEBUG_ABBREV, cu_iterator).collect();
+    let mut abbr_test: Vec<_> = abbr_iterator[0].iter().map(|i| i).collect();
+    abbr_test.sort_by(|(&a, _), (&b, _)| a.cmp(&b));
 
-    for entries in abbr_iterator {
-        assert!(abbr_assert
-            .iter()
-            .zip(entries.iter())
-            .all(|((ca, a), (cb, b))| { a.attrs_list == b.attrs_list && ca == cb }));
-        println!("{:#?}", entries);
+    assert_eq!(abbr_test.len(), abbr_assert.len());
+
+    for (a, b) in abbr_test.iter().zip(assert_coll.iter()) {
+        if a.0 != b.0 {
+            println!("{:?} ==\n{:?}", abbr_test, assert_coll);
+        }
+        println!("{}, {}", a.0, b.0);
+        assert_eq!(a.0, b.0);
+        println!("{:?} ==\n{:?}", a.1, b.1);
+        assert_eq!(a.1, b.1);
     }
 }
 
@@ -286,7 +246,8 @@ pub fn find_symbol_make_todo_in_ddump_analysis() {
             .expect("failed to get .debug_line");
         let low_pc = midas::dwarf::compilation_unit::find_low_pc_of("make_todo", debug_info, pub_names, abbrev_table);
         println!("Low PC possibly found at {:#X?}", low_pc);
-        assert_eq!(low_pc, Some(0x401180));
+        // todo(simon): execute dwarfdump and pull the addresses dynamically, so this can work across platforms and computers.
+        assert_eq!(low_pc, Some(0x401240));
     });
 }
 
@@ -310,254 +271,7 @@ pub fn find_symbol_main_in_ddump_analysis() {
         assert!(midas::dwarf::pubnames::find_name("motherfucker", pub_names).is_none());
         let low_pc = midas::dwarf::compilation_unit::find_low_pc_of("main", debug_info, pub_names, abbrev_table);
         println!("Low PC possibly found at {:#X?}", low_pc);
-        assert_eq!(low_pc, Some(0x401130));
+        // todo(simon): execute dwarfdump and pull the addresses dynamically, so this can work across platforms and computers.
+        assert_eq!(low_pc, Some(0x4011f0));
     });
-}
-
-// 0x11, 0x25
-#[test]
-pub fn parse_debug_info() {
-    assert_eq!(DEBUG_STR.len(), 236);
-    let cu_header = midas::dwarf::compilation_unit::CompilationUnitHeader::from_bytes(DEBUG_INFO);
-    println!("Compilation Unit Header #1:\n {:?}", cu_header);
-    let contribution_begins = cu_header.stride();
-    assert_eq!(contribution_begins, 11);
-
-    let abbr_entries = attributes::parse_cu_attributes(&DEBUG_ABBREV).unwrap();
-    println!("{:#?}", abbr_entries);
-    let encoding = decode_unsigned(&DEBUG_INFO[cu_header.stride()..]).unwrap();
-    assert_eq!(encoding.value, 1);
-    let entry = abbr_entries.get(&encoding.value).unwrap();
-    let mut offset = cu_header.stride() + encoding.bytes_read;
-    let mut string_entry_index = 0;
-
-    // let state_fn = |offs, data| {};
-    let lang: attributes::SourceLanguage =
-        unsafe { std::mem::transmute([*&DEBUG_INFO[offset], *&DEBUG_INFO[offset + 1]]) };
-    /*
-    for (attribute, form) in entry.attrs_list.iter() {
-        match form {
-            attributes::AttributeForm::DW_FORM_addr => todo!(),
-            attributes::AttributeForm::Reserved => todo!(),
-            attributes::AttributeForm::DW_FORM_block2 => todo!(),
-            attributes::AttributeForm::DW_FORM_block4 => todo!(),
-            attributes::AttributeForm::DW_FORM_data2 => todo!(),
-            attributes::AttributeForm::DW_FORM_data4 => todo!(),
-            attributes::AttributeForm::DW_FORM_data8 => todo!(),
-            attributes::AttributeForm::DW_FORM_string => todo!(),
-            attributes::AttributeForm::DW_FORM_block => todo!(),
-            attributes::AttributeForm::DW_FORM_block1 => todo!(),
-            attributes::AttributeForm::DW_FORM_data1 => match attribute {
-                attributes::Attribute::DW_AT_sibling => todo!(),
-                attributes::Attribute::DW_AT_location => todo!(),
-                attributes::Attribute::DW_AT_name => todo!(),
-                attributes::Attribute::Reserved1 => todo!(),
-                attributes::Attribute::Reserved2 => todo!(),
-                attributes::Attribute::Reserved3 => todo!(),
-                attributes::Attribute::Reserved4 => todo!(),
-                attributes::Attribute::Reserved5 => todo!(),
-                attributes::Attribute::DW_AT_ordering => todo!(),
-                attributes::Attribute::Reserved6 => todo!(),
-                attributes::Attribute::DW_AT_byte_size => todo!(),
-                attributes::Attribute::Reserved7 => todo!(),
-                attributes::Attribute::DW_AT_bit_size => todo!(),
-                attributes::Attribute::Reserved8 => todo!(),
-                attributes::Attribute::Reserved9 => todo!(),
-                attributes::Attribute::DW_AT_stmt_list => todo!(),
-                attributes::Attribute::DW_AT_low_pc => todo!(),
-                attributes::Attribute::DW_AT_high_pc => todo!(),
-                attributes::Attribute::DW_AT_language => {
-                    let lang: attributes::SourceLanguage =
-                        unsafe { std::mem::transmute([*&DEBUG_INFO[offset], *&DEBUG_INFO[offset + 1]]) };
-                    println!("DW_AT_language : {:?}", lang);
-                    offset += 2;
-                }
-                attributes::Attribute::Reserved10 => todo!(),
-                attributes::Attribute::DW_AT_discr => todo!(),
-                attributes::Attribute::DW_AT_discr_value => todo!(),
-                attributes::Attribute::DW_AT_visibility => todo!(),
-                attributes::Attribute::DW_AT_import => todo!(),
-                attributes::Attribute::DW_AT_string_length => todo!(),
-                attributes::Attribute::DW_AT_common_reference => todo!(),
-                attributes::Attribute::DW_AT_comp_dir => todo!(),
-                attributes::Attribute::DW_AT_const_value => todo!(),
-                attributes::Attribute::DW_AT_containing_type => todo!(),
-                attributes::Attribute::DW_AT_default_value => todo!(),
-                attributes::Attribute::Reserved11 => todo!(),
-                attributes::Attribute::DW_AT_inline => todo!(),
-                attributes::Attribute::DW_AT_is_optional => todo!(),
-                attributes::Attribute::DW_AT_lower_bound => todo!(),
-                attributes::Attribute::Reserved12 => todo!(),
-                attributes::Attribute::Reserved13 => todo!(),
-                attributes::Attribute::DW_AT_producer => todo!(),
-                attributes::Attribute::Reserved14 => todo!(),
-                attributes::Attribute::DW_AT_prototyped => todo!(),
-                attributes::Attribute::Reserved15 => todo!(),
-                attributes::Attribute::Reserved16 => todo!(),
-                attributes::Attribute::DW_AT_return_addr => todo!(),
-                attributes::Attribute::Reserved17 => todo!(),
-                attributes::Attribute::DW_AT_start_scope => todo!(),
-                attributes::Attribute::Reserved18 => todo!(),
-                attributes::Attribute::DW_AT_bit_stride => todo!(),
-                attributes::Attribute::DW_AT_upper_bound => todo!(),
-                attributes::Attribute::Reserved19 => todo!(),
-                attributes::Attribute::DW_AT_abstract_origin => todo!(),
-                attributes::Attribute::DW_AT_accessibility => todo!(),
-                attributes::Attribute::DW_AT_address_class => todo!(),
-                attributes::Attribute::DW_AT_artificial => todo!(),
-                attributes::Attribute::DW_AT_base_types => todo!(),
-                attributes::Attribute::DW_AT_calling_convention => todo!(),
-                attributes::Attribute::DW_AT_count => todo!(),
-                attributes::Attribute::DW_AT_data_member_location => todo!(),
-                attributes::Attribute::DW_AT_decl_column => todo!(),
-                attributes::Attribute::DW_AT_decl_file => todo!(),
-                attributes::Attribute::DW_AT_decl_line => todo!(),
-                attributes::Attribute::DW_AT_declaration => todo!(),
-                attributes::Attribute::DW_AT_discr_list => todo!(),
-                attributes::Attribute::DW_AT_encoding => todo!(),
-                attributes::Attribute::DW_AT_external => todo!(),
-                attributes::Attribute::DW_AT_frame_base => todo!(),
-                attributes::Attribute::DW_AT_friend => todo!(),
-                attributes::Attribute::DW_AT_identifier_case => todo!(),
-                attributes::Attribute::Reserved20 => todo!(),
-                attributes::Attribute::DW_AT_namelist_item => todo!(),
-                attributes::Attribute::DW_AT_priority => todo!(),
-                attributes::Attribute::DW_AT_segment => todo!(),
-                attributes::Attribute::DW_AT_specification => todo!(),
-                attributes::Attribute::DW_AT_static_link => todo!(),
-                attributes::Attribute::DW_AT_type => todo!(),
-                attributes::Attribute::DW_AT_use_location => todo!(),
-                attributes::Attribute::DW_AT_variable_parameter => todo!(),
-                attributes::Attribute::DW_AT_virtuality => todo!(),
-                attributes::Attribute::DW_AT_vtable_elem_location => todo!(),
-                attributes::Attribute::DW_AT_allocated => todo!(),
-                attributes::Attribute::DW_AT_associated => todo!(),
-                attributes::Attribute::DW_AT_data_location => todo!(),
-                attributes::Attribute::DW_AT_byte_stride => todo!(),
-                attributes::Attribute::DW_AT_entry_pc => todo!(),
-                attributes::Attribute::DW_AT_use_UTF8 => todo!(),
-                attributes::Attribute::DW_AT_extension => todo!(),
-                attributes::Attribute::DW_AT_ranges => todo!(),
-                attributes::Attribute::DW_AT_trampoline => todo!(),
-                attributes::Attribute::DW_AT_call_column => todo!(),
-                attributes::Attribute::DW_AT_call_file => todo!(),
-                attributes::Attribute::DW_AT_call_line => todo!(),
-                attributes::Attribute::DW_AT_description => todo!(),
-                attributes::Attribute::DW_AT_binary_scale => todo!(),
-                attributes::Attribute::DW_AT_decimal_scale => todo!(),
-                attributes::Attribute::DW_AT_small => todo!(),
-                attributes::Attribute::DW_AT_decimal_sign => todo!(),
-                attributes::Attribute::DW_AT_digit_count => todo!(),
-                attributes::Attribute::DW_AT_picture_string => todo!(),
-                attributes::Attribute::DW_AT_mutable => todo!(),
-                attributes::Attribute::DW_AT_threads_scaled => todo!(),
-                attributes::Attribute::DW_AT_explicit => todo!(),
-                attributes::Attribute::DW_AT_object_pointer => todo!(),
-                attributes::Attribute::DW_AT_endianity => todo!(),
-                attributes::Attribute::DW_AT_elemental => todo!(),
-                attributes::Attribute::DW_AT_pure => todo!(),
-                attributes::Attribute::DW_AT_recursive => todo!(),
-                attributes::Attribute::DW_AT_signature => todo!(),
-                attributes::Attribute::DW_AT_main_subprogram => todo!(),
-                attributes::Attribute::DW_AT_data_bit_offset => todo!(),
-                attributes::Attribute::DW_AT_const_expr => todo!(),
-                attributes::Attribute::DW_AT_enum_class => todo!(),
-                attributes::Attribute::DW_AT_linkage_name => todo!(),
-                attributes::Attribute::DW_AT_string_length_bit_size => todo!(),
-                attributes::Attribute::DW_AT_string_length_byte_size => todo!(),
-                attributes::Attribute::DW_AT_rank => todo!(),
-                attributes::Attribute::DW_AT_str_offsets_base => todo!(),
-                attributes::Attribute::DW_AT_addr_base => todo!(),
-                attributes::Attribute::DW_AT_rnglists_base => todo!(),
-                attributes::Attribute::Reserved21 => todo!(),
-                attributes::Attribute::DW_AT_dwo_name => todo!(),
-                attributes::Attribute::DW_AT_reference => todo!(),
-                attributes::Attribute::DW_AT_rvalue_reference => todo!(),
-                attributes::Attribute::DW_AT_macros => todo!(),
-                attributes::Attribute::DW_AT_call_all_calls => todo!(),
-                attributes::Attribute::DW_AT_call_all_source_calls => todo!(),
-                attributes::Attribute::DW_AT_call_all_tail_calls => todo!(),
-                attributes::Attribute::DW_AT_call_return_pc => todo!(),
-                attributes::Attribute::DW_AT_call_value => todo!(),
-                attributes::Attribute::DW_AT_call_origin => todo!(),
-                attributes::Attribute::DW_AT_call_parameter => todo!(),
-                attributes::Attribute::DW_AT_call_pc => todo!(),
-                attributes::Attribute::DW_AT_call_tail_call => todo!(),
-                attributes::Attribute::DW_AT_call_target => todo!(),
-                attributes::Attribute::DW_AT_call_target_clobbered => todo!(),
-                attributes::Attribute::DW_AT_call_data_location => todo!(),
-                attributes::Attribute::DW_AT_call_data_value => todo!(),
-                attributes::Attribute::DW_AT_noreturn => todo!(),
-                attributes::Attribute::DW_AT_alignment => todo!(),
-                attributes::Attribute::DW_AT_export_symbols => todo!(),
-                attributes::Attribute::DW_AT_deleted => todo!(),
-                attributes::Attribute::DW_AT_defaulted => todo!(),
-                attributes::Attribute::DW_AT_loclists_base => todo!(),
-                attributes::Attribute::DW_AT_lo_user => todo!(),
-                attributes::Attribute::DW_AT_hi_user => todo!(),
-            },
-            attributes::AttributeForm::DW_FORM_flag => todo!(),
-            attributes::AttributeForm::DW_FORM_sdata => todo!(),
-            attributes::AttributeForm::DW_FORM_strp => {
-                let dbg_str_offset: u32 = unsafe {
-                    let mut buf: [u8; 4] = [0; 4];
-                    std::ptr::copy_nonoverlapping(DEBUG_INFO.as_ptr().offset(offset as _), buf.as_mut_ptr(), 4);
-                    std::mem::transmute(buf)
-                };
-
-                let (begin, end) = if dbg_str_offset == 0 {
-                    let r = *&DEBUG_STR[string_entry_index..]
-                        .iter()
-                        .position(|c| *c == 0)
-                        .map(|value| dbg_str_offset as usize + value)
-                        .unwrap();
-                    let result = (string_entry_index, string_entry_index + r);
-                    string_entry_index += r + 1;
-                    result
-                } else {
-                    let e = *&DEBUG_STR[dbg_str_offset as usize..]
-                        .iter()
-                        .position(|c| *c == 0)
-                        .map(|value| dbg_str_offset as usize + value)
-                        .unwrap();
-                    (dbg_str_offset as usize, e)
-                };
-
-                let s = std::str::from_utf8(&DEBUG_STR[begin..end]).unwrap();
-                println!("{:?} : {}", attribute, s);
-                offset += 4;
-            }
-            attributes::AttributeForm::DW_FORM_udata => todo!(),
-            attributes::AttributeForm::DW_FORM_ref_addr => todo!(),
-            attributes::AttributeForm::DW_FORM_ref1 => todo!(),
-            attributes::AttributeForm::DW_FORM_ref2 => todo!(),
-            attributes::AttributeForm::DW_FORM_ref4 => todo!(),
-            attributes::AttributeForm::DW_FORM_ref8 => todo!(),
-            attributes::AttributeForm::DW_FORM_ref_udata => todo!(),
-            attributes::AttributeForm::DW_FORM_indirect => todo!(),
-            attributes::AttributeForm::DW_FORM_sec_offset => todo!(),
-            attributes::AttributeForm::DW_FORM_exprloc => todo!(),
-            attributes::AttributeForm::DW_FORM_flag_present => todo!(),
-            attributes::AttributeForm::DW_FORM_strx => todo!(),
-            attributes::AttributeForm::DW_FORM_addrx => todo!(),
-            attributes::AttributeForm::DW_FORM_ref_sup4 => todo!(),
-            attributes::AttributeForm::DW_FORM_strp_sup => todo!(),
-            attributes::AttributeForm::DW_FORM_data16 => todo!(),
-            attributes::AttributeForm::DW_FORM_line_strp => todo!(),
-            attributes::AttributeForm::DW_FORM_ref_sig8 => todo!(),
-            attributes::AttributeForm::DW_FORM_implicit_const => todo!("implicit const not yet implemented"),
-            attributes::AttributeForm::DW_FORM_loclistx => todo!(),
-            attributes::AttributeForm::DW_FORM_rnglistx => todo!(),
-            attributes::AttributeForm::DW_FORM_ref_sup8 => todo!(),
-            attributes::AttributeForm::DW_FORM_strx1 => todo!(),
-            attributes::AttributeForm::DW_FORM_strx2 => todo!(),
-            attributes::AttributeForm::DW_FORM_strx3 => todo!(),
-            attributes::AttributeForm::DW_FORM_strx4 => todo!(),
-            attributes::AttributeForm::DW_FORM_addrx1 => todo!(),
-            attributes::AttributeForm::DW_FORM_addrx2 => todo!(),
-            attributes::AttributeForm::DW_FORM_addrx3 => todo!(),
-            attributes::AttributeForm::DW_FORM_addrx4 => todo!(),
-        }
-    }
-    */
 }

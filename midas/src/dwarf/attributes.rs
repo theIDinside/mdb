@@ -2,7 +2,7 @@
 use crate::{bytereader, MidasError, MidasSysResult};
 use std::collections::HashMap;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AbbreviationsTableEntry {
     pub tag: DwarfTag,
     pub attrs_list: Vec<(Attribute, AttributeForm)>,

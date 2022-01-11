@@ -15,10 +15,10 @@ helloworld_exit_status_1: helloworld_exit_status_1.cpp
 	$(CLANG_COMPILE) helloworld_exit_status_1.cpp -o $(OBJS)/helloworld_exit_status_1
 
 myfile1.o:
-	clang-12 $(DEBUG_FLAGS) -c dwarf_standard_examples/d1/myfile1.c -o $(OBJS)/myfile1.o
+	clang-12 $(DEBUG_FLAGS) -fno-eliminate-unused-debug-types -fno-standalone-debug -c dwarf_standard_examples/d1/myfile1.c -o $(OBJS)/myfile1.o
 
 myfile2.o:
-	clang-12 $(DEBUG_FLAGS) -c dwarf_standard_examples/d1/myfile2.c -o $(OBJS)/myfile2.o
+	clang-12 $(DEBUG_FLAGS) -fno-eliminate-unused-debug-types -fno-standalone-debug -c dwarf_standard_examples/d1/myfile2.c -o $(OBJS)/myfile2.o
 
 dwarfdump_analysis:
 	$(CLANG_COMPILE) ddump.cpp todo.cpp -o $(OBJS)/ddump_analysis
