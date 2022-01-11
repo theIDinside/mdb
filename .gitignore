@@ -5,3 +5,5 @@
 helloworld
 executables
 *.o
+
+ddump_analysis
