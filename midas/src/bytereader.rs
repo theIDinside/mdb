@@ -1,4 +1,25 @@
-use crate::MidasSysResult;
+use crate::{dwarf, MidasSysResult};
+
+pub fn offset_dwarf32(data: &[u8]) -> (usize, usize) {
+    let res: u32 = unsafe {
+        let mut buf = [0u8; 4];
+        std::ptr::copy_nonoverlapping(data.as_ptr(), buf.as_mut_ptr(), 4);
+        std::mem::transmute(buf)
+    };
+    (4, res as usize)
+}
+
+pub fn offset_dwarf64(data: &[u8]) -> (usize, usize) {
+    let res: u64 = unsafe {
+        let mut buf = [0u8; 8];
+        std::ptr::copy_nonoverlapping(data.as_ptr(), buf.as_mut_ptr(), 8);
+        std::mem::transmute(buf)
+    };
+    (8, res as usize)
+}
+
+type OffsetParser = fn(&[u8]) -> (usize, usize);
+static mut PARSE_DWARF_OFFSET: OffsetParser = offset_dwarf32;
 
 // Reader that "consumes" the data it points to, meaning, it's not a seekable reader.
 pub struct ConsumeReader<'data> {
@@ -8,6 +29,14 @@ pub struct ConsumeReader<'data> {
 // I'm actually pretty happy with this interface.
 /// All read operations move the pointer to the data forwards and can not be moved backwards.
 impl<'data> ConsumeReader<'data> {
+    pub unsafe fn set_dwarf32() {
+        PARSE_DWARF_OFFSET = offset_dwarf32;
+    }
+
+    pub unsafe fn set_dwarf64() {
+        PARSE_DWARF_OFFSET = offset_dwarf64;
+    }
+
     pub fn wrap(data: &'data [u8]) -> ConsumeReader<'data> {
         ConsumeReader { data }
     }
@@ -19,6 +48,10 @@ impl<'data> ConsumeReader<'data> {
             return Ok(res);
         }
         Err(super::MidasError::EOFNotExpected)
+    }
+
+    pub fn clone_slice(&mut self, len: usize) -> MidasSysResult<Vec<u8>> {
+        Ok(Vec::from(self.read_slice(len)?))
     }
 
     pub fn read_u8(&mut self) -> u8 {
@@ -95,6 +128,29 @@ impl<'data> ConsumeReader<'data> {
         let slice = self.data;
         self.data = &[];
         slice
+    }
+
+    pub fn share(&self) -> &[u8] {
+        self.data
+    }
+
+    pub fn read_initial_length(&mut self) -> dwarf::InitialLengthField {
+        debug_assert!(self.data.len() >= 12, "If you fucked this up, it's on you");
+        let dword = self.read_u32();
+        let mut length_field = dwarf::InitialLengthField::get(dword);
+        match &mut length_field {
+            dwarf::InitialLengthField::Dwarf32(_) => length_field,
+            dwarf::InitialLengthField::Dwarf64(ref mut none) => {
+                *none = self.read_u64();
+                length_field
+            }
+        }
+    }
+
+    pub fn read_offset(&mut self) -> usize {
+        let (flow, offset) = unsafe { PARSE_DWARF_OFFSET(&self.data) };
+        self.flow(flow);
+        offset
     }
 
     fn flow(&mut self, offset: usize) {
