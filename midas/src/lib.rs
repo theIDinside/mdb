@@ -29,6 +29,7 @@ pub enum MidasError {
         valid_up_to: usize,
         error_len: Option<usize>,
     },
+    ErroneousAddressSize(usize),
 }
 
 pub use dwarf::compilation_unit::find_low_pc_of;
@@ -92,6 +93,7 @@ impl MidasError {
             MidasError::SectionNotFound(_) => "[ELF] error: Section not found.",
             MidasError::ReaderOutOfBounds => "[BYTEREADER]: Position out of bounds of slice",
             MidasError::AttributeParseError => "[DWARF]: Parsing of attributes failed",
+            MidasError::ErroneousAddressSize(..) => "[DWARF]: Erroenous address size",
         }
     }
 }

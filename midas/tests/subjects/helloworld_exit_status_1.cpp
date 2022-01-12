@@ -2,7 +2,7 @@
 #include <cstdio>
 
 void print_hw_with_argument(const char* arg) {
-    std::printf("Hello world: %s\n", arg);
+    std::printf("Hello world: '%s'\n", arg);
 }
 
 void print_hw_without_argument() {

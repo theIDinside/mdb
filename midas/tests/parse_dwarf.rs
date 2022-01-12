@@ -6,6 +6,7 @@ use midas::{
     dwarf::{
         attributes::{self, AbbreviationsTableIterator},
         compilation_unit::CompilationUnitHeaderIterator,
+        linenumber::{LineNumberProgram, LineNumberProgramHeaderVersion4},
     },
     leb128::decode_unsigned,
 };
@@ -153,21 +154,6 @@ pub fn parse_ddump_analysis_abbreviations() {
 }
 
 #[test]
-pub fn test_parse_line_number_program_header() {
-    run_test(|| {
-        let program_path = subjects!("ddump_analysis");
-        let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
-        let elf = midas::elf::ParsedELF::parse_elf(&object).expect("failed to parse ELF of myfile1.o");
-        let debug_line = elf
-            .get_dwarf_section(midas::dwarf::Section::DebugLine)
-            .expect("failed to get .debug_line");
-        let lnp_header = midas::dwarf::linenumber::LineNumberProgramHeaderVersion4::from_bytes(&debug_line);
-
-        println!("{:#?}", lnp_header);
-    })
-}
-
-#[test]
 pub fn get_program_main_address_of_ddump_analysis() {
     run_test(|| {
         let program_path = subjects!("ddump_analysis");
@@ -273,5 +259,43 @@ pub fn find_symbol_main_in_ddump_analysis() {
         println!("Low PC possibly found at {:#X?}", low_pc);
         // todo(simon): execute dwarfdump and pull the addresses dynamically, so this can work across platforms and computers.
         assert_eq!(low_pc, Some(0x4011f0));
+    });
+}
+
+#[test]
+pub fn run_line_number_program_of_first_debug_line_section_ddump_cpp() {
+    run_test(|| {
+        let program_path = subjects!("ddump_analysis");
+        let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
+        let elf = midas::elf::ParsedELF::parse_elf(&object).expect("failed to parse ELF of ddump_analysis");
+        let pub_names = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugPubNames)
+            .expect("failed to get .debug_pubnames");
+
+        let debug_info = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugInfo)
+            .expect("failed to get .debug_info");
+
+        let abbrev_table = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugAbbrev)
+            .expect("failed to get .debug_abbrev");
+
+        let line_number_table = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugLine)
+            .expect("failed to get .debug_line");
+
+        let lnp_header = LineNumberProgramHeaderVersion4::from_bytes(8, line_number_table);
+        let mut line_program = LineNumberProgram::new(8, line_number_table);
+        let before = std::time::Instant::now();
+        let data = line_program.run();
+        let after = before.elapsed().as_micros();
+        println!("Running line number program took {}us", after);
+        let before = std::time::Instant::now();
+        for res in data {
+            println!("{:?}", res);
+        }
+        let after = before.elapsed().as_micros();
+
+        println!("printing the data took: {}us", after);
     });
 }

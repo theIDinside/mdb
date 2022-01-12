@@ -138,16 +138,18 @@ pub fn find_low_pc_of(name: &str, debug_info: &[u8], debug_names: &[u8], abbr_ta
 
             let encoding = cu_header.encoding();
             attr.get(&abbrev_code).and_then(|item| {
-                let mut res = None;
                 for (attribute, form) in item.attrs_list.iter() {
+                    // we *must* parse the attribute, before checking that it's the one we want; because we want to move the byte stream along, if we don't parse it we either;
+                    // A: don't move the bytestream (reader) along or
+                    // B: we don't move it along correctly, since we can't know beforehand how long the individual fields will be, unfortunately a design DWARF has chosen.
                     let parsed_attr = parse_attribute(&mut die_reader, encoding, (*attribute, *form));
                     if parsed_attr.attribute == crate::dwarf::attributes::Attribute::DW_AT_low_pc {
                         if let crate::dwarf::attributes::AttributeValue::Address(addr) = parsed_attr.value {
-                            res = Some(addr);
+                            return Some(addr);
                         }
                     }
                 }
-                res
+                None
             })
         },
     )

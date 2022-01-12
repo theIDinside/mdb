@@ -50,6 +50,13 @@ pub fn parse_hex_string(s: &str) -> Result<usize, &str> {
 
 fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().collect();
+    let separator = args.iter().position(|item| item == "--");
+    let inferiors_args: Vec<&str> = if let Some(pos) = separator {
+        args.iter().skip(pos).map(|s| s.as_str()).collect()
+    } else {
+        Vec::new()
+    };
+
     let program_path = args
         .get(1)
         .ok_or("You did not provide a binary".to_owned())?;
@@ -58,7 +65,7 @@ fn main() -> Result<(), String> {
     let _elf = midas::elf::ParsedELF::parse_elf(&object).map_err(|e| format!("{}", e.description()))?;
 
     let (mut target_, _waitstatus) =
-        midas::target::linux::LinuxTarget::launch(&mut target::make_command(program_path, vec!["exited"]).unwrap())
+        midas::target::linux::LinuxTarget::launch(&mut target::make_command(program_path, inferiors_args).unwrap())
             .unwrap();
     println!("spawned {}", *target_.process_id());
     loop {
@@ -96,6 +103,7 @@ fn main() -> Result<(), String> {
                             p.display_output("Failed to set breakpoint");
                         }
                     } else {
+                        // todo(simon): when we've added functionality of parsing .debug_line, we'll actually set the breakpoint _after_ the function prologue, now we set it *at* the prologue
                         let find_address_of_symbol = |name| {
                             midas::find_low_pc_of(
                                 name,
