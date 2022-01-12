@@ -8,3 +8,8 @@ edition = "2021"
 [dependencies]
 libc = "*"
 linuxwrapper = { path = "../linuxwrapper" }
+# Wrapper around the gimli and object crate, for parsing & understanding ELF and DWARF, which is at the core of any nix debugger
+debug_info = { path = "../debug_info" }
+
+[lib]
+doctest = false

@@ -7,16 +7,17 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug executable 'mdbg'",
+            "name": "Debug unit tests in library 'midas'",
             "cargo": {
                 "args": [
-                    "build",
-                    "--bin=mdbg",
-                    "--package=mdbg"
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=midas"
                 ],
                 "filter": {
-                    "name": "mdbg",
-                    "kind": "bin"
+                    "name": "midas",
+                    "kind": "lib"
                 }
             },
             "args": [],
@@ -25,17 +26,93 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in executable 'mdbg'",
+            "name": "Debug integration test 'parse_elf_header'",
             "cargo": {
                 "args": [
                     "test",
                     "--no-run",
-                    "--bin=mdbg",
-                    "--package=mdbg"
+                    "--test=parse_elf_header",
+                    "--package=midas"
                 ],
                 "filter": {
-                    "name": "mdbg",
-                    "kind": "bin"
+                    "name": "parse_elf_header",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'continue_and_exit'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=continue_and_exit",
+                    "--package=midas"
+                ],
+                "filter": {
+                    "name": "continue_and_exit",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'parse_dwarf'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=parse_dwarf",
+                    "--package=midas"
+                ],
+                "filter": {
+                    "name": "parse_dwarf",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'debug_info'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=debug_info"
+                ],
+                "filter": {
+                    "name": "debug_info",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'linuxwrapper'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=linuxwrapper"
+                ],
+                "filter": {
+                    "name": "linuxwrapper",
+                    "kind": "lib"
                 }
             },
             "args": [],
@@ -92,6 +169,80 @@
                 "filter": {
                     "name": "prompt",
                     "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'repl'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=repl",
+                    "--package=repl"
+                ],
+                "filter": {
+                    "name": "repl",
+                    "kind": "bin"
+                }
+            },
+            "args": ["ddump_analysis"],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'repl'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=repl",
+                    "--package=repl"
+                ],
+                "filter": {
+                    "name": "repl",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'server'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=server",
+                    "--package=server"
+                ],
+                "filter": {
+                    "name": "server",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'server'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=server",
+                    "--package=server"
+                ],
+                "filter": {
+                    "name": "server",
+                    "kind": "bin"
                 }
             },
             "args": [],

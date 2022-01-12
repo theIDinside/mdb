@@ -4,7 +4,9 @@ pub use waitstatus::{Pid, WaitStatus};
 pub mod errno;
 pub mod ptrace;
 pub mod signals;
-pub type MidasSysResult<T> = Result<T, String>;
+// Error typedef that can display dynamic error messages (for instance, messages requiring formatted text)
+pub type MidasSysResultDynamic<T> = Result<T, String>;
+
 pub enum Fork {
     Parent(pid_t),
     Child,

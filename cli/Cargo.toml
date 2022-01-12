@@ -7,3 +7,7 @@ edition = "2021"
 
 [dependencies]
 libc = "*"
+
+[lib]
+test = false
+doctest = false
