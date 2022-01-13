@@ -104,7 +104,7 @@ pub fn parse_dwarf() {
     run_test(|| {
         let program_path = subjects!("ddump_analysis");
         let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
-        let elf = midas::elf::ParsedELF::parse_elf(&object).expect("failed to parse ELF of myfile1.o");
+        let elf = midas::elf::ParsedELF::parse_elf(object.clone()).expect("failed to parse ELF of myfile1.o");
         let dbg_info = elf
             .get_dwarf_section(midas::dwarf::Section::DebugInfo)
             .expect("Failed to get .debug_info");
@@ -122,7 +122,7 @@ pub fn ddump_analysis_cu_headers_is_2() {
     run_test(|| {
         let program_path = subjects!("ddump_analysis");
         let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
-        let elf = midas::elf::ParsedELF::parse_elf(&object).expect("failed to parse ELF of myfile1.o");
+        let elf = midas::elf::ParsedELF::parse_elf(object.clone()).expect("failed to parse ELF of myfile1.o");
         let dbg_info = elf
             .get_dwarf_section(midas::dwarf::Section::DebugInfo)
             .expect("Failed to get .debug_info");
@@ -137,7 +137,7 @@ pub fn parse_ddump_analysis_abbreviations() {
     run_test(|| {
         let program_path = subjects!("ddump_analysis");
         let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
-        let elf = midas::elf::ParsedELF::parse_elf(&object).expect("failed to parse ELF of myfile1.o");
+        let elf = midas::elf::ParsedELF::parse_elf(object.clone()).expect("failed to parse ELF of myfile1.o");
         let dbg_info = elf
             .get_dwarf_section(midas::dwarf::Section::DebugInfo)
             .expect("Failed to get .debug_info");
@@ -158,7 +158,7 @@ pub fn get_program_main_address_of_ddump_analysis() {
     run_test(|| {
         let program_path = subjects!("ddump_analysis");
         let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
-        let elf = midas::elf::ParsedELF::parse_elf(&object).expect("failed to parse ELF of myfile1.o");
+        let elf = midas::elf::ParsedELF::parse_elf(object.clone()).expect("failed to parse ELF of myfile1.o");
         let debug_line = elf
             .get_dwarf_section(midas::dwarf::Section::DebugLine)
             .expect("failed to get .debug_line");
@@ -196,7 +196,7 @@ pub fn parse_pubname_section_ddump_analysis() {
     run_test(|| {
         let program_path = subjects!("ddump_analysis");
         let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
-        let elf = midas::elf::ParsedELF::parse_elf(&object).expect("failed to parse ELF of ddump_analysis");
+        let elf = midas::elf::ParsedELF::parse_elf(object.clone()).expect("failed to parse ELF of ddump_analysis");
         let pub_names = elf
             .get_dwarf_section(midas::dwarf::Section::DebugPubNames)
             .expect("failed to get .debug_line");
@@ -218,7 +218,7 @@ pub fn find_symbol_make_todo_in_ddump_analysis() {
     run_test(|| {
         let program_path = subjects!("ddump_analysis");
         let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
-        let elf = midas::elf::ParsedELF::parse_elf(&object).expect("failed to parse ELF of ddump_analysis");
+        let elf = midas::elf::ParsedELF::parse_elf(object.clone()).expect("failed to parse ELF of ddump_analysis");
         let pub_names = elf
             .get_dwarf_section(midas::dwarf::Section::DebugPubNames)
             .expect("failed to get .debug_line");
@@ -242,7 +242,7 @@ pub fn find_symbol_main_in_ddump_analysis() {
     run_test(|| {
         let program_path = subjects!("ddump_analysis");
         let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
-        let elf = midas::elf::ParsedELF::parse_elf(&object).expect("failed to parse ELF of ddump_analysis");
+        let elf = midas::elf::ParsedELF::parse_elf(object.clone()).expect("failed to parse ELF of ddump_analysis");
         let pub_names = elf
             .get_dwarf_section(midas::dwarf::Section::DebugPubNames)
             .expect("failed to get .debug_line");
@@ -267,7 +267,7 @@ pub fn run_line_number_program_of_first_debug_line_section_ddump_cpp() {
     run_test(|| {
         let program_path = subjects!("ddump_analysis");
         let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
-        let elf = midas::elf::ParsedELF::parse_elf(&object).expect("failed to parse ELF of ddump_analysis");
+        let elf = midas::elf::ParsedELF::parse_elf(object.clone()).expect("failed to parse ELF of ddump_analysis");
         let pub_names = elf
             .get_dwarf_section(midas::dwarf::Section::DebugPubNames)
             .expect("failed to get .debug_pubnames");
@@ -285,6 +285,7 @@ pub fn run_line_number_program_of_first_debug_line_section_ddump_cpp() {
             .expect("failed to get .debug_line");
 
         let lnp_header = LineNumberProgramHeaderVersion4::from_bytes(8, line_number_table);
+        println!("{:#X?}", lnp_header);
         let mut line_program = LineNumberProgram::new(8, line_number_table);
         let before = std::time::Instant::now();
         let data = line_program.run();
@@ -298,4 +299,76 @@ pub fn run_line_number_program_of_first_debug_line_section_ddump_cpp() {
 
         println!("printing the data took: {}us", after);
     });
+}
+
+#[test]
+pub fn parse_2_lnp_headers() {
+    run_test(|| {
+        let program_path = subjects!("ddump_analysis");
+        let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
+        let elf = midas::elf::ParsedELF::parse_elf(object.clone()).expect("failed to parse ELF of ddump_analysis");
+
+        // this code verifiably works, so we use this as assert case when we can
+        let dbg_info = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugInfo)
+            .expect("Failed to get .debug_info");
+        let cus: Vec<_> = CompilationUnitHeaderIterator::new(&dbg_info).collect();
+
+        let line_number_table = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugLine)
+            .expect("failed to get .debug_line");
+
+        let headers: Vec<_> = midas::dwarf::linenumber::ProgramHeaderIterator::new(
+            line_number_table,
+            midas::dwarf::linenumber::LineInstructionConfig {
+                pointer_width: 8,
+                opcode_base: 13,
+            },
+        )
+        .collect();
+
+        assert_eq!(headers.len(), cus.len());
+    })
+}
+
+#[test]
+pub fn parse_2_lnps() {
+    run_test(|| {
+        let program_path = subjects!("ddump_analysis");
+        let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
+        let elf = midas::elf::ParsedELF::parse_elf(object.clone()).expect("failed to parse ELF of ddump_analysis");
+
+        let line_number_table = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugLine)
+            .expect("failed to get .debug_line");
+
+        let header_iterator = midas::dwarf::linenumber::ProgramHeaderIterator::new(
+            line_number_table,
+            midas::dwarf::linenumber::LineInstructionConfig {
+                pointer_width: 8,
+                opcode_base: 13,
+            },
+        );
+
+        let table = midas::dwarf::linenumber::TableIterator::new(
+            line_number_table,
+            header_iterator,
+            midas::dwarf::linenumber::LineInstructionConfig {
+                pointer_width: 8,
+                opcode_base: 13,
+            },
+        );
+
+        for mut program in table {
+            let data = program.run();
+            println!(
+                "header include_dirs: {:#?}",
+                program.header.include_directories
+            );
+            for res in data {
+                res.debug_print(&program.header);
+            }
+            println!("------ line number program end ------");
+        }
+    })
 }

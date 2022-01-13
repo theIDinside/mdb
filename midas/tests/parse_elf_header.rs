@@ -50,7 +50,7 @@ pub fn parse_elf_header() {
     run_test(|| {
         let program_path = subjects!("helloworld");
         let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
-        let elf_header = midas::elf::ELFHeader::from(&object.data[..]).unwrap();
+        let elf_header = midas::elf::ELFHeader::from(&object.clone().data[..]).unwrap();
         let should_be = midas::elf::ELFHeader {
             architecture: midas::elf::Class::ELF64,
             encoding: midas::elf::DataEncoding::LSB,
@@ -94,7 +94,7 @@ pub fn print_program_headers_of_helloworld() {
     run_test(|| {
         let program_path = subjects!("helloworld");
         let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
-        let parser = elf::ParsedELF::parse_elf(&object).unwrap();
+        let parser = elf::ParsedELF::parse_elf(object.clone()).unwrap();
         parser.print_program_segments();
         println!("Interpreter: {}", parser.get_interpreter().unwrap());
         parser.print_section_headers();
@@ -106,7 +106,7 @@ pub fn print_program_headers_of_helloworld2() {
     run_test(|| {
         let program_path = subjects!("helloworld");
         let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
-        let parser = elf::ParsedELF::parse_elf(&object).expect("Failed to parse ELF");
+        let parser = elf::ParsedELF::parse_elf(object.clone()).expect("Failed to parse ELF");
         parser.print_program_segments();
         parser.print_section_headers();
     })
@@ -117,7 +117,7 @@ pub fn print_ddump_headers() {
     run_test(|| {
         let program_path = subjects!("ddump_analysis");
         let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
-        let parser = elf::ParsedELF::parse_elf(&object).unwrap();
+        let parser = elf::ParsedELF::parse_elf(object.clone()).unwrap();
         parser.print_program_segments();
         println!("Interpreter: {}", parser.get_interpreter().unwrap());
         parser.print_section_headers();
@@ -129,7 +129,7 @@ pub fn print_info_myfile1() {
     run_test(|| {
         let program_path = subjects!("myfile1.o");
         let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
-        let parser = elf::ParsedELF::parse_elf(&object).unwrap();
+        let parser = elf::ParsedELF::parse_elf(object.clone()).unwrap();
         parser.print_program_segments();
         parser.print_section_headers();
     })
@@ -140,7 +140,7 @@ pub fn print_symbol_table() {
     run_test(|| {
         let program_path = subjects!("helloworld");
         let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
-        let parser = elf::ParsedELF::parse_elf(&object).unwrap();
+        let parser = elf::ParsedELF::parse_elf(object.clone()).unwrap();
         parser.symbol_table.print_unordered();
     })
 }

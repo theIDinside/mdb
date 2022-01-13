@@ -1,11 +1,9 @@
 extern crate cli;
 extern crate linuxwrapper as nixwrap;
 extern crate midas;
-use midas::{
-    target::{self, Target},
-    types::Address,
-    ELFSection,
-};
+use midas::target::{self, Target};
+
+use crate::commands::parse_user_input;
 mod commands;
 
 #[derive(Debug)]
@@ -16,7 +14,7 @@ pub enum CommandResultError {
 
 impl From<midas::MidasError> for CommandResultError {
     fn from(e: midas::MidasError) -> Self {
-        CommandResultError::MidasLibraryError(format!("Error: {}", e.description()))
+        CommandResultError::MidasLibraryError(format!("Error: {}", e.describe()))
     }
 }
 
@@ -61,8 +59,9 @@ fn main() -> Result<(), String> {
         .get(1)
         .ok_or("You did not provide a binary".to_owned())?;
     let mut p = cli::Prompt::new("midas> ")?;
-    let object = std::rc::Rc::new(midas::elf::load_object(std::path::Path::new(program_path))?);
-    let _elf = midas::elf::ParsedELF::parse_elf(&object).map_err(|e| format!("{}", e.description()))?;
+    let object = midas::elf::load_object(std::path::Path::new(program_path))
+        .map_err(|_| "Failed to load binary to parse for information".to_string())?;
+    let _elf = midas::elf::ParsedELF::parse_elf(object.clone()).map_err(|e| format!("{}", e.describe()))?;
 
     let (mut target_, _waitstatus) =
         midas::target::linux::LinuxTarget::launch(&mut target::make_command(program_path, inferiors_args).unwrap())
@@ -70,101 +69,93 @@ fn main() -> Result<(), String> {
     println!("spawned {}", *target_.process_id());
     loop {
         let input = p.read_input();
-        let parts: Vec<String> = input.split(" ").map(|item| item.to_owned()).collect();
-        let cmd = parts.get(0).map(|i| i.clone()).unwrap_or("".to_owned());
-        match &cmd[..] {
-            "q" | "quit" => {
+        match parse_user_input(&input) {
+            commands::ReplCommands::Quit => {
                 p.display_output("quitting");
                 return Ok(());
             }
-            "r" | "run" => match target_.continue_execution() {
+            commands::ReplCommands::Run => match target_.continue_execution() {
                 Ok(_status) => {
                     if let Some(msg) = prepare_waitstatus_display_message(_status, target_.as_mut()) {
-                        p.display_output(&msg);
+                        let m = msg;
+                        p.display_formatted(m.output);
                     }
                 }
                 Err(err) => p.display_output(&err),
             },
-            "b" | "breakpoint" => {
-                let params = &parts[1..];
-                if params.len() < 1 {
-                    p.display_output(
-                        "breakpoint command requires parameters: <address | function | symbol | source location>",
-                    );
-                } else {
-                    let res = parse_hex_string(&params[0]);
-                    if let Ok(addr) = res {
-                        let addr = Address(addr);
-                        if let Ok(_) =
-                            target_.set_breakpoint(midas::software_breakpoint::BreakpointRequest::Address(addr))
-                        {
-                            p.display_output(&format!("Breakpoint set @ {:X?}", addr));
-                        } else {
-                            p.display_output("Failed to set breakpoint");
-                        }
-                    } else {
-                        // todo(simon): when we've added functionality of parsing .debug_line, we'll actually set the breakpoint _after_ the function prologue, now we set it *at* the prologue
-                        let find_address_of_symbol = |name| {
-                            midas::find_low_pc_of(
-                                name,
-                                _elf.get_dwarf_section(midas::dwarf::Section::DebugInfo)?,
-                                _elf.get_dwarf_section(midas::dwarf::Section::DebugPubNames)?,
-                                _elf.get_dwarf_section(midas::dwarf::Section::DebugAbbrev)?,
-                            )
-                            .ok_or(CommandResultError::SymbolNotFound(format!(
-                                "{} not found",
-                                &name
-                            )))
-                        };
-
-                        if let Some(addr) = _elf
-                            .symbol_table
-                            .get_function_symbol(&params[0])
-                            .and_then(|s| s.value.map(|v| Address(v.get())))
-                        {
-                            if let Ok(_) =
-                                target_.set_breakpoint(midas::software_breakpoint::BreakpointRequest::Address(addr))
-                            {
-                                p.display_output(&format!("Breakpoint set @ {:X?}", addr))
-                            } else {
-                                p.display_output("Failed to set breakpoint");
-                            }
-                        } else {
-                            match find_address_of_symbol(&params[0]) {
-                                Ok(addr) => {
-                                    if let Ok(_) = target_.set_breakpoint(
-                                        midas::software_breakpoint::BreakpointRequest::Address(Address(addr)),
-                                    ) {
-                                        p.display_output(&format!("Breakpoint set @ {:X?}", addr))
-                                    } else {
-                                        p.display_output("Failed to set breakpoint");
-                                    }
-                                }
-                                Err(err) => {
-                                    p.display_output(&format!("Failed: {:?}", err));
-                                }
-                            }
-                        }
+            commands::ReplCommands::SetBreakpoint(maybe_parsed) => match maybe_parsed {
+                Ok(bp_req) => match target_.set_breakpoint(bp_req) {
+                    Ok(addr) => {
+                        let mut format = Formatted::new();
+                        format.add_formatted(&format!("Breakpoint set @ {:X?}", addr), TextColor::Green);
+                        p.display_formatted(format.output);
                     }
-                }
-            }
-            _ => {
-                p.display_output(&format!("You wrote: {}", input));
-            }
+                    Err(err_msg) => {
+                        let mut format = Formatted::new();
+                        format.add_formatted(
+                            &format!("Failed to set breakpoint: {}", err_msg),
+                            TextColor::Red,
+                        );
+                        p.display_formatted(format.output);
+                    }
+                },
+                Err(err_msg) => p.display_output(&format!("Failed to set breakpoint: {}", err_msg)),
+            },
+            commands::ReplCommands::UnknownCommand => p.display_output("Unkonwn command"),
+        };
+    }
+}
+
+pub enum TextColor {
+    Red,
+    Green,
+}
+
+impl Into<&'static str> for TextColor {
+    fn into(self) -> &'static str {
+        match self {
+            TextColor::Red => "\x1b[31m",
+            TextColor::Green => "\x1b[32m",
         }
     }
 }
+
+pub struct Formatted {
+    pub output: Vec<u8>,
+}
+
+impl Formatted {
+    pub fn new() -> Formatted {
+        Formatted { output: vec![] }
+    }
+
+    pub fn add_unformatted<S: AsRef<str>>(&mut self, data: S) {
+        self.output.extend_from_slice(data.as_ref().as_bytes());
+    }
+
+    pub fn add_formatted<S: AsRef<str>>(&mut self, string: &S, fmt: TextColor) {
+        self.output
+            .extend_from_slice(Into::<&'static str>::into(fmt).as_bytes());
+        self.output.extend_from_slice(string.as_ref().as_bytes());
+        self.output.extend_from_slice("\x1b[00m".as_bytes());
+    }
+}
+
 #[allow(unused)]
-fn prepare_waitstatus_display_message(_status: nixwrap::WaitStatus, target: &dyn Target) -> Option<String> {
+fn prepare_waitstatus_display_message(_status: nixwrap::WaitStatus, target: &dyn Target) -> Option<Formatted> {
     match _status {
         nixwrap::WaitStatus::Continued(pid) => {
-            return Some(format!("Inferior continued"));
+            let mut format = Formatted::new();
+            format.add_formatted(&"Inferior continued", TextColor::Green);
+            return Some(format);
         }
         nixwrap::WaitStatus::ExitedNormally(pid, exit_code) => {
-            return Some(format!(
-                "Inferior exited normally with exit code {}",
-                exit_code
-            ));
+            let mut format = Formatted::new();
+            format.add_formatted(
+                &format!("Inferior exited normally with exit code {}", exit_code),
+                TextColor::Red,
+            );
+            return Some(format);
         }
         nixwrap::WaitStatus::Stopped(pid, signal) => match signal {
             nixwrap::signals::Signal::HangUp => todo!(),
@@ -173,9 +164,13 @@ fn prepare_waitstatus_display_message(_status: nixwrap::WaitStatus, target: &dyn
             nixwrap::signals::Signal::Ill => todo!(),
             nixwrap::signals::Signal::Trap => {
                 if let Some(addr) = target.stopped_at_breakpoint() {
-                    return Some(format!("Hit breakpoint @ {:X?}", addr));
+                    let mut format = Formatted::new();
+                    format.add_formatted(&format!("Hit breakpoint @ {:X?}", addr), TextColor::Green);
+                    return Some(format);
                 } else {
-                    return Some(format!("Caught trap signal"));
+                    let mut format = Formatted::new();
+                    format.add_unformatted("Caught trap signal");
+                    return Some(format);
                 }
             }
             nixwrap::signals::Signal::Abort => todo!(),
@@ -206,10 +201,17 @@ fn prepare_waitstatus_display_message(_status: nixwrap::WaitStatus, target: &dyn
             nixwrap::signals::Signal::BadSystemCallArgument => todo!(),
         },
         nixwrap::WaitStatus::Killed(pid, signal) => {
-            return Some(format!("Inferior killed with signal {:?}", signal));
+            let mut format = Formatted::new();
+            format.add_formatted(
+                &format!("Inferior killed with signal {:?}", signal),
+                TextColor::Red,
+            );
+            return Some(format);
         }
         nixwrap::WaitStatus::CoreDumped(pid) => {
-            return Some(format!("Core dumped"));
+            let mut format = Formatted::new();
+            format.add_formatted(&"Core dumped", TextColor::Red);
+            return Some(format);
         }
     }
 }

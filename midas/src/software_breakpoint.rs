@@ -9,8 +9,15 @@ impl HWBreakpoint {}
 #[allow(dead_code)]
 pub enum BreakpointRequest {
     Address(Address),
-    Line { number: usize, file: String },
-    Function { name: String, file: Option<String> },
+    SourceCodeLocation {
+        line: usize,
+        column: usize,
+        file: String,
+    },
+    Function {
+        name: String,
+        file: Option<String>,
+    },
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]

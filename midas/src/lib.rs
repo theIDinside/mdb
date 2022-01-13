@@ -30,6 +30,9 @@ pub enum MidasError {
         error_len: Option<usize>,
     },
     ErroneousAddressSize(usize),
+    // to keep MidasError non-allocating, we return the OS error codes instead of the message provided by rust's stdlib
+    FileOpenError(Option<i32>),
+    FileReadError(Option<i32>),
 }
 
 pub use dwarf::compilation_unit::find_low_pc_of;
@@ -80,7 +83,7 @@ impl From<Utf8Error> for MidasError {
 }
 
 impl MidasError {
-    pub fn description(&self) -> &'static str {
+    pub fn describe(&self) -> &'static str {
         match self {
             MidasError::BadUnsignedLEB128Encoding(_) => "[LEB128] error: Decoding unsigned LEB128 failed",
             MidasError::BadSignedLEB128Encoding(_) => "[LEB128] error: Decoding signed LEB128 failed",
@@ -94,13 +97,15 @@ impl MidasError {
             MidasError::ReaderOutOfBounds => "[BYTEREADER]: Position out of bounds of slice",
             MidasError::AttributeParseError => "[DWARF]: Parsing of attributes failed",
             MidasError::ErroneousAddressSize(..) => "[DWARF]: Erroenous address size",
+            MidasError::FileOpenError(..) => "[FILE]: Failed to open file",
+            MidasError::FileReadError(..) => "[FILE]: Failed to read file",
         }
     }
 }
 
 impl std::fmt::Display for MidasError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.description())
+        write!(f, "{}", self.describe())
     }
 }
 

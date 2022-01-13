@@ -261,7 +261,17 @@ impl Prompt {
     }
 
     pub fn display_output(&mut self, output: &str) {
-        println!("\r{}\r", output);
+        write_string(output);
+        println!("\n\r");
+    }
+
+    pub fn display_formatted(&mut self, output: Vec<u8>) {
+        unsafe {
+            if libc::write(libc::STDOUT_FILENO, output.as_ptr() as _, output.len()) == -1 {
+                panic!("failed to write to stdout");
+            }
+        }
+        println!("\n\r");
     }
 
     pub fn pop_history(&mut self) -> Option<String> {

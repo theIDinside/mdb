@@ -2,6 +2,49 @@
 use crate::{bytereader, dwarf::linenumber::encodings::LineNumberOp, MidasError};
 use std::num::{NonZeroU128, NonZeroU64};
 
+macro_rules! LNEncoding {
+    ($struct_name:ident($struct_type:ty) { $($name:ident = $val:expr),+ $(,)? }) => {
+        #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy)]
+        pub struct $struct_name(pub $struct_type);
+
+        $(
+            #[allow(non_upper_case_globals)]
+            pub const $name: $struct_name = $struct_name($val);
+        )+
+    };
+}
+
+pub mod encodings {
+    LNEncoding!(
+        LineNumberOp(u8) {
+            Copy = 0x01,
+            AdvancePC = 0x02,
+            AdvanceLine = 0x03,
+            SetFile = 0x04,
+            SetColumn = 0x05,
+            NegateIsStatement = 0x06,
+            SetBasicBlock = 0x07,
+            ConstAddPC = 0x08,
+            FixedAdvancePC = 0x09,
+            SetPrologueEnd = 0x0a,
+            SetEpilogueBegin = 0x0b,
+            SetISA = 0x0c,
+        }
+    );
+
+    LNEncoding!(
+        ExtendedLineNumberOp(u8) {
+            EndSequence = 0x1,
+            SetAddress = 0x2,
+            DefineFile = 0x3,
+            Reserved = 0x34,
+            SetDiscriminator = 0x4,
+            LO_User = 0x80,
+            HI_User = 0xff
+        }
+    );
+}
+
 pub struct LineNumberProgramHeaderVersion5 {
     unit_length: super::InitialLengthField,
     version: u16,
@@ -27,10 +70,10 @@ pub struct LineNumberProgramHeaderVersion5 {
 
 #[derive(Debug)]
 pub struct FileEntry {
-    path: String,
-    dir_index: usize,
-    last_modified: usize,
-    file_length: usize,
+    pub path: String,
+    pub dir_index: usize,
+    pub last_modified: usize,
+    pub file_length: usize,
 }
 
 impl FileEntry {
@@ -89,11 +132,38 @@ impl<'a> Iterator for FileEntryIterator<'a> {
     }
 }
 
+pub struct ProgramHeaderIterator<'a> {
+    pub section_data: &'a [u8],
+    pub config: LineInstructionConfig,
+}
+
+impl<'a> ProgramHeaderIterator<'a> {
+    pub fn new(section_data: &'a [u8], config: LineInstructionConfig) -> ProgramHeaderIterator {
+        ProgramHeaderIterator {
+            section_data,
+            config,
+        }
+    }
+}
+
+impl<'a> Iterator for ProgramHeaderIterator<'a> {
+    type Item = LineNumberProgramHeaderVersion4;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.section_data.len() > 0 {
+            let header = LineNumberProgramHeaderVersion4::from_bytes(self.config.pointer_width, &self.section_data);
+            self.section_data = &self.section_data[header.unit_length.entry_length() + 4..];
+            Some(header)
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct LineNumberProgramHeaderVersion4 {
     pub unit_length: super::InitialLengthField,
     pub version: u16,
-    pub header_length: usize, // 4 or 8 bytes long
+    pub header_prologue_length: usize, // 4 or 8 bytes long
     pub instruction_length_minimum: u8,
     pub max_operations_per_instruction: u8,
     pub default_is_statement: bool,
@@ -160,7 +230,7 @@ impl LineNumberProgramHeaderVersion4 {
         LineNumberProgramHeaderVersion4 {
             unit_length,
             version,
-            header_length,
+            header_prologue_length: header_length,
             instruction_length_minimum,
             max_operations_per_instruction,
             default_is_statement,
@@ -199,22 +269,6 @@ pub enum LineNumberHeaderEntryFormat {
     DW_LNCT_MD5 = 0x5,
     DW_LNCT_lo_user = 0x2000,
     DW_LNCT_hi_user = 0x3fff,
-}
-
-pub struct LineNumberInterpreter<'a> {
-    instruction_stream: &'a [u8],
-    state: LineNumberState,
-}
-
-impl<'a> LineNumberInterpreter<'a> {
-    pub fn new(instruction_stream: &'a [u8]) -> LineNumberInterpreter {
-        let r = LineNumberInterpreter {
-            instruction_stream,
-            state: LineNumberState::default(),
-        };
-        // todo(simon): set is_statement default, by parsing the line number program header
-        r
-    }
 }
 
 pub struct LineNumberState {
@@ -265,66 +319,17 @@ impl LineNumberState {
 }
 
 pub struct ComputationResult {
-    address: usize,
-    op_index: u16,
-    file: u32,
-    line: u32,
-    column: u32,
-    description: u8,
-    isa: u16,
-    discriminator: Option<NonZeroU64>,
+    pub address: usize,
+    pub op_index: u16,
+    pub file: u32,
+    pub line: u32,
+    pub column: u32,
+    pub description: u8,
+    pub isa: u16,
+    pub discriminator: Option<NonZeroU64>,
 }
 
-pub fn description(
-    is_statement: bool,
-    basic_block: bool,
-    end_sequence: bool,
-    prologue_end: bool,
-    epilogue_begin: bool,
-) -> &'static str {
-    match (
-        is_statement,
-        basic_block,
-        end_sequence,
-        prologue_end,
-        epilogue_begin,
-    ) {
-        (true, true, true, true, true) => "NS BB ET PE EB, ",
-        (true, true, true, true, false) => "NS BB ET PE, ",
-        (true, true, true, false, true) => "NS BB ET EB, ",
-        (true, true, true, false, false) => "NS BB ET, ",
-        (true, true, false, true, true) => "NS BB PE EB, ",
-        (true, true, false, true, false) => "NS BB PE, ",
-        (true, true, false, false, true) => "NS BB EB, ",
-        (true, true, false, false, false) => "NS BB, ",
-        (true, false, true, true, true) => "NS ET PE EB, ",
-        (true, false, true, true, false) => "NS ET PE, ",
-        (true, false, true, false, true) => "NS ET EB, ",
-        (true, false, true, false, false) => "NS ET, ",
-        (true, false, false, true, true) => "NS PE EB, ",
-        (true, false, false, true, false) => "NS PE, ",
-        (true, false, false, false, true) => "NS EB, ",
-        (true, false, false, false, false) => "NS, ",
-        (false, true, true, true, true) => "BB ET PE EB, ",
-        (false, true, true, true, false) => "BB ET PE, ",
-        (false, true, true, false, true) => "BB ET EB, ",
-        (false, true, true, false, false) => "BB ET, ",
-        (false, true, false, true, true) => "BB PE EB, ",
-        (false, true, false, true, false) => "BB PE, ",
-        (false, true, false, false, true) => "BB EB, ",
-        (false, true, false, false, false) => "BB, ",
-        (false, false, true, true, true) => "ET PE EB, ",
-        (false, false, true, true, false) => "ET PE, ",
-        (false, false, true, false, true) => "ET EB, ",
-        (false, false, true, false, false) => "ET, ",
-        (false, false, false, true, true) => "PE EB, ",
-        (false, false, false, true, false) => "PE, ",
-        (false, false, false, false, true) => "EB, ",
-        (false, false, false, false, false) => "",
-    }
-}
-
-pub fn description2(value: u8) -> &'static str {
+pub fn description(value: u8) -> &'static str {
     match value & 0x1f {
         0b11111 => "NS BB ET PE EB, ",
         0b11110 => "NS BB ET PE, ",
@@ -363,26 +368,7 @@ pub fn description2(value: u8) -> &'static str {
 
 impl std::fmt::Debug for ComputationResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        /*
-        let (is_statement, basic_block, end_sequence, prologue_end, epilogue_begin) = (
-            self.description & 0b10000 != 0,
-            self.description & 0b1000 != 0,
-            self.description & &0b100 != 0,
-            self.description & 0b10 != 0,
-            self.description & 0b1 != 0,
-        );
-
-        let descrip: &'static str = description(
-            is_statement,
-            basic_block,
-            end_sequence,
-            prologue_end,
-            epilogue_begin,
-        );
-        */
-
-        let descrip = description2(self.description);
-
+        let descrip = description(self.description);
         write!(
             f,
             "0x{:016X} [{:>3}, {:>2}], {}File id: {uri}",
@@ -446,6 +432,33 @@ impl ComputationResult {
             discriminator,
         }
     }
+
+    pub fn debug_print(&self, header: &LineNumberProgramHeaderVersion4) {
+        let descrip = description(self.description);
+        let f = header
+            .file_names
+            .get(self.file.saturating_sub(1) as usize)
+            .and_then(|fe| {
+                println!("dir index: {}", fe.dir_index);
+                if fe.dir_index == 0 {
+                    Some(format!("./{}", fe.path))
+                } else {
+                    header
+                        .include_directories
+                        .get(fe.dir_index.saturating_sub(1))
+                        .map(|path| format!("{}/{}", path, fe.path))
+                }
+            });
+
+        println!(
+            "0x{:016X} [{:>3}, {:>2}], {}File id: {:?}",
+            self.address,
+            self.line,
+            self.column,
+            descrip,
+            f.unwrap_or("".to_string())
+        )
+    }
 }
 
 pub fn encode_description(
@@ -463,19 +476,21 @@ pub fn encode_description(
 }
 
 pub struct LineNumberProgram<'a> {
-    header: LineNumberProgramHeaderVersion4,
-    state: LineNumberState,
+    pub header: LineNumberProgramHeaderVersion4,
+    pub state: LineNumberState,
     sec_data: &'a [u8],
 }
 
 impl<'a> LineNumberProgram<'a> {
-    pub fn new(address_size: u8, debug_line_section: &'a [u8]) -> LineNumberProgram<'a> {
-        let header = LineNumberProgramHeaderVersion4::from_bytes(address_size, debug_line_section);
+    pub fn new_with_header(
+        debug_line_section: &'a [u8],
+        header: LineNumberProgramHeaderVersion4,
+    ) -> LineNumberProgram<'a> {
         let total_length = header.unit_length.entry_length() + 4;
         let mut state = LineNumberState::default();
         state.is_statement = header.default_is_statement;
         let pre_header_len_size = 2 + 4 + 4;
-        let instructions_offset_from_debug_line_section = pre_header_len_size + header.header_length;
+        let instructions_offset_from_debug_line_section = pre_header_len_size + header.header_prologue_length;
 
         let sec_data = &debug_line_section[instructions_offset_from_debug_line_section..total_length];
         LineNumberProgram {
@@ -483,6 +498,11 @@ impl<'a> LineNumberProgram<'a> {
             state,
             sec_data,
         }
+    }
+
+    pub fn new(address_size: u8, debug_line_section: &'a [u8]) -> LineNumberProgram<'a> {
+        let header = LineNumberProgramHeaderVersion4::from_bytes(address_size, debug_line_section);
+        LineNumberProgram::new_with_header(debug_line_section, header)
     }
 
     pub fn run(&mut self) -> Vec<ComputationResult> {
@@ -531,9 +551,9 @@ impl<'a> LineNumberProgram<'a> {
                 }
                 LineInstruction::AdvanceLine(lines) => {
                     self.state.line = if lines < 0 {
-                        self.state.line.wrapping_sub(lines.abs() as usize)
+                        self.state.line.saturating_sub(lines.abs() as usize)
                     } else {
-                        self.state.line.wrapping_add(lines as usize)
+                        self.state.line.saturating_sub(lines as usize)
                     }
                 }
                 LineInstruction::SetFile(file_id) => self.state.file = file_id,
@@ -753,45 +773,38 @@ impl LineInstruction {
     }
 }
 
-macro_rules! LNEncoding {
-    ($struct_name:ident($struct_type:ty) { $($name:ident = $val:expr),+ $(,)? }) => {
-        #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy)]
-        pub struct $struct_name(pub $struct_type);
-
-        $(
-            #[allow(non_upper_case_globals)]
-            pub const $name: $struct_name = $struct_name($val);
-        )+
-    };
+pub struct TableIterator<'a> {
+    data: &'a [u8],
+    header_iterator: ProgramHeaderIterator<'a>,
+    config: LineInstructionConfig,
 }
 
-pub mod encodings {
-    LNEncoding!(
-        LineNumberOp(u8) {
-            Copy = 0x01,
-            AdvancePC = 0x02,
-            AdvanceLine = 0x03,
-            SetFile = 0x04,
-            SetColumn = 0x05,
-            NegateIsStatement = 0x06,
-            SetBasicBlock = 0x07,
-            ConstAddPC = 0x08,
-            FixedAdvancePC = 0x09,
-            SetPrologueEnd = 0x0a,
-            SetEpilogueBegin = 0x0b,
-            SetISA = 0x0c,
+impl<'a> TableIterator<'a> {
+    pub fn new(
+        data: &'a [u8],
+        header_iterator: ProgramHeaderIterator<'a>,
+        config: LineInstructionConfig,
+    ) -> TableIterator<'a> {
+        TableIterator {
+            data,
+            header_iterator,
+            config,
         }
-    );
+    }
+}
 
-    LNEncoding!(
-        ExtendedLineNumberOp(u8) {
-            EndSequence = 0x1,
-            SetAddress = 0x2,
-            DefineFile = 0x3,
-            Reserved = 0x34,
-            SetDiscriminator = 0x4,
-            LO_User = 0x80,
-            HI_User = 0xff
+impl<'a> Iterator for TableIterator<'a> {
+    type Item = LineNumberProgram<'a>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let header_opt = self.header_iterator.next();
+        if let Some(header) = header_opt {
+            let pre_header_len_size = 2 + 4 + 4;
+            let next_section_start = header.unit_length.entry_length() + header.unit_length.offsets_bytes();
+            let lnp = LineNumberProgram::new_with_header(self.data, header);
+            self.data = &self.data[next_section_start..];
+            Some(lnp)
+        } else {
+            None
         }
-    );
+    }
 }

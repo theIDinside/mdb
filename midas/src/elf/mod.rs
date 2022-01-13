@@ -6,7 +6,7 @@ mod section;
 pub mod symbol;
 use super::dwarf;
 
-use std::{collections::HashMap, io::Read};
+use std::{collections::HashMap, error::Error, io::Read};
 
 #[cfg(target_arch = "x86")]
 pub use elf32::*;
@@ -59,18 +59,18 @@ impl ParsedSections {
     }
 }
 
-pub struct ParsedELF<'object> {
+pub struct ParsedELF {
     // we take a reference counted pointer to the loaded object, but all operations, circumvent the access of it. We do it once and keep
     // the Rc around, to make sure it never dies.
     object: std::rc::Rc<Object>,
     header: elf64::ELFHeader,
     dwarf_sections: ParsedSections,
     sections: HashMap<String, (section::SectionHeader, section::Section)>,
-    pub symbol_table: SymbolTable<'object>,
+    pub symbol_table: SymbolTable,
 }
 
-impl<'object> ParsedELF<'object> {
-    pub fn parse_elf(obj: &'object std::rc::Rc<Object>) -> MidasSysResult<ParsedELF<'object>> {
+impl ParsedELF {
+    pub fn parse_elf(obj: std::rc::Rc<Object>) -> MidasSysResult<ParsedELF> {
         let header = elf64::ELFHeader::from(&obj.data[..])?;
         let obj_ref = std::rc::Rc::as_ref(&obj);
         let mut sections = HashMap::new();
@@ -120,7 +120,7 @@ impl<'object> ParsedELF<'object> {
         Ok(pe)
     }
 
-    pub fn get_section_data(&'object self, name: &str) -> Option<&'object [u8]> {
+    pub fn get_section_data(&self, name: &str) -> Option<&[u8]> {
         self.sections.get(name).map(|(header, sec)| sec.data())
     }
 
@@ -129,15 +129,14 @@ impl<'object> ParsedELF<'object> {
         self.dwarf_sections.get(dwarf_section)
     }
 
-    pub fn get_section_header_name(
-        &'object self,
-        section_header: &section::SectionHeader,
-    ) -> MidasSysResultDynamic<&'object str> {
+    pub fn get_section_header_name(&self, section_header: &section::SectionHeader) -> MidasSysResultDynamic<String> {
         let idx = section_header.string_table_index as usize;
         let bytes = self.string_table_data()?;
         let str_term = bytes.iter().skip(idx).position(|&b| b == 0);
         if let Some(pos) = str_term {
-            std::str::from_utf8(&bytes[idx..idx + pos]).map_err(|err| err.to_string())
+            std::str::from_utf8(&bytes[idx..idx + pos])
+                .map_err(|err| err.to_string())
+                .map(|v| v.to_owned())
         } else {
             Err("Could not find string null terminator in string table".to_string())
         }
@@ -174,7 +173,7 @@ impl<'object> ParsedELF<'object> {
         }
     }
 
-    pub fn get_raw_segment_headers_of(&'object self, segment_type: programheader::Type) -> Vec<&'object [u8]> {
+    pub fn get_raw_segment_headers_of(&self, segment_type: programheader::Type) -> Vec<&[u8]> {
         let mut v = vec![];
         for x in 0..self.header.program_header_entries {
             if let Some(ph) = self.get_program_segment_header(x as _) {
@@ -242,7 +241,7 @@ impl<'object> ParsedELF<'object> {
         Ok(section_headers)
     }
 
-    pub fn get_interpreter(&'object self) -> MidasSysResultDynamic<&'object str> {
+    pub fn get_interpreter(&self) -> MidasSysResultDynamic<String> {
         let interpreter_header = self
             .get_program_segment_headers_of(programheader::Type::ProgramInterpreter)
             .ok_or("Could not find interpreter headers".to_string())?;
@@ -250,6 +249,7 @@ impl<'object> ParsedELF<'object> {
 
         std::str::from_utf8(&self.object.data[ph.file_offset as usize..(ph.file_offset + ph.file_size) as usize])
             .map_err(|err| err.to_string())
+            .map(|v| v.to_owned())
     }
 
     pub fn string_table_data(&self) -> MidasSysResultDynamic<&[u8]> {
@@ -270,7 +270,7 @@ impl<'object> ParsedELF<'object> {
             )))
     }
 
-    pub fn parse_symbol_table(&'object self) -> MidasSysResult<SymbolTable<'object>> {
+    pub fn parse_symbol_table(&self) -> MidasSysResult<SymbolTable> {
         let (header, section) = self
             .sections
             .get(".symtab")
@@ -293,15 +293,20 @@ impl Object {
     }
 }
 
-pub fn load_object(path: &std::path::Path) -> MidasSysResultDynamic<std::rc::Rc<Object>> {
+pub fn load_object(path: &std::path::Path) -> MidasSysResult<std::rc::Rc<Object>> {
     let mut buf = vec![];
     let mut f = std::fs::OpenOptions::new()
         .read(true)
         .create_new(false)
         .open(path)
-        .map_err(midas_err)?;
-    let file_size = f.metadata().map_err(midas_err)?.len();
+        .map_err(|e| MidasError::FileOpenError(e.raw_os_error()))?;
+    let file_size = f
+        .metadata()
+        .map_err(|err| MidasError::FileOpenError(err.raw_os_error()))?
+        .len();
     buf.reserve(file_size as _);
-    let bytes_read = f.read_to_end(&mut buf).map_err(midas_err)?;
+    let bytes_read = f
+        .read_to_end(&mut buf)
+        .map_err(|err| MidasError::FileReadError(err.raw_os_error()))?;
     Ok(std::rc::Rc::new(Object::new(buf, bytes_read)))
 }

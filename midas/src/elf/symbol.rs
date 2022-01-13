@@ -2,21 +2,21 @@ use super::section;
 use crate::bytereader::{ConsumeReader, NonConsumingReader};
 use std::collections::HashMap;
 
-pub struct SymbolTable<'object> {
+pub struct SymbolTable {
     unnamed_symbols: Vec<Symbol>,
-    no_type: HashMap<&'object str, Symbol>,
-    objects: HashMap<&'object str, Symbol>,
-    functions: HashMap<&'object str, Symbol>,
-    sections: HashMap<&'object str, Symbol>,
-    files: HashMap<&'object str, Symbol>,
+    no_type: HashMap<String, Symbol>,
+    objects: HashMap<String, Symbol>,
+    functions: HashMap<String, Symbol>,
+    sections: HashMap<String, Symbol>,
+    files: HashMap<String, Symbol>,
 }
 
-impl<'object> SymbolTable<'object> {
+impl SymbolTable {
     pub fn parse_symbol_table(
         section_header: &section::SectionHeader,
-        mut symbol_table_reader: ConsumeReader<'object>,
-        string_table_data_reader: &NonConsumingReader<'object>,
-    ) -> crate::MidasSysResult<SymbolTable<'object>> {
+        mut symbol_table_reader: ConsumeReader,
+        string_table_data_reader: &NonConsumingReader,
+    ) -> crate::MidasSysResult<SymbolTable> {
         let entries = section_header.entries_count().unwrap();
         let entry_sz = section_header.entry_size as usize;
 
@@ -52,7 +52,7 @@ impl<'object> SymbolTable<'object> {
                     match type_ {
                         Type::None => {
                             st.no_type.insert(
-                                name,
+                                name.to_owned(),
                                 Symbol::new(
                                     entry_index,
                                     address,
@@ -64,7 +64,7 @@ impl<'object> SymbolTable<'object> {
                         }
                         Type::Object => {
                             st.objects.insert(
-                                name,
+                                name.to_owned(),
                                 Symbol::new(
                                     entry_index,
                                     address,
@@ -76,7 +76,7 @@ impl<'object> SymbolTable<'object> {
                         }
                         Type::Function => {
                             st.functions.insert(
-                                name,
+                                name.to_owned(),
                                 Symbol::new(
                                     entry_index,
                                     address,
@@ -88,7 +88,7 @@ impl<'object> SymbolTable<'object> {
                         }
                         Type::Section => {
                             st.sections.insert(
-                                name,
+                                name.to_owned(),
                                 Symbol::new(
                                     entry_index,
                                     address,
@@ -100,7 +100,7 @@ impl<'object> SymbolTable<'object> {
                         }
                         Type::File => {
                             st.files.insert(
-                                name,
+                                name.to_owned(),
                                 Symbol::new(
                                     entry_index,
                                     address,
