@@ -262,7 +262,7 @@ impl Prompt {
 
     pub fn display_output(&mut self, output: &str) {
         write_string(output);
-        println!("\n\r");
+        println!("");
     }
 
     pub fn display_formatted(&mut self, output: Vec<u8>) {
@@ -271,7 +271,7 @@ impl Prompt {
                 panic!("failed to write to stdout");
             }
         }
-        println!("\n\r");
+        write_string("\n");
     }
 
     pub fn pop_history(&mut self) -> Option<String> {

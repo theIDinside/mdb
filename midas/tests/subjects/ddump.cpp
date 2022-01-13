@@ -3,5 +3,5 @@
 
 int main(int argc, const char** argv) {
     auto todo = make_todo(1, 100);
-    std::fputs("hello world!", stdout);
+    std::fputs("hello world!\n", stdout);
 }

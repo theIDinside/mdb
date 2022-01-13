@@ -18,7 +18,7 @@ pub struct TerminalConfiguration {
 
 impl TerminalConfiguration {
     pub fn init() -> Result<TerminalConfiguration, &'static str> {
-        use libc::{BRKINT, CS8, ECHO, ICANON, ICRNL, IEXTEN, INPCK, ISIG, ISTRIP, IXON, OPOST};
+        use libc::{BRKINT, CS8, ECHO, ICANON, ICRNL, IEXTEN, INPCK, ISIG, ISTRIP, IXON};
         // non-portable code
         let stdin_fd = 0;
         let mut original_attributes = zeroed_termios();
@@ -28,7 +28,8 @@ impl TerminalConfiguration {
             }
             let mut runtime_settings = original_attributes.clone();
             runtime_settings.c_iflag &= !(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
-            runtime_settings.c_oflag &= !(OPOST);
+            // runtime_settings.c_oflag &= !(OPOST);
+            runtime_settings.c_oflag |= libc::ONLCR;
             runtime_settings.c_cflag |= CS8;
             runtime_settings.c_lflag &= !(ECHO | ICANON | IEXTEN | ISIG);
             // returns each byte, or a 0-timeout.

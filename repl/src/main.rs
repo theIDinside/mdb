@@ -1,6 +1,7 @@
 extern crate cli;
 extern crate linuxwrapper as nixwrap;
 extern crate midas;
+
 use midas::target::{self, Target};
 
 use crate::commands::parse_user_input;
@@ -58,7 +59,7 @@ fn main() -> Result<(), String> {
     let program_path = args
         .get(1)
         .ok_or("You did not provide a binary".to_owned())?;
-    let mut p = cli::Prompt::new("midas> ")?;
+    let mut prompt = cli::Prompt::new("midas> ")?;
     let object = midas::elf::load_object(std::path::Path::new(program_path))
         .map_err(|_| "Failed to load binary to parse for information".to_string())?;
     let _elf = midas::elf::ParsedELF::parse_elf(object.clone()).map_err(|e| format!("{}", e.describe()))?;
@@ -66,29 +67,36 @@ fn main() -> Result<(), String> {
     let (mut target_, _waitstatus) =
         midas::target::linux::LinuxTarget::launch(&mut target::make_command(program_path, inferiors_args).unwrap())
             .unwrap();
-    println!("spawned {}", *target_.process_id());
+    {
+        let mut f = Formatted::with_capacity(35);
+        f.add_with_format(
+            &format!("spawned {}", *target_.process_id()),
+            Format::new().color(TextColor::Green).style(Style::Bold),
+        );
+        prompt.display_formatted(f.output);
+    }
     loop {
-        let input = p.read_input();
+        let input = prompt.read_input();
         match parse_user_input(&input) {
             commands::ReplCommands::Quit => {
-                p.display_output("quitting");
+                prompt.display_output("quitting");
                 return Ok(());
             }
             commands::ReplCommands::Run => match target_.continue_execution() {
                 Ok(_status) => {
                     if let Some(msg) = prepare_waitstatus_display_message(_status, target_.as_mut()) {
                         let m = msg;
-                        p.display_formatted(m.output);
+                        prompt.display_formatted(m.output);
                     }
                 }
-                Err(err) => p.display_output(&err),
+                Err(err) => prompt.display_output(&err),
             },
             commands::ReplCommands::SetBreakpoint(maybe_parsed) => match maybe_parsed {
                 Ok(bp_req) => match target_.set_breakpoint(bp_req) {
                     Ok(addr) => {
                         let mut format = Formatted::new();
                         format.add_formatted(&format!("Breakpoint set @ {:X?}", addr), TextColor::Green);
-                        p.display_formatted(format.output);
+                        prompt.display_formatted(format.output);
                     }
                     Err(err_msg) => {
                         let mut format = Formatted::new();
@@ -96,14 +104,19 @@ fn main() -> Result<(), String> {
                             &format!("Failed to set breakpoint: {}", err_msg),
                             TextColor::Red,
                         );
-                        p.display_formatted(format.output);
+                        prompt.display_formatted(format.output);
                     }
                 },
-                Err(err_msg) => p.display_output(&format!("Failed to set breakpoint: {}", err_msg)),
+                Err(err_msg) => prompt.display_output(&format!("Failed to set breakpoint: {}", err_msg)),
             },
-            commands::ReplCommands::UnknownCommand => p.display_output("Unkonwn command"),
+            commands::ReplCommands::UnknownCommand => prompt.display_output("Unkonwn command"),
         };
     }
+}
+
+pub enum Style {
+    Bold,
+    Underlined,
 }
 
 pub enum TextColor {
@@ -111,7 +124,83 @@ pub enum TextColor {
     Green,
 }
 
+pub struct Format {
+    color: Option<TextColor>,
+    style: Option<Style>,
+}
+
+impl Format {
+    pub fn new() -> Format {
+        Format {
+            color: None,
+            style: None,
+        }
+    }
+
+    pub fn new_with(style: Style, color: TextColor) -> Format {
+        Format {
+            color: Some(color),
+            style: Some(style),
+        }
+    }
+
+    pub fn style(mut self, style: Style) -> Self {
+        self.style = Some(style);
+        self
+    }
+
+    pub fn color(mut self, color: TextColor) -> Self {
+        self.color = Some(color);
+        self
+    }
+
+    pub fn make(&self) -> Vec<u8> {
+        let mut v: Vec<u8> = Vec::with_capacity("\x1b[31\x1b[31".len());
+        v.extend_from_slice(
+            &self
+                .color
+                .as_ref()
+                .map(|c| Into::<&str>::into(c).as_bytes())
+                .unwrap_or("".as_bytes()),
+        );
+        v.extend_from_slice(
+            self.style
+                .as_ref()
+                .map(|s| Into::<&str>::into(s).as_bytes())
+                .unwrap_or("".as_bytes()),
+        );
+        v
+    }
+}
+
+impl Into<&'static str> for Style {
+    fn into(self) -> &'static str {
+        match self {
+            Style::Bold => "\x1b[1m",
+            Style::Underlined => "\x1b[4m",
+        }
+    }
+}
+
 impl Into<&'static str> for TextColor {
+    fn into(self) -> &'static str {
+        match self {
+            TextColor::Red => "\x1b[31m",
+            TextColor::Green => "\x1b[32m",
+        }
+    }
+}
+
+impl Into<&'static str> for &Style {
+    fn into(self) -> &'static str {
+        match self {
+            Style::Bold => "\x1b[1m",
+            Style::Underlined => "\x1b[4m",
+        }
+    }
+}
+
+impl Into<&'static str> for &TextColor {
     fn into(self) -> &'static str {
         match self {
             TextColor::Red => "\x1b[31m",
@@ -129,13 +218,25 @@ impl Formatted {
         Formatted { output: vec![] }
     }
 
+    pub fn with_capacity(capacity: usize) -> Formatted {
+        Formatted {
+            output: Vec::with_capacity(capacity),
+        }
+    }
+
     pub fn add_unformatted<S: AsRef<str>>(&mut self, data: S) {
         self.output.extend_from_slice(data.as_ref().as_bytes());
     }
 
-    pub fn add_formatted<S: AsRef<str>>(&mut self, string: &S, fmt: TextColor) {
+    pub fn add_with_format<S: AsRef<str>>(&mut self, string: &S, fmt: Format) {
+        self.output.extend_from_slice(&fmt.make());
+        self.output.extend_from_slice(string.as_ref().as_bytes());
+        self.output.extend_from_slice("\x1b[00m".as_bytes());
+    }
+
+    pub fn add_formatted<S: AsRef<str>>(&mut self, string: &S, color: TextColor) {
         self.output
-            .extend_from_slice(Into::<&'static str>::into(fmt).as_bytes());
+            .extend_from_slice(Into::<&'static str>::into(color).as_bytes());
         self.output.extend_from_slice(string.as_ref().as_bytes());
         self.output.extend_from_slice("\x1b[00m".as_bytes());
     }
@@ -143,17 +244,18 @@ impl Formatted {
 
 #[allow(unused)]
 fn prepare_waitstatus_display_message(_status: nixwrap::WaitStatus, target: &dyn Target) -> Option<Formatted> {
+    let mut format = Formatted::new();
+    format.add_unformatted("\n");
     match _status {
         nixwrap::WaitStatus::Continued(pid) => {
-            let mut format = Formatted::new();
             format.add_formatted(&"Inferior continued", TextColor::Green);
             return Some(format);
         }
         nixwrap::WaitStatus::ExitedNormally(pid, exit_code) => {
-            let mut format = Formatted::new();
-            format.add_formatted(
+            let mut f = Format::new().color(TextColor::Red).style(Style::Bold);
+            format.add_with_format(
                 &format!("Inferior exited normally with exit code {}", exit_code),
-                TextColor::Red,
+                f,
             );
             return Some(format);
         }
@@ -164,11 +266,9 @@ fn prepare_waitstatus_display_message(_status: nixwrap::WaitStatus, target: &dyn
             nixwrap::signals::Signal::Ill => todo!(),
             nixwrap::signals::Signal::Trap => {
                 if let Some(addr) = target.stopped_at_breakpoint() {
-                    let mut format = Formatted::new();
                     format.add_formatted(&format!("Hit breakpoint @ {:X?}", addr), TextColor::Green);
                     return Some(format);
                 } else {
-                    let mut format = Formatted::new();
                     format.add_unformatted("Caught trap signal");
                     return Some(format);
                 }
@@ -201,7 +301,6 @@ fn prepare_waitstatus_display_message(_status: nixwrap::WaitStatus, target: &dyn
             nixwrap::signals::Signal::BadSystemCallArgument => todo!(),
         },
         nixwrap::WaitStatus::Killed(pid, signal) => {
-            let mut format = Formatted::new();
             format.add_formatted(
                 &format!("Inferior killed with signal {:?}", signal),
                 TextColor::Red,
@@ -209,7 +308,6 @@ fn prepare_waitstatus_display_message(_status: nixwrap::WaitStatus, target: &dyn
             return Some(format);
         }
         nixwrap::WaitStatus::CoreDumped(pid) => {
-            let mut format = Formatted::new();
             format.add_formatted(&"Core dumped", TextColor::Red);
             return Some(format);
         }

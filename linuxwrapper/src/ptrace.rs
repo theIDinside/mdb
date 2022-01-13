@@ -178,7 +178,7 @@ pub fn peek_data(pid: Pid, addr: usize) -> crate::MidasSysResultDynamic<i64> {
         );
         if quadword == -1 {
             Err(format!(
-                "failed to peek data at {} of [PID: {}]",
+                "failed to peek data at 0x{:X} of [PID: {}]",
                 addr, *pid
             ))
         } else {
