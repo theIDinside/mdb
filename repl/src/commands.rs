@@ -1,19 +1,12 @@
-use midas::{commands::Command, software_breakpoint::BreakpointRequest};
-
 use crate::parse_hex_string;
-#[allow(dead_code)]
-pub fn parse_input(input: String) -> Command {
-    match &input[..] {
-        "info" | "i" => Command::Info,
-        _ => Command::Unknown,
-    }
-}
+use midas::{commands::Command, software_breakpoint::BreakpointRequest};
 
 pub enum ReplCommands {
     Quit,
     Run,
     SetBreakpoint(Result<BreakpointRequest, String>),
     UnknownCommand,
+    Help(Option<Command>),
 }
 
 pub fn parse_user_input(input: &String) -> ReplCommands {
@@ -57,6 +50,13 @@ pub fn parse_user_input(input: &String) -> ReplCommands {
                         }));
                     }
                 }
+            }
+        }
+        "h" | "help" => {
+            if parts.len() > 1 {
+                ReplCommands::Help(None)
+            } else {
+                ReplCommands::Help(None)
             }
         }
         _ => ReplCommands::UnknownCommand,

@@ -6,11 +6,11 @@ fn main() -> Result<(), &'static str> {
         let input = p.read_input();
         match &input[..] {
             "q" | "quit" => {
-                p.display_output("quitting");
+                p.display_string("quitting");
                 return Ok(());
             }
             _ => {
-                p.display_output(&format!("You wrote: {}", input));
+                p.display_string(&format!("You wrote: {}", input));
             }
         }
     }

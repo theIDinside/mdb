@@ -20,6 +20,34 @@ pub enum BreakpointRequest {
     },
 }
 
+impl BreakpointRequest {
+    pub fn source(line: usize, column: usize, file: String) -> BreakpointRequest {
+        BreakpointRequest::SourceCodeLocation { line, column, file }
+    }
+
+    pub fn address<A: Into<Address>>(address: A) -> BreakpointRequest {
+        BreakpointRequest::Address(address.into())
+    }
+
+    pub fn function<S>(name: S, file: Option<S>) -> BreakpointRequest
+    where
+        S: ToString + Into<String>,
+    {
+        BreakpointRequest::Function {
+            name: name.into(),
+            file: file.map(|a| a.to_string()),
+        }
+    }
+
+    pub fn description(&self) -> &'static str {
+        match self {
+            BreakpointRequest::Address(..) => "Sets a breakpoint at the provided <address>: <0x123abc>",
+            BreakpointRequest::SourceCodeLocation { .. } => "Set a breakpoint in the provided <file and line>: <file:line>",
+            BreakpointRequest::Function { .. } => "Sets a breakpoint on all functions with the provided name. Does not discriminate between namespaces or member functions. A::foo and foo is the same. If a file name is provided as a parameter, this will be a predicate.",
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Breakpoint {
     pub address: Address,

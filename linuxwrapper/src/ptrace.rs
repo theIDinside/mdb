@@ -142,7 +142,7 @@ pub fn kill_on_midas_exit(pid: Pid) -> Result<(), String> {
             PTRACE_SETOPTIONS,
             *pid,
             std::ptr::null() as *const libc::c_void,
-            std::ptr::null() as *const libc::c_void,
+            libc::PTRACE_O_EXITKILL,
         ) == -1
         {
             Err(crate::errno::get_errno_msg())

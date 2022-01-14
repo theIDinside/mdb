@@ -2,8 +2,8 @@ use crate::ansicodes;
 use crate::cfg;
 use crate::key;
 
+pub use super::fmt::*;
 use crate::key::KeyboardInput;
-
 struct PromptHistory {
     history: Vec<String>,
     history_selector: usize,
@@ -260,18 +260,28 @@ impl Prompt {
         }
     }
 
-    pub fn display_output(&mut self, output: &str) {
+    pub fn display_string(&mut self, output: &str) {
         write_string(output);
         println!("");
     }
 
-    pub fn display_formatted(&mut self, output: Vec<u8>) {
+    /// Writes `output` to terminal and appends a newline
+    pub fn display_bytes_newline(&mut self, output: Vec<u8>) {
         unsafe {
             if libc::write(libc::STDOUT_FILENO, output.as_ptr() as _, output.len()) == -1 {
                 panic!("failed to write to stdout");
             }
         }
-        write_string("\n");
+        write_string("\r\n");
+    }
+
+    /// Writes `output` to terminal
+    pub fn display_bytes(&mut self, output: Vec<u8>) {
+        unsafe {
+            if libc::write(libc::STDOUT_FILENO, output.as_ptr() as _, output.len()) == -1 {
+                panic!("failed to write to stdout");
+            }
+        }
     }
 
     pub fn pop_history(&mut self) -> Option<String> {
