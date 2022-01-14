@@ -1,5 +1,5 @@
 #![allow(unused, unused_macros)]
-use std::{panic, process::Command, sync::Once};
+use std::{io::Read, panic, process::Command, sync::Once};
 
 use midas::{
     bytereader,
@@ -52,6 +52,91 @@ where
     }
     let result = panic::catch_unwind(|| test());
     assert!(result.is_ok())
+}
+
+/// Symbol name passed to this, must exactly match what we are looking for.
+macro_rules! get_addr_from_objdump_symbolname_is_exact {
+    ($path:expr, $symbol:expr) => {{
+        let mut readelf_output = std::process::Command::new("objdump")
+            .arg("-t")
+            .arg(subjects!($path))
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("failed to run readelf on binary");
+
+        let grep = std::process::Command::new("grep")
+            .arg("-w")
+            .arg($symbol)
+            .stdin(
+                readelf_output
+                    .stdout
+                    .take()
+                    .expect("failed to grab output from readelf"),
+            )
+            .output()
+            .expect("failed to spawn grep");
+        let result = String::from_utf8(grep.stdout).expect("failed to get string contents from grep");
+        let parts: Vec<&str> = result.split(" ").collect();
+        let part = parts.get(0);
+        let remove_leading_zeroes = part
+            .and_then(|s| s.chars().position(|c| c != '0'))
+            .unwrap_or(0usize);
+        let addr = part.and_then(|s| parse_hex_string(&s[remove_leading_zeroes..]).ok());
+        addr
+    }};
+}
+
+pub fn addr2line_compare(path: &str, symbol: &str, addr: usize) -> bool {
+    let mut addr2line_output = std::process::Command::new("addr2line")
+        .arg("-f")
+        .arg(format!("{:X}", addr))
+        .arg("-C")
+        .arg("-s")
+        .arg("-e")
+        .arg(path)
+        .output()
+        .expect("failed to run readelf on binary");
+
+    let result = String::from_utf8(addr2line_output.stdout).expect("failed to get string contents from grep");
+
+    let lines: Vec<&str> = result.lines().collect();
+    let line_1 = lines.get(0);
+    if let Some(&s) = line_1 {
+        s.contains(symbol)
+    } else {
+        false
+    }
+}
+
+// parses a string from the LSB until EOF or until it encounters an "X" or "x"
+pub fn parse_hex_string(s: &str) -> Result<usize, &str> {
+    let mut value = 0;
+    let mut multiplier = 1;
+    let ident_found = false;
+    for c in s.to_uppercase().chars().rev() {
+        value += match c {
+            '0' => 0 * multiplier,
+            '1' => 1 * multiplier,
+            '2' => 2 * multiplier,
+            '3' => 3 * multiplier,
+            '4' => 4 * multiplier,
+            '5' => 5 * multiplier,
+            '6' => 6 * multiplier,
+            '7' => 7 * multiplier,
+            '8' => 8 * multiplier,
+            '9' => 9 * multiplier,
+            'A' => 10 * multiplier,
+            'B' => 11 * multiplier,
+            'C' => 12 * multiplier,
+            'D' => 13 * multiplier,
+            'E' => 14 * multiplier,
+            'F' => 15 * multiplier,
+            'X' => return Ok(value),
+            _ => return Err("hex parse failed"),
+        };
+        multiplier *= 16;
+    }
+    Ok(value)
 }
 
 /// binary data taken from myfile1.c
@@ -162,6 +247,22 @@ pub fn get_program_main_address_of_ddump_analysis() {
         let debug_line = elf
             .get_dwarf_section(midas::dwarf::Section::DebugLine)
             .expect("failed to get .debug_line");
+
+        let pub_names = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugPubNames)
+            .expect("failed to get .debug_line");
+
+        let debug_info = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugInfo)
+            .expect("failed to get .debug_line");
+
+        let abbrev_table = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugAbbrev)
+            .expect("failed to get .debug_line");
+
+        let low_pc = midas::dwarf::compilation_unit::find_low_pc_of("main", debug_info, pub_names, abbrev_table);
+        let addr = get_addr_from_objdump_symbolname_is_exact!("ddump_analysis", "main");
+        assert_eq!(low_pc, addr);
     })
 }
 
@@ -231,9 +332,20 @@ pub fn find_symbol_make_todo_in_ddump_analysis() {
             .get_dwarf_section(midas::dwarf::Section::DebugAbbrev)
             .expect("failed to get .debug_line");
         let low_pc = midas::dwarf::compilation_unit::find_low_pc_of("make_todo", debug_info, pub_names, abbrev_table);
-        println!("Low PC possibly found at {:#X?}", low_pc);
+        assert!(low_pc.is_some());
         // todo(simon): execute dwarfdump and pull the addresses dynamically, so this can work across platforms and computers.
-        assert_eq!(low_pc, Some(0x401240));
+        if !addr2line_compare(program_path, "make_todo", low_pc.unwrap()) {
+            println!(
+                "Function at address 0x{:X} did not match make_todo",
+                low_pc.unwrap()
+            );
+        }
+        assert!(addr2line_compare(
+            program_path,
+            "make_todo",
+            low_pc.unwrap()
+        ),);
+        // assert_eq!(low_pc, Some(0x401240));
     });
 }
 
