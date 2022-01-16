@@ -4,11 +4,14 @@ use std::{io::Read, panic, process::Command, sync::Once};
 use midas::{
     bytereader,
     dwarf::{
-        attributes::{self, AbbreviationsTableIterator},
-        compilation_unit::CompilationUnitHeaderIterator,
+        attributes::{self, parse_attribute, parse_cu_attributes, AbbreviationsTableIterator},
+        compilation_unit::{
+            CompilationUnit, CompilationUnitHeader, CompilationUnitHeaderIterator, CompilationUnitIterator,
+        },
         linenumber::{LineNumberProgram, LineNumberProgramHeaderVersion4},
     },
     leb128::decode_unsigned,
+    types::Index,
 };
 
 static BUILT_TEST_DEBUGGEES: Once = Once::new();
@@ -309,7 +312,6 @@ pub fn parse_pubname_section_ddump_analysis() {
             let mut entries = midas::dwarf::pubnames::PubNameEntryIterator::new(bytereader::ConsumeReader::wrap(
                 &pub_names[header.section_offset + data_offset..],
             ));
-            for entry in entries {}
         }
     });
 }
@@ -440,6 +442,64 @@ pub fn parse_2_lnp_headers() {
         .collect();
 
         assert_eq!(headers.len(), cus.len());
+    })
+}
+
+#[test]
+pub fn dump_cus() {
+    run_test(|| {
+        let program_path = subjects!("ddump_analysis");
+        let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
+        let elf = midas::elf::ParsedELF::parse_elf(object.clone()).expect("failed to parse ELF of ddump_analysis");
+
+        // this code verifiably works, so we use this as assert case when we can
+        let dbg_info = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugInfo)
+            .expect("Failed to get .debug_info");
+
+        let abbr_table = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugAbbrev)
+            .expect("Failed to get .debug_info");
+
+        let debug_str_table = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugStr)
+            .expect("Failed to get .debug_info");
+
+        for cu_header in CompilationUnitHeaderIterator::new(dbg_info) {
+            let header_offset = cu_header
+                .section_offset
+                .expect("couldn't read absolute section offset");
+            let mut die_reader = bytereader::ConsumeReader::wrap(
+                &dbg_info[header_offset + CompilationUnitHeader::DWARF4_32_SIZE as usize..],
+            );
+            let abbrev_code = die_reader.read_uleb128().unwrap();
+            let attr = parse_cu_attributes(&abbr_table[cu_header.abbreviation_offset..]).unwrap();
+            let item = attr.get(&abbrev_code).unwrap();
+            let encoding = cu_header.encoding();
+            for (attribute, form) in item.attrs_list.iter() {
+                // we *must* parse the attribute, before checking that it's the one we want; because we want to move the byte stream along, if we don't parse it we either;
+                // A: don't move the bytestream (reader) along or
+                // B: we don't move it along correctly, since we can't know beforehand how long the individual fields will be, unfortunately a design DWARF has chosen.
+                let parsed_attr = parse_attribute(&mut die_reader, encoding, (*attribute, *form));
+
+                println!("{:#X?}", parsed_attr);
+            }
+        }
+    })
+}
+
+#[test]
+pub fn test_new_reader_style() {
+    run_test(|| {
+        let program_path = subjects!("ddump_analysis");
+        let object = midas::elf::load_object(std::path::Path::new(program_path)).unwrap();
+        let elf = midas::elf::ParsedELF::parse_elf(object.clone()).expect("failed to parse ELF of ddump_analysis");
+        let dbg_info = elf
+            .get_dwarf_section(midas::dwarf::Section::DebugInfo)
+            .expect("Failed to get .debug_info");
+
+        let cus: Vec<_> = CompilationUnitIterator::new(bytereader::ConsumeReader::wrap(dbg_info)).collect();
+        assert_eq!(cus.len(), 2);
     })
 }
 
