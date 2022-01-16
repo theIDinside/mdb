@@ -140,6 +140,23 @@ fn main() -> Result<(), String> {
                 prompt.display_bytes_newline(fmt.output);
             }
             commands::ReplCommands::UnknownCommand => prompt.display_string("Unkonwn command"),
+            commands::ReplCommands::List(lines) => match target_.source_code_at_pc(lines) {
+                Ok((current_line_index, content)) => {
+                    let mut fmt = FormattedBuffer::with_capacity(
+                        content.iter().fold(0, |acc, (_, s)| acc + s.len()) + content.len() * 2,
+                    );
+                    for (lnum, line) in content {
+                        if lnum == current_line_index {
+                            fmt.add_formatted(">>>", Format::new_with(Style::Bold, TextColor::Green));
+                            fmt.add_formatted_line(line, Format::new_with(Style::Bold, TextColor::Green));
+                        } else {
+                            fmt.add_unformatted_line(line);
+                        }
+                    }
+                    prompt.display_bytes_ref(&fmt.output);
+                }
+                Err(err) => prompt.display_error(err.describe()),
+            },
         };
     }
 }

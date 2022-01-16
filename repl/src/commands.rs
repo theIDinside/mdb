@@ -5,6 +5,7 @@ pub enum ReplCommands {
     Quit,
     Run,
     SetBreakpoint(Result<BreakpointRequest, String>),
+    List(usize),
     UnknownCommand,
     Help(Option<Command>),
 }
@@ -57,6 +58,14 @@ pub fn parse_user_input(input: &String) -> ReplCommands {
                 ReplCommands::Help(None)
             } else {
                 ReplCommands::Help(None)
+            }
+        }
+        "l" | "list" => {
+            if parts.len() > 1 {
+                let line_count = &parts[1].parse().unwrap_or(10usize);
+                ReplCommands::List(*line_count)
+            } else {
+                ReplCommands::List(10)
             }
         }
         _ => ReplCommands::UnknownCommand,
