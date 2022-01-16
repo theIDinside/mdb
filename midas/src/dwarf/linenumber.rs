@@ -259,6 +259,18 @@ impl LineNumberProgramHeaderVersion4 {
             super::InitialLengthField::Dwarf64(len) => todo!(),
         }
     }
+
+    pub fn get_full_path_of_file(&self, file_id: usize) -> Option<std::path::PathBuf> {
+        self.file_names
+            .get(file_id.saturating_sub(1))
+            .and_then(|fe| {
+                self.get_dir_by_index(fe.dir_index).map(|path| {
+                    let mut pb = std::path::PathBuf::from(path);
+                    pb.push(&fe.path);
+                    pb
+                })
+            })
+    }
 }
 
 pub enum LineNumberHeaderEntryFormat {
@@ -439,7 +451,6 @@ impl ComputationResult {
             .file_names
             .get(self.file.saturating_sub(1) as usize)
             .and_then(|fe| {
-                println!("dir index: {}", fe.dir_index);
                 if fe.dir_index == 0 {
                     Some(format!("./{}", fe.path))
                 } else {
@@ -451,7 +462,7 @@ impl ComputationResult {
             });
 
         println!(
-            "0x{:016X} [{:>3}, {:>2}], {}File id: {:?}",
+            "0x{:016X} [{:>3}, {:>2}], {:<10} {}",
             self.address,
             self.line,
             self.column,
@@ -506,7 +517,7 @@ impl<'a> LineNumberProgram<'a> {
     }
 
     pub fn run(&mut self) -> Vec<ComputationResult> {
-        let mut v = vec![];
+        let mut v = Vec::with_capacity(2048);
         let mut reader = bytereader::ConsumeReader::wrap(self.sec_data);
         // values that the closures will capture
         let line_range = self.header.line_range;
@@ -515,11 +526,11 @@ impl<'a> LineNumberProgram<'a> {
         let min_instruction_length = self.header.instruction_length_minimum;
         let max_ops_per_instruction = self.header.max_operations_per_instruction;
 
-        let adjust_opcode = |opcode: u8| opcode.wrapping_sub(opcode_base);
+        let adjust_opcode = move |opcode: u8| opcode.wrapping_sub(opcode_base);
 
-        let operation_advance = |opcode| adjust_opcode(opcode) / line_range;
+        let operation_advance = move |opcode| adjust_opcode(opcode) / line_range;
 
-        let new_address = |address, op_index, opcode| {
+        let new_address = move |address, op_index, opcode| {
             address
                 + (min_instruction_length * ((op_index + operation_advance(opcode)) / max_ops_per_instruction)) as usize
         };

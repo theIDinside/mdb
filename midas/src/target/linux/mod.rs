@@ -1,12 +1,13 @@
 use std::{
     collections::{HashMap, HashSet},
+    io::Read,
     os::unix::prelude::CommandExt,
 };
 
 use crate::{
     software_breakpoint::{self, Breakpoint},
     types::Address,
-    MidasSysResult,
+    CommandErrors, MidasError, MidasSysResult,
 };
 use nixwrap::{waitpid, MidasSysResultDynamic, Pid, WaitStatus};
 
@@ -212,5 +213,66 @@ impl super::Target for LinuxTarget {
         } else {
             None
         }
+    }
+
+    fn read_registers(&self) -> nixwrap::ptrace::UserRegisters {
+        nixwrap::ptrace::get_regs(self.process_id())
+    }
+
+    fn source_code_at_pc(&self, lines: usize) -> MidasSysResult<(usize, Vec<(usize, String)>)> {
+        let pc = self.read_registers().pc();
+        let line_number_table = self
+            .debug_info
+            .elf
+            .get_dwarf_section(crate::dwarf::Section::DebugLine)
+            .expect("failed to get .debug_line");
+
+        let header_iterator = crate::dwarf::linenumber::ProgramHeaderIterator::new(
+            line_number_table,
+            crate::dwarf::linenumber::LineInstructionConfig {
+                pointer_width: 8,
+                opcode_base: 13,
+            },
+        );
+
+        let it = crate::dwarf::linenumber::TableIterator::new(
+            line_number_table,
+            header_iterator,
+            crate::dwarf::linenumber::LineInstructionConfig {
+                pointer_width: 8,
+                opcode_base: 13,
+            },
+        );
+        for mut program in it {
+            let results = program.run();
+            for res in results {
+                if res.address == (pc - 1) as _ {
+                    if let Some(p) = program.header.get_full_path_of_file(res.file as usize) {
+                        let foo = &p;
+                        let mut f = std::fs::File::open(p).map_err(|e| MidasError::FileOpenError(e.kind()))?;
+                        let mut buf = String::with_capacity(
+                            f.metadata()
+                                .map_err(|e| MidasError::FileOpenError(e.kind()))?
+                                .len() as usize,
+                        );
+                        let bytes = f
+                            .read_to_string(&mut buf)
+                            .map_err(|e| MidasError::FileReadError(e.kind()))?;
+                        let ln = lines as u32;
+                        let start = res.line.saturating_sub(ln / 2);
+                        let end = res.line.saturating_add(ln / 2);
+                        let content: Vec<(usize, String)> = buf
+                            .lines()
+                            .enumerate()
+                            .skip(start as usize)
+                            .take((end - start) as usize)
+                            .map(|(line_index, s)| (line_index, s.to_string()))
+                            .collect();
+                        return Ok((res.line as usize, content));
+                    }
+                }
+            }
+        }
+        Err(MidasError::ClientOperation(CommandErrors::ContextNotFound))
     }
 }

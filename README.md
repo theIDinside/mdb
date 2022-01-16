@@ -1,6 +1,6 @@
 # Midas
 
-Midas Debugger library for Rust / C / C++
+Midas Debugger library for Rust / C / C++ with no dependencies. Perfect for learning.
 
 ## Workspace structure
 
@@ -31,11 +31,6 @@ The actual debugger library; the library which either the repl binary links to o
 
 #### debug_info
 
-Library that wraps around the [gimli](https://github.com/gimli-rs/gimli) & the [object](https://github.com/gimli-rs/object) crates for parsing ELF and DWARF data. The reason for wrapping this in it's own library, is because, if I ever wanted to dive down
-and make a rudimentary ELF and DWARF parser, switching this component out becomes much easier.
-
-Note: I've changed my mind, I'm going to try and write rudimentary libraries for this myself at first.
-
 ## Binaries in this workspace
 
 #### repl
@@ -52,6 +47,6 @@ An interface against Midas that instead of taking commands from the commandline,
 
 ## Dependencies
 
-Though, I'm trying to keep it as non-dependent on other libraries as possible, to get going and actually get somewhere here in the beginning, I'm going to pull in the following crate:
+Currently no dependencies, though, in the future, I _might_ pull in the rayon crate for multi threaded parallelism features. Or I might not. If I decide to write multi threaded code, it could be unsafe multi-threaded code, as I don't want to pollute neither the "inner" API's nor the "outwards" facing ones with Arc's etc. We _know_ we own the data, when we load the binary to parse it, we _know_ it's 100% immutable, there is absolutely 0 reason, to wrap it in Arc and mutexes. None. So in that case, we might just hand out raw pointers to the binary blob (the tracee) and offload whatever work we need. The only possible synchronization primitives / operations we need, is when we in turn retrieve the parsed data from that thread, but that's a much simpler problem to solve.
 
-- gimli - for reading DWARF.
+- libc

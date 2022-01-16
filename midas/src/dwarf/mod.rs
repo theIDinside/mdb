@@ -17,6 +17,8 @@ pub mod tag;
 
 pub use sections::*;
 
+use self::compilation_unit::{DWARFEncoding, DWARF};
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum InitialLengthField {
     Dwarf32(u32),
@@ -38,6 +40,19 @@ pub struct Encoding {
 }
 
 impl Encoding {
+    pub fn to_dwarf_format(&self) -> DWARF {
+        match (self.version, self.pointer_width) {
+            (4, 4) => DWARF::Version4(DWARFEncoding::BITS32),
+            (4, 8) => DWARF::Version4(DWARFEncoding::BITS64),
+            (5, 4) => DWARF::Version5(DWARFEncoding::BITS32),
+            (5, 8) => DWARF::Version5(DWARFEncoding::BITS64),
+            _ => panic!(
+                "Version: {}. Pointer size: {} - Unknown DWARF encoding",
+                self.version, self.pointer_width
+            ),
+        }
+    }
+
     pub fn new(pointer_width: u8, format: Format, version: u16) -> Encoding {
         Encoding {
             pointer_width,

@@ -1,9 +1,9 @@
-#![allow(unused, non_camel_case_types)]
-pub struct DIE {
-    tag: usize,
-}
+use crate::types::SectionPointer;
 
-pub enum DIEHasChildren {
-    No = 0x00,
-    Yes = 0x01,
+use super::compilation_unit::CompilationUnitHeader;
+
+pub struct DIE {
+    cu_header: CompilationUnitHeader,
+    debug_info: SectionPointer,
+    debug_abbrev: SectionPointer,
 }

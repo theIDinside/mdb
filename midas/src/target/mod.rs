@@ -1,11 +1,16 @@
 #![allow(unused, non_camel_case_types)]
+use std::process::Output;
+
+use nixwrap::ptrace::UserRegisters;
 use nixwrap::{Pid, WaitStatus};
 pub mod linux;
 
 use nixwrap::MidasSysResultDynamic;
 
+use crate::dwarf::linenumber::LineNumberProgram;
 use crate::software_breakpoint::BreakpointRequest;
 use crate::types::Address;
+use crate::MidasSysResult;
 
 pub struct MemoryRead {
     pub result: Vec<Vec<u8>>,
@@ -65,9 +70,11 @@ pub trait Target {
     fn continue_execution(&mut self) -> MidasSysResultDynamic<WaitStatus>;
     fn kill(&mut self) -> MidasSysResultDynamic<WaitStatus>;
     fn read_memory(&self, address: usize, bytes: usize) -> Vec<u8>;
+    fn read_registers(&self) -> UserRegisters;
     fn kill_on_tracer_exit(&mut self) -> MidasSysResultDynamic<()>;
     fn set_breakpoint(&mut self, bp: BreakpointRequest) -> MidasSysResultDynamic<Address>;
     fn stopped_at_breakpoint(&self) -> Option<Address>;
+    fn source_code_at_pc(&self, lines: usize) -> MidasSysResult<(usize, Vec<(usize, String)>)>;
 }
 
 pub fn make_command(program_path: &str, args: Vec<&str>) -> MidasSysResultDynamic<std::process::Command> {
