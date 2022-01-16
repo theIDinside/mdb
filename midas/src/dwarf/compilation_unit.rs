@@ -1,17 +1,76 @@
 use crate::{
     bytereader,
     dwarf::{attributes::parse_attribute, Encoding},
+    types::{Index, SectionPointer},
+    MidasError, MidasSysResult, ParseError,
 };
 
 use super::{attributes::parse_cu_attributes, pubnames::DIEOffset, Format};
 #[allow(unused, non_camel_case_types)]
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CompilationUnitHeader {
+    // exact data represented in byte stream
     unit_length: super::InitialLengthField,
     version: u16,
     unit_type: Option<u8>,
     pub address_size: u8,
     pub abbreviation_offset: usize,
+    // our own data
+    pub cu_data_start: usize,
+    pub section_offset: Option<usize>,
+}
+
+pub struct CompilationUnit {
+    /// this compilation unit's header
+    header: CompilationUnitHeader,
+    /// the compilation unit index; it's index into the .debug_info section
+    cu_index: Index,
+    /// Section pointer to the actual compilation unit data; not including the header itself.
+    data: SectionPointer,
+}
+
+pub struct CompilationUnitIterator<'a> {
+    reader: bytereader::ConsumeReader<'a>,
+    index: usize,
+}
+
+impl<'a> CompilationUnitIterator<'a> {
+    pub fn new(data: bytereader::ConsumeReader<'a>) -> CompilationUnitIterator<'a> {
+        CompilationUnitIterator {
+            reader: data,
+            index: 0,
+        }
+    }
+}
+
+impl<'a> Iterator for CompilationUnitIterator<'a> {
+    type Item = CompilationUnit;
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.reader.has_more() {
+            return None;
+        }
+        let compilation_unit =
+            CompilationUnit::read_from(Index(self.index), &mut self.reader).expect("failed to read compilation unit");
+        self.index += 1;
+        Some(compilation_unit)
+    }
+}
+
+impl CompilationUnit {
+    pub fn read_from(index: Index, reader: &mut bytereader::ConsumeReader) -> MidasSysResult<CompilationUnit> {
+        let header = reader.dispatch_read(CompilationUnitHeader::read_from)?;
+        let encoding = header.encoding();
+        let cu_length = header.unit_length() - header.header_size();
+        if reader.len() < cu_length {
+            return Err(MidasError::ParseError(ParseError::CompilationUnit));
+        }
+        let data = SectionPointer::from_slice(&reader.read_slice(cu_length)?);
+        Ok(CompilationUnit {
+            header,
+            cu_index: index,
+            data,
+        })
+    }
 }
 
 pub enum DWARFEncoding {
@@ -36,12 +95,50 @@ const fn header_size_bytes(format: DWARF) -> usize {
         },
     }
 }
+
 #[allow(unused)]
 impl CompilationUnitHeader {
-    const DWARF4_32_SIZE: usize = header_size_bytes(DWARF::Version4(DWARFEncoding::BITS32));
-    const DWARF5_32_SIZE: usize = header_size_bytes(DWARF::Version5(DWARFEncoding::BITS32));
-    const DWARF4_64_SIZE: usize = header_size_bytes(DWARF::Version4(DWARFEncoding::BITS64));
-    const DWARF5_64_SIZE: usize = header_size_bytes(DWARF::Version5(DWARFEncoding::BITS64));
+    pub const DWARF4_32_SIZE: usize = header_size_bytes(DWARF::Version4(DWARFEncoding::BITS32));
+    pub const DWARF5_32_SIZE: usize = header_size_bytes(DWARF::Version5(DWARFEncoding::BITS32));
+    pub const DWARF4_64_SIZE: usize = header_size_bytes(DWARF::Version4(DWARFEncoding::BITS64));
+    pub const DWARF5_64_SIZE: usize = header_size_bytes(DWARF::Version5(DWARFEncoding::BITS64));
+
+    pub fn read_from(reader: &mut bytereader::ConsumeReader) -> MidasSysResult<CompilationUnitHeader> {
+        if reader.len() < CompilationUnitHeader::DWARF5_64_SIZE {
+            return Err(MidasError::ParseError(ParseError::CompilationUnitHeader));
+        }
+        let unit_length = reader.read_initial_length();
+        let version = reader.read_u16();
+
+        let unit_type = if version == 5 {
+            Some(reader.read_u8())
+        } else {
+            None
+        };
+
+        let (address_size, abbreviation_offset) = match &unit_length {
+            &super::InitialLengthField::Dwarf32(_) => {
+                let data = reader.read_u32();
+                let address_size = reader.read_u8();
+                (address_size, data as usize)
+            }
+            &super::InitialLengthField::Dwarf64(_) => {
+                let address_size = reader.read_u8();
+                let data = reader.read_u64();
+                (address_size, data as usize)
+            }
+        };
+        let cu_data_start = unit_length.offsets_bytes();
+        Ok(CompilationUnitHeader {
+            unit_length,
+            version,
+            unit_type,
+            address_size,
+            abbreviation_offset,
+            cu_data_start,
+            section_offset: None,
+        })
+    }
 
     pub fn from_bytes(bytes: &[u8]) -> CompilationUnitHeader {
         let mut reader = bytereader::ConsumeReader::wrap(&bytes);
@@ -66,17 +163,19 @@ impl CompilationUnitHeader {
                 (address_size, data as usize)
             }
         };
-
+        let cu_data_start = unit_length.offsets_bytes();
         CompilationUnitHeader {
             unit_length,
             version,
             unit_type,
             address_size,
             abbreviation_offset,
+            cu_data_start,
+            section_offset: None,
         }
     }
 
-    pub fn stride(&self) -> usize {
+    pub fn header_size(&self) -> usize {
         self.unit_length.offsets_bytes()
             + 2
             + self.unit_type.map(|_| 1).unwrap_or(0)
@@ -102,11 +201,15 @@ impl CompilationUnitHeader {
 
 pub struct CompilationUnitHeaderIterator<'a> {
     data: &'a [u8],
+    bytes_travelled: usize,
 }
 
 impl<'a> CompilationUnitHeaderIterator<'a> {
     pub fn new(data: &'a [u8]) -> CompilationUnitHeaderIterator<'a> {
-        CompilationUnitHeaderIterator { data }
+        CompilationUnitHeaderIterator {
+            data,
+            bytes_travelled: 0,
+        }
     }
 }
 
@@ -115,8 +218,10 @@ impl<'a> Iterator for CompilationUnitHeaderIterator<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.data.len() >= CompilationUnitHeader::DWARF4_32_SIZE {
-            let header = CompilationUnitHeader::from_bytes(&self.data);
+            let mut header = CompilationUnitHeader::from_bytes(&self.data);
+            header.section_offset = Some(self.bytes_travelled);
             let offset = header.unit_length();
+            self.bytes_travelled += offset;
             self.data = &self.data[offset..];
             Some(header)
         } else {
