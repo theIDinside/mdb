@@ -299,14 +299,14 @@ pub fn load_object(path: &std::path::Path) -> MidasSysResult<std::rc::Rc<Object>
         .read(true)
         .create_new(false)
         .open(path)
-        .map_err(|e| MidasError::FileOpenError(e.raw_os_error()))?;
+        .map_err(|e| MidasError::FileOpenError(e.kind()))?;
     let file_size = f
         .metadata()
-        .map_err(|err| MidasError::FileOpenError(err.raw_os_error()))?
+        .map_err(|err| MidasError::FileOpenError(err.kind()))?
         .len();
     buf.reserve(file_size as _);
     let bytes_read = f
         .read_to_end(&mut buf)
-        .map_err(|err| MidasError::FileReadError(err.raw_os_error()))?;
+        .map_err(|err| MidasError::FileReadError(err.kind()))?;
     Ok(std::rc::Rc::new(Object::new(buf, bytes_read)))
 }
