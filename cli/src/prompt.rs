@@ -265,6 +265,12 @@ impl Prompt {
         println!("");
     }
 
+    pub fn display_error(&mut self, output: &str) {
+        let mut fmt_buf = FormattedBuffer::with_capacity(output.len() + 25);
+        fmt_buf.add_formatted_line(output, Format::new_with(Style::Bold, TextColor::Red));
+        self.display_bytes_ref(&fmt_buf.output);
+    }
+
     /// Writes `output` to terminal and appends a newline
     pub fn display_bytes_newline(&mut self, output: Vec<u8>) {
         unsafe {
@@ -277,6 +283,14 @@ impl Prompt {
 
     /// Writes `output` to terminal
     pub fn display_bytes(&mut self, output: Vec<u8>) {
+        unsafe {
+            if libc::write(libc::STDOUT_FILENO, output.as_ptr() as _, output.len()) == -1 {
+                panic!("failed to write to stdout");
+            }
+        }
+    }
+
+    pub fn display_bytes_ref(&mut self, output: &Vec<u8>) {
         unsafe {
             if libc::write(libc::STDOUT_FILENO, output.as_ptr() as _, output.len()) == -1 {
                 panic!("failed to write to stdout");
