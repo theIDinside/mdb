@@ -119,6 +119,11 @@ impl FormattedBuffer {
         self.output.extend_from_slice("\x1b[00m".as_bytes());
     }
 
+    pub fn add_unformatted_line<S: AsRef<str>>(&mut self, string: S) {
+        self.add_unformatted(string);
+        self.add_unformatted("\r\n");
+    }
+
     pub fn add_formatted_line<S: AsRef<str>>(&mut self, string: S, fmt: Format) {
         self.add_formatted(string, fmt);
         self.add_unformatted("\r\n");
