@@ -14,6 +14,11 @@ pub mod types;
 pub mod utils;
 
 #[derive(Debug)]
+pub enum CommandErrors {
+    ContextNotFound,
+}
+
+#[derive(Debug)]
 pub enum MidasError {
     BadUnsignedLEB128Encoding(usize),
     BadSignedLEB128Encoding(usize),
@@ -31,11 +36,20 @@ pub enum MidasError {
     },
     ErroneousAddressSize(usize),
     // to keep MidasError non-allocating, we return the OS error codes instead of the message provided by rust's stdlib
-    FileOpenError(Option<i32>),
-    FileReadError(Option<i32>),
+    FileOpenError(std::io::ErrorKind),
+    FileReadError(std::io::ErrorKind),
+    ClientOperation(CommandErrors),
+    ParseError(ParseError),
+}
+
+#[derive(Debug)]
+pub enum ParseError {
+    CompilationUnitHeader,
+    CompilationUnit,
 }
 
 pub use dwarf::compilation_unit::find_low_pc_of;
+use types::Index;
 
 #[derive(Debug)]
 pub enum ELFSection {
@@ -99,6 +113,13 @@ impl MidasError {
             MidasError::ErroneousAddressSize(..) => "[DWARF]: Erroenous address size",
             MidasError::FileOpenError(..) => "[FILE]: Failed to open file",
             MidasError::FileReadError(..) => "[FILE]: Failed to read file",
+            MidasError::ClientOperation(op) => match op {
+                CommandErrors::ContextNotFound => "[CLIENT ERROR]: Program context could not be established",
+            },
+            MidasError::ParseError(parse_err) => match parse_err {
+                ParseError::CompilationUnitHeader => "[DWARF]: Parsing of Compilation Unit Header failed",
+                ParseError::CompilationUnit => "[DWARF]: Parsing of Compilation Unit failed",
+            },
         }
     }
 }
