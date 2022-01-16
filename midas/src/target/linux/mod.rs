@@ -2,22 +2,34 @@ use std::{
     collections::{HashMap, HashSet},
     io::Read,
     os::unix::prelude::CommandExt,
+    path::PathBuf,
 };
 
 use crate::{
+    bytereader::{self, ConsumeReader},
+    dwarf::{
+        self,
+        attributes::{parse_cu_attributes, AbbreviationsTableEntry},
+    },
     software_breakpoint::{self, Breakpoint},
-    types::Address,
+    step::StepRequest,
+    types::{Address, Index},
     CommandErrors, MidasError, MidasSysResult,
 };
 use nixwrap::{waitpid, MidasSysResultDynamic, Pid, WaitStatus};
 
+use self::linelookup::{ReadFile, ReadFileRingBuffer};
+
 pub mod debug_info;
+pub mod linelookup;
 
 pub struct LinuxTarget {
     _binary: String,
     pid: Pid,
     _software_breakpoints: HashMap<Address, Vec<Breakpoint>>,
     debug_info: debug_info::DebugInfo,
+    parsed_abbreviation_units: HashMap<Index, HashMap<u64, AbbreviationsTableEntry>>,
+    last_opened_source_files: ReadFileRingBuffer,
 }
 
 impl super::Target for LinuxTarget {
@@ -52,6 +64,8 @@ impl super::Target for LinuxTarget {
                     pid: pid,
                     _software_breakpoints: HashMap::new(),
                     debug_info: debug_info.unwrap(),
+                    parsed_abbreviation_units: HashMap::new(),
+                    last_opened_source_files: ReadFileRingBuffer::new(),
                 });
                 Ok((target, status))
             }
@@ -60,10 +74,6 @@ impl super::Target for LinuxTarget {
 
     fn process_id(&self) -> Pid {
         self.pid
-    }
-
-    fn step(&mut self, _steps: usize) {
-        todo!()
     }
 
     fn continue_execution(&mut self) -> nixwrap::MidasSysResultDynamic<nixwrap::WaitStatus> {
@@ -219,7 +229,7 @@ impl super::Target for LinuxTarget {
         nixwrap::ptrace::get_regs(self.process_id())
     }
 
-    fn source_code_at_pc(&self, lines: usize) -> MidasSysResult<(usize, Vec<(usize, String)>)> {
+    fn source_code_at_pc(&mut self, lines: usize) -> MidasSysResult<(usize, Vec<(usize, String)>)> {
         let pc = self.read_registers().pc();
         let line_number_table = self
             .debug_info
@@ -243,36 +253,99 @@ impl super::Target for LinuxTarget {
                 opcode_base: 13,
             },
         );
-        for mut program in it {
+
+        let dbg_info = self
+            .debug_info
+            .elf
+            .get_dwarf_section(dwarf::Section::DebugInfo)?;
+        let abbr_table = self
+            .debug_info
+            .elf
+            .get_dwarf_section(dwarf::Section::DebugAbbrev)?;
+
+        let dbg_str = self
+            .debug_info
+            .elf
+            .get_dwarf_section(dwarf::Section::DebugStr)?;
+
+        for (cu_index, mut program) in it.enumerate() {
+            let t = std::time::Instant::now();
             let results = program.run();
             for res in results {
                 if res.address == (pc - 1) as _ {
-                    if let Some(p) = program.header.get_full_path_of_file(res.file as usize) {
-                        let foo = &p;
-                        let mut f = std::fs::File::open(p).map_err(|e| MidasError::FileOpenError(e.kind()))?;
-                        let mut buf = String::with_capacity(
-                            f.metadata()
-                                .map_err(|e| MidasError::FileOpenError(e.kind()))?
-                                .len() as usize,
-                        );
-                        let bytes = f
-                            .read_to_string(&mut buf)
-                            .map_err(|e| MidasError::FileReadError(e.kind()))?;
-                        let ln = lines as u32;
-                        let start = res.line.saturating_sub(ln / 2);
-                        let end = res.line.saturating_add(ln / 2);
-                        let content: Vec<(usize, String)> = buf
-                            .lines()
-                            .enumerate()
-                            .skip(start as usize)
-                            .take((end - start) as usize)
-                            .map(|(line_index, s)| (line_index, s.to_string()))
-                            .collect();
-                        return Ok((res.line as usize, content));
+                    if let Some(comp_unit) = dwarf::compilation_unit::CompilationUnitHeaderIterator::new(dbg_info)
+                        .skip(cu_index)
+                        .next()
+                    {
+                        let mut die_reader: ConsumeReader = dbg_info[comp_unit
+                            .section_offset
+                            .expect("couldn't read absolute section offset")
+                            + dwarf::compilation_unit::CompilationUnitHeader::DWARF4_32_SIZE as usize..]
+                            .into();
+                        let abbrev_code = die_reader.read_uleb128().unwrap();
+                        // this is pleasing code to me.
+                        // Also; even a user interfacing with a system, adheres to laws of temporal locality; if we're doing something
+                        // in some part of the code base, chances are much more likely we'll do something adjacent to it, or even something right in it again, close in time.
+                        // Therefore we should apply caching as much as possible. This comes with complexity. But it also provides speed for the end user.
+                        let item = self
+                            .parsed_abbreviation_units
+                            .entry(Index(cu_index))
+                            .or_insert_with(|| {
+                                dwarf::attributes::parse_cu_attributes(&abbr_table[comp_unit.abbreviation_offset..])
+                                    .unwrap()
+                            })
+                            .get(&abbrev_code)
+                            .unwrap();
+                        let encoding = comp_unit.encoding();
+                        for (attribute, form) in item.attrs_list.iter() {
+                            let parsed_attr =
+                                dwarf::attributes::parse_attribute(&mut die_reader, encoding, (*attribute, *form));
+                            match parsed_attr.attribute {
+                                dwarf::attributes::Attribute::DW_AT_comp_dir => match parsed_attr.value {
+                                    dwarf::attributes::AttributeValue::DebugStrOffset(offset) => {
+                                        let mut str_reader = bytereader::ConsumeReader::wrap(&dbg_str[offset..]);
+                                        let name = str_reader.read_str()?;
+                                        let fe = program.header.get_file_by_index(res.file as usize);
+
+                                        let pb = if fe.unwrap().dir_index == 0 {
+                                            let mut pb = PathBuf::from(name);
+                                            pb.push(&fe.unwrap().path);
+                                            pb
+                                        } else {
+                                            program
+                                                .header
+                                                .get_full_path_of_file(res.file as usize)
+                                                .unwrap()
+                                        };
+                                        let text = self.last_opened_source_files.cache(&pb)?.text();
+                                        let ln = lines as u32;
+                                        let start = res.line.saturating_sub(ln / 2);
+                                        let end = res.line.saturating_add(ln / 2);
+                                        let content: Vec<(usize, String)> = text
+                                            .lines()
+                                            .enumerate()
+                                            .skip(start as usize)
+                                            .take((end - start) as usize)
+                                            // line_index + 1, because in DWARF lines are 1-indexed
+                                            .map(|(line_index, s)| (line_index + 1, s.to_string()))
+                                            .collect();
+                                        return Ok((res.line as usize, content));
+                                    }
+                                    _ => {}
+                                },
+                                _ => {}
+                            }
+                        }
                     }
                 }
             }
+            let taken = t.elapsed().as_micros();
+            println!("one iteration took: {}μs", taken);
         }
         Err(MidasError::ClientOperation(CommandErrors::ContextNotFound))
+    }
+
+    fn next(&mut self, step: StepRequest) -> MidasSysResult<WaitStatus> {
+        todo!()
     }
 }
