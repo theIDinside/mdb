@@ -3,7 +3,11 @@ extern crate linuxwrapper as nixwrap;
 extern crate midas;
 
 use cli::prompt::{Format, FormattedBuffer, Style, TextColor};
-use midas::target::{self, Target};
+use commands::prepare_help_output;
+use midas::{
+    step::StepRequest,
+    target::{self, Target},
+};
 
 use crate::commands::parse_user_input;
 mod commands;
@@ -115,28 +119,8 @@ fn main() -> Result<(), String> {
                 },
                 Err(err_msg) => prompt.display_string(&format!("Failed to set breakpoint: {}", err_msg)),
             },
-            commands::ReplCommands::Help(None) => {
-                let mut fmt = FormattedBuffer::with_capacity(350);
-                let cmd_fmt = Format::new().style(Style::Bold);
-                fmt.add_formatted("--- Commands --- \n\r", cmd_fmt);
-                fmt.add_formatted("help | h", cmd_fmt);
-                fmt.add_unformatted(" --- show this help message\n\r");
-                fmt.add_formatted("breakpoint | b", cmd_fmt);
-                fmt.add_unformatted(" --- set a breakpoint\n\r");
-                fmt.add_formatted("run | r", cmd_fmt);
-                fmt.add_unformatted(" --- Continue / start the inferior or tracee process\n\r");
-                prompt.display_bytes_newline(fmt.output);
-            }
-            commands::ReplCommands::Help(..) => {
-                let mut fmt = FormattedBuffer::with_capacity(350);
-                let cmd_fmt = Format::new().style(Style::Bold);
-                fmt.add_formatted("--- Commands --- \n\r", cmd_fmt);
-                fmt.add_formatted("help | h", cmd_fmt);
-                fmt.add_unformatted(" --- show this help message\n\r");
-                fmt.add_formatted("breakpoint | b", cmd_fmt);
-                fmt.add_unformatted(" --- set a breakpoint\n\r");
-                fmt.add_formatted("run | r", cmd_fmt);
-                fmt.add_unformatted(" --- Continue / start the inferior or tracee process\n\r");
+            commands::ReplCommands::Help(_) => {
+                let fmt = prepare_help_output();
                 prompt.display_bytes_newline(fmt.output);
             }
             commands::ReplCommands::UnknownCommand => prompt.display_string("Unkonwn command"),
@@ -157,11 +141,21 @@ fn main() -> Result<(), String> {
                 }
                 Err(err) => prompt.display_error(err.describe()),
             },
+            commands::ReplCommands::Step(instructions) => match target_.next(StepRequest::Instruction(instructions)) {
+                Ok(ws) => todo!(),
+                Err(e) => todo!(),
+            },
+            commands::ReplCommands::Next(lines) => match target_.next(StepRequest::NextSourceLine {
+                count: lines,
+                step_over: true,
+            }) {
+                Ok(ws) => todo!(),
+                Err(e) => todo!(),
+            },
         };
     }
 }
 
-#[allow(unused)]
 fn prepare_waitstatus_display_message(_status: nixwrap::WaitStatus, target: &dyn Target) -> Option<FormattedBuffer> {
     let mut format = FormattedBuffer::new();
     format.add_unformatted("\n");

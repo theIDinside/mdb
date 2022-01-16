@@ -17,6 +17,8 @@ pub mod tag;
 
 pub use sections::*;
 
+use crate::{bytereader, MidasError, MidasSysResult};
+
 use self::compilation_unit::{DWARFEncoding, DWARF};
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -68,6 +70,17 @@ impl InitialLengthField {
             // means we're 64-bit, we need to read the next 8 bytes, after where ever these 4 bytes came from
             0xff_ff_ff_ff => InitialLengthField::Dwarf64(0),
             _ => InitialLengthField::Dwarf32(value),
+        }
+    }
+
+    pub fn read(reader: &mut bytereader::ConsumeReader) -> MidasSysResult<InitialLengthField> {
+        if reader.len() < 12 {
+            return Err(MidasError::InitialLengthField);
+        }
+        let dword = reader.read_u32();
+        match dword {
+            0xff_ff_ff_ff => Ok(InitialLengthField::Dwarf64(reader.read_u64())),
+            _ => Ok(InitialLengthField::Dwarf32(dword)),
         }
     }
 

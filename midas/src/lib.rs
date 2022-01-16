@@ -9,6 +9,7 @@ pub mod elf;
 // used to live in /dwarf module, but moved here, due to wrapping reading operations in bytereader::Reader
 pub mod leb128;
 pub mod software_breakpoint;
+pub mod step;
 pub mod target;
 pub mod types;
 pub mod utils;
@@ -40,12 +41,14 @@ pub enum MidasError {
     FileReadError(std::io::ErrorKind),
     ClientOperation(CommandErrors),
     ParseError(ParseError),
+    InitialLengthField,
 }
 
 #[derive(Debug)]
 pub enum ParseError {
     CompilationUnitHeader,
     CompilationUnit,
+    FileEntry,
 }
 
 pub use dwarf::compilation_unit::find_low_pc_of;
@@ -119,7 +122,9 @@ impl MidasError {
             MidasError::ParseError(parse_err) => match parse_err {
                 ParseError::CompilationUnitHeader => "[DWARF]: Parsing of Compilation Unit Header failed",
                 ParseError::CompilationUnit => "[DWARF]: Parsing of Compilation Unit failed",
+                ParseError::FileEntry => "[DWARF]: Parsing of file Entry failed",
             },
+            MidasError::InitialLengthField => "[DWARF]: Initial Length Field could not be read",
         }
     }
 }

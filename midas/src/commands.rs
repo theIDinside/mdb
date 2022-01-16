@@ -1,4 +1,4 @@
-use crate::software_breakpoint::BreakpointRequest;
+use crate::{software_breakpoint::BreakpointRequest, step::StepRequest};
 
 pub enum InfoCommand {
     Registers,
@@ -22,9 +22,7 @@ pub enum Command {
     Run(usize),
     ListLines(usize),
     RunAll,
-    Step { count: Option<usize> },
-    StepIn,
-    Next { count: Option<usize> },
+    Step(StepRequest),
     Finish,
     FinishAll,
     Noop,
@@ -39,9 +37,7 @@ impl Command {
             Command::Run(..) => "Continue the currently selected thread of the tracee",
             Command::ListLines(..) => "List <N> source lines around current program counter",
             Command::RunAll => "Continue all threads",
-            Command::Step { .. } => "Step <N> lines",
-            Command::StepIn => "Step into",
-            Command::Next { .. } => "Step <N> instructions",
+            Command::Step(step_req) => step_req.description(),
             Command::Finish => "Continue until this function exits",
             Command::FinishAll => "Continue all threads until they exit the routine they're inside",
             Command::Noop => todo!(),

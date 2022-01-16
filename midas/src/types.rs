@@ -6,7 +6,7 @@ use std::{
 // Macro that wraps types, for clarity in the API what they are meant to represent.
 macro_rules! BasicTypeTuple {
     ($struct_name:ident($wrapped_type:ty)) => {
-        #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy)]
+        #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy, Hash)]
         pub struct $struct_name(pub $wrapped_type);
 
         impl AsRef<$wrapped_type> for $struct_name {

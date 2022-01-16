@@ -5,6 +5,10 @@ pub enum ReplCommands {
     Quit,
     Run,
     SetBreakpoint(Result<BreakpointRequest, String>),
+    // step machine instructions
+    Step(usize),
+    // step source line
+    Next(usize),
     List(usize),
     UnknownCommand,
     Help(Option<Command>),
@@ -70,4 +74,17 @@ pub fn parse_user_input(input: &String) -> ReplCommands {
         }
         _ => ReplCommands::UnknownCommand,
     }
+}
+
+pub fn prepare_help_output() -> cli::prompt::FormattedBuffer {
+    let mut fmt = cli::prompt::FormattedBuffer::with_capacity(350);
+    let cmd_fmt = cli::prompt::Format::new().style(cli::prompt::Style::Bold);
+    fmt.add_formatted("--- Commands --- \n\r", cmd_fmt);
+    fmt.add_formatted("help | h", cmd_fmt);
+    fmt.add_unformatted(" --- show this help message\n\r");
+    fmt.add_formatted("breakpoint | b", cmd_fmt);
+    fmt.add_unformatted(" --- set a breakpoint\n\r");
+    fmt.add_formatted("run | r", cmd_fmt);
+    fmt.add_unformatted(" --- Continue / start the inferior or tracee process\n\r");
+    fmt
 }

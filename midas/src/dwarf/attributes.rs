@@ -83,7 +83,6 @@ pub fn parse_cu_attributes(
             };
             attrs_list.push((attr, form));
         }
-        attrs_list.shrink_to_fit();
 
         map.insert(
             abbrev_code,

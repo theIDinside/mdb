@@ -1,6 +1,12 @@
 #![allow(unused, non_camel_case_types, non_upper_case_globals)]
-use crate::{bytereader, dwarf::linenumber::encodings::LineNumberOp, MidasError};
+use crate::{
+    bytereader::{self, ConsumeReader},
+    dwarf::linenumber::encodings::LineNumberOp,
+    MidasError, MidasSysResult,
+};
 use std::num::{NonZeroU128, NonZeroU64};
+
+use super::InitialLengthField;
 
 macro_rules! LNEncoding {
     ($struct_name:ident($struct_type:ty) { $($name:ident = $val:expr),+ $(,)? }) => {
@@ -91,6 +97,49 @@ pub struct FileEntryIterator<'a> {
     data: &'a [u8],
 }
 
+pub struct FileEntryReaderIterator<'a> {
+    reader: ConsumeReader<'a>,
+}
+
+impl<'a> FileEntryReaderIterator<'a> {
+    pub fn new(reader: ConsumeReader) -> FileEntryReaderIterator {
+        FileEntryReaderIterator { reader }
+    }
+}
+
+impl<'a> Iterator for FileEntryReaderIterator<'a> {
+    type Item = MidasSysResult<FileEntry>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let v = self.reader.peek_byte();
+
+        v.and_then(|i| {
+            if i == 0 {
+                self.reader.read_u8();
+                None
+            } else {
+                Some(i)
+            }
+        })
+        .and_then(|i| {
+            // todo(simon): for now we just panic when format is erroneous
+            let name = match self.reader.read_str() {
+                Ok(name) => name.to_string(),
+                Err(e) => return Some(Err(e)),
+            };
+            let _ = self.reader.read_u8(); // read beyond null termination.. todo(simon): perhaps change this in API?
+            let dir_index = self.reader.read_uleb128().unwrap() as _;
+            let last_modified = self.reader.read_uleb128().unwrap() as _;
+            let file_length = self.reader.read_uleb128().unwrap() as _;
+            Some(Ok(FileEntry {
+                path: name.to_owned(),
+                dir_index,
+                last_modified,
+                file_length,
+            }))
+        })
+    }
+}
+
 impl<'a> FileEntryIterator<'a> {
     pub fn new(data: &'a [u8]) -> FileEntryIterator<'a> {
         FileEntryIterator { data }
@@ -177,9 +226,77 @@ pub struct LineNumberProgramHeaderVersion4 {
 }
 
 impl LineNumberProgramHeaderVersion4 {
+    pub fn from_reader(
+        address_size: u8,
+        reader: &mut bytereader::ConsumeReader,
+    ) -> MidasSysResult<LineNumberProgramHeaderVersion4> {
+        let unit_length = reader.dispatch_read(InitialLengthField::read)?;
+        let version = reader.read_u16();
+
+        let header_length = if unit_length.is_32bit() {
+            reader.read_u32() as usize
+        } else {
+            reader.read_u64() as usize
+        };
+
+        let instruction_length_minimum = reader.read_u8();
+        let max_operations_per_instruction = reader.read_u8();
+        let default_is_statement = reader.read_u8() != 0;
+        let line_base = reader.read_u8() as i8;
+        let line_range = reader.read_u8();
+        let opcode_base = reader.read_u8();
+        let codes_count = (opcode_base - 1) as usize;
+        let mut standard_opcode_lengths = Vec::with_capacity(codes_count);
+        let slice = reader.read_slice(codes_count)?;
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                slice.as_ptr(),
+                standard_opcode_lengths.as_mut_ptr(),
+                codes_count,
+            );
+            standard_opcode_lengths.set_len(codes_count);
+        }
+
+        let mut include_directories = vec![];
+        'include_dirs: loop {
+            let res = reader.read_str();
+            if let Ok(s) = res {
+                if s.len() == 0 {
+                    break 'include_dirs;
+                } else {
+                    include_directories.push(s.to_owned());
+                    // tood(simon): when reading strings, consume the nullbyte. this is error-prone. change this. add this todo at every place this has to be done
+                    reader.read_u8();
+                }
+            } else {
+                break 'include_dirs;
+            }
+        }
+        // consume last 0-byte. todo(simon): introduce another API point, that handles this for us?
+        reader.read_u8();
+        let file_names = FileEntryIterator::new(reader.release()).collect();
+
+        Ok(LineNumberProgramHeaderVersion4 {
+            unit_length,
+            version,
+            header_prologue_length: header_length,
+            instruction_length_minimum,
+            max_operations_per_instruction,
+            default_is_statement,
+            line_base,
+            line_range,
+            opcode_base,
+            standard_opcode_lengths,
+            include_directories,
+            file_names,
+            pointer_width: address_size,
+        })
+    }
     pub fn from_bytes(address_size: u8, bytes: &[u8]) -> LineNumberProgramHeaderVersion4 {
         let mut reader = bytereader::ConsumeReader::wrap(&bytes);
-        let unit_length = reader.read_initial_length();
+        let unit_length = reader
+            .dispatch_read(InitialLengthField::read)
+            .expect("Failed to read Initial Length Field for Line Number Program Header");
         let version = reader.read_u16();
 
         let header_length = if unit_length.is_32bit() {

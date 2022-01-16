@@ -465,7 +465,10 @@ pub fn dump_cus() {
             .get_dwarf_section(midas::dwarf::Section::DebugStr)
             .expect("Failed to get .debug_info");
 
+        let mut cu_index = 0;
         for cu_header in CompilationUnitHeaderIterator::new(dbg_info) {
+            println!("Compilation Unit: {:?}", Index(cu_index));
+            cu_index += 1;
             let header_offset = cu_header
                 .section_offset
                 .expect("couldn't read absolute section offset");
@@ -476,14 +479,29 @@ pub fn dump_cus() {
             let attr = parse_cu_attributes(&abbr_table[cu_header.abbreviation_offset..]).unwrap();
             let item = attr.get(&abbrev_code).unwrap();
             let encoding = cu_header.encoding();
+
             for (attribute, form) in item.attrs_list.iter() {
                 // we *must* parse the attribute, before checking that it's the one we want; because we want to move the byte stream along, if we don't parse it we either;
                 // A: don't move the bytestream (reader) along or
                 // B: we don't move it along correctly, since we can't know beforehand how long the individual fields will be, unfortunately a design DWARF has chosen.
                 let parsed_attr = parse_attribute(&mut die_reader, encoding, (*attribute, *form));
-
-                println!("{:#X?}", parsed_attr);
+                match parsed_attr.value {
+                    attributes::AttributeValue::DebugStrOffset(offset) => {
+                        let mut strreader = bytereader::ConsumeReader::wrap(&debug_str_table[offset..]);
+                        let name = strreader
+                            .read_str_including_terminator()
+                            .expect("failed to read string from .debug_str");
+                        println!(
+                            "ParsedAttribute {{\n\t attribute: {:?},\n\tvalue: '{}',\n}}",
+                            parsed_attr.attribute, name
+                        );
+                    }
+                    _ => {
+                        println!("{:#X?}", parsed_attr);
+                    }
+                }
             }
+            println!("---------");
         }
     })
 }

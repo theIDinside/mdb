@@ -1,4 +1,4 @@
-use crate::{dwarf, MidasSysResult};
+use crate::MidasSysResult;
 
 pub fn offset_dwarf32(data: &[u8]) -> (usize, usize) {
     let res: u32 = unsafe {
@@ -26,6 +26,11 @@ pub struct ConsumeReader<'data> {
     data: &'data [u8],
 }
 
+impl<'a> Into<ConsumeReader<'a>> for &'a [u8] {
+    fn into(self) -> ConsumeReader<'a> {
+        ConsumeReader { data: self }
+    }
+}
 // I'm actually pretty happy with this interface.
 /// All read operations move the pointer to the data forwards and can not be moved backwards.
 impl<'data> ConsumeReader<'data> {
@@ -94,7 +99,7 @@ impl<'data> ConsumeReader<'data> {
 
     pub fn read_u64(&mut self) -> u64 {
         let res = unsafe {
-            let mut buf = [0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8];
+            let mut buf = [0u8; 8];
             std::ptr::copy_nonoverlapping(self.data.as_ptr(), buf.as_mut_ptr(), 8);
             std::mem::transmute(buf)
         };
@@ -160,19 +165,6 @@ impl<'data> ConsumeReader<'data> {
         self.data
     }
 
-    pub fn read_initial_length(&mut self) -> dwarf::InitialLengthField {
-        debug_assert!(self.data.len() >= 12, "If you fucked this up, it's on you");
-        let dword = self.read_u32();
-        let mut length_field = dwarf::InitialLengthField::get(dword);
-        match &mut length_field {
-            dwarf::InitialLengthField::Dwarf32(_) => length_field,
-            dwarf::InitialLengthField::Dwarf64(ref mut none) => {
-                *none = self.read_u64();
-                length_field
-            }
-        }
-    }
-
     pub fn read_offset(&mut self) -> usize {
         let (flow, offset) = unsafe { PARSE_DWARF_OFFSET(&self.data) };
         self.flow(flow);
@@ -185,6 +177,14 @@ impl<'data> ConsumeReader<'data> {
 
     fn flow(&mut self, offset: usize) {
         self.data = &self.data[offset..];
+    }
+
+    pub fn peek_byte(&self) -> Option<u8> {
+        if self.has_more() {
+            Some(self.data[0])
+        } else {
+            None
+        }
     }
 }
 

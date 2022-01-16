@@ -5,7 +5,7 @@ use crate::{
     MidasError, MidasSysResult, ParseError,
 };
 
-use super::{attributes::parse_cu_attributes, pubnames::DIEOffset, Format};
+use super::{attributes::parse_cu_attributes, pubnames::DIEOffset, Format, InitialLengthField};
 #[allow(unused, non_camel_case_types)]
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CompilationUnitHeader {
@@ -107,7 +107,7 @@ impl CompilationUnitHeader {
         if reader.len() < CompilationUnitHeader::DWARF5_64_SIZE {
             return Err(MidasError::ParseError(ParseError::CompilationUnitHeader));
         }
-        let unit_length = reader.read_initial_length();
+        let unit_length = reader.dispatch_read(InitialLengthField::read)?;
         let version = reader.read_u16();
 
         let unit_type = if version == 5 {
@@ -142,7 +142,9 @@ impl CompilationUnitHeader {
 
     pub fn from_bytes(bytes: &[u8]) -> CompilationUnitHeader {
         let mut reader = bytereader::ConsumeReader::wrap(&bytes);
-        let unit_length = reader.read_initial_length();
+        let unit_length = reader
+            .dispatch_read(InitialLengthField::read)
+            .expect("failed to read initial length field for Compilation Unit Header");
         let version = reader.read_u16();
 
         let unit_type = if version == 5 {

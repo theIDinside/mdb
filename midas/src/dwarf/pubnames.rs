@@ -1,5 +1,7 @@
 use crate::bytereader;
 
+use super::InitialLengthField;
+
 #[derive(Debug)]
 pub struct PubNameHeader {
     unit_length: super::InitialLengthField,
@@ -13,7 +15,9 @@ pub struct PubNameHeader {
 impl PubNameHeader {
     pub fn from_bytes(data: &[u8], section_offset: usize) -> PubNameHeader {
         let mut reader = bytereader::ConsumeReader::wrap(&data);
-        let unit_length = reader.read_initial_length();
+        let unit_length = reader
+            .dispatch_read(InitialLengthField::read)
+            .expect("failed to read initial length field for PubNameHeader");
         let version = reader.read_u16();
         let debug_info_offset = reader.read_offset();
         let debug_info_length = reader.read_offset();
