@@ -41,6 +41,18 @@ impl<'data> ConsumeReader<'data> {
         ConsumeReader { data }
     }
 
+    /// This function operates on the following contract:
+    /// All types like, Compilation Units, headers, etc, defines a "read_from" function, that takes a ConsumeReader.
+    /// This static member function should be passed into this to create the type. Doing this, we don't have to create separate
+    /// ConsumeReaders for a header and for it's entries, since this will statically dispatch to the correct reader implementations on the type.
+    pub fn dispatch_read<T>(&mut self, read_fn: fn(&mut ConsumeReader) -> MidasSysResult<T>) -> MidasSysResult<T>
+    where
+        T: Sized,
+    {
+        let t = read_fn(self)?;
+        Ok(t)
+    }
+
     pub fn read_slice(&mut self, len: usize) -> MidasSysResult<&[u8]> {
         if self.data.len() >= len {
             let res = &self.data[..len];
@@ -120,6 +132,20 @@ impl<'data> ConsumeReader<'data> {
         }
     }
 
+    pub fn read_str_including_terminator(&mut self) -> MidasSysResult<&str> {
+        let end = self.data.iter().position(|b| *b == 0);
+        if let Some(pos) = end {
+            let s = std::str::from_utf8(&self.data[..pos]);
+            self.flow(pos + 1);
+            s.map_err(|e| crate::MidasError::from(e))
+        } else {
+            Err(crate::MidasError::UTF8Error {
+                valid_up_to: self.data.len(),
+                error_len: None,
+            })
+        }
+    }
+
     pub fn has_more(&self) -> bool {
         self.data.len() != 0
     }
@@ -151,6 +177,10 @@ impl<'data> ConsumeReader<'data> {
         let (flow, offset) = unsafe { PARSE_DWARF_OFFSET(&self.data) };
         self.flow(flow);
         offset
+    }
+
+    pub fn len(&self) -> usize {
+        self.data.len()
     }
 
     fn flow(&mut self, offset: usize) {
