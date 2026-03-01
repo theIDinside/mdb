@@ -362,8 +362,20 @@ if(NOT IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/dependencies/rr")
     message(FATAL_ERROR "RR source has not been configured. run `mdbuild dev-setup`")
 endif()
 
-# Add RR to this configuration and build artefacts into RR_BINARY_OBJ_DIR
+# We are not interested in bulding RR in debug. Always build RR files with O3
+set(MDB_SAVED_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+set(MDB_SAVED_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
+set(CMAKE_CXX_FLAGS_DEBUG "${COMMON_FLAGS} -O3 -g3")
+set(CMAKE_C_FLAGS_DEBUG "${COMMON_FLAGS} -O3 -g3")
+
+message(STATUS "Building RR with optimization: ${CMAKE_CXX_FLAGS_DEBUG}")
 add_subdirectory(dependencies/rr "${RR_BINARY_OBJ_DIR}")
+
+# Restore project wide settings to whatever it is.
+set(CMAKE_CXX_FLAGS_DEBUG "${MDB_SAVED_CXX_FLAGS_DEBUG}")
+set(CMAKE_C_FLAGS_DEBUG "${MDB_SAVED_C_FLAGS_DEBUG}")
+
+message(STATUS "Restored MDB debug flags: ${CMAKE_CXX_FLAGS_DEBUG}")
 
 target_link_libraries(mdb PRIVATE mdb_spinlock zydis libquickjs mdbjson librr)
 # Link the libraries to your target
