@@ -38,15 +38,21 @@ PrepareCompileUnitPreDwarf5(UnitData *compilationUnit, const DieMetaData &unitDi
   return std::tuple<u64, const char *>{ offset, directory };
 }
 
-DieReference::DieReference(UnitData *compilationUnit, const DieMetaData *die) noexcept
-    : mUnitData(compilationUnit), mDebugInfoEntry(die)
+ObjectFile *
+UnitDataEntry::GetObjectFile() const noexcept
 {
+  return mUnitData->GetObjectFile();
 }
 
 UnitData *
-DieReference::GetUnitData() const noexcept
+UnitDataEntry::GetUnitData() const noexcept
 {
   return mUnitData;
+}
+
+DieReference::DieReference(UnitData *compilationUnit, const DieMetaData *die) noexcept
+    : UnitDataEntry(compilationUnit), mDebugInfoEntry(die)
+{
 }
 
 const DieMetaData *
@@ -129,7 +135,7 @@ IndexedDieReference::IndexedDieReference(const DieReference &reference) noexcept
 }
 
 IndexedDieReference::IndexedDieReference(UnitData *compilationUnit, u64 index) noexcept
-    : mUnitData(compilationUnit), mDieIndex(index)
+    : UnitDataEntry(compilationUnit), mDieIndex(index)
 {
 }
 
@@ -176,12 +182,6 @@ DieReference::ReadAttribute(Attribute attr) const noexcept
     ++i;
   }
   return std::nullopt;
-}
-
-UnitData *
-IndexedDieReference::GetUnitData() const noexcept
-{
-  return mUnitData;
 }
 
 u64

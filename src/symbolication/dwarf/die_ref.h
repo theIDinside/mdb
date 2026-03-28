@@ -4,8 +4,9 @@
 #include <symbolication/dwarf_defs.h>
 
 namespace mdb {
+class ObjectFile;
 struct AttributeValue;
-}
+} // namespace mdb
 
 namespace mdb::sym::dw {
 class UnitData;
@@ -24,16 +25,20 @@ std::tuple<u64, const char *> PrepareCompileUnitPreDwarf5(UnitData *compilationU
 
 class IndexedDieReference;
 
-class DieReference
+struct UnitDataEntry
 {
-protected:
   UnitData *mUnitData;
+  [[nodiscard]] ObjectFile *GetObjectFile() const noexcept;
+  [[nodiscard]] UnitData *GetUnitData() const noexcept;
+};
+
+class DieReference : public UnitDataEntry
+{
   const DieMetaData *mDebugInfoEntry;
 
 public:
   DieReference() noexcept = default;
   DieReference(UnitData *compilationUnit, const DieMetaData *die) noexcept;
-  UnitData *GetUnitData() const noexcept;
   const DieMetaData *GetDie() const noexcept;
   DieReference MaybeResolveReference() const noexcept;
   u64 IndexOfDie() const noexcept;
@@ -51,9 +56,8 @@ public:
   std::optional<DieReference> GetParent() const;
 };
 
-class IndexedDieReference
+class IndexedDieReference : public UnitDataEntry
 {
-  UnitData *mUnitData;
   u64 mDieIndex;
 
 public:
@@ -62,7 +66,6 @@ public:
   IndexedDieReference(UnitData *compilationUnit, u64 index) noexcept;
 
   bool IsValid() const noexcept;
-  UnitData *GetUnitData() const noexcept;
   u64 GetIndex() const noexcept;
   const DieMetaData *GetDie() noexcept;
 
