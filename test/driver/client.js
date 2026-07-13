@@ -80,22 +80,46 @@ class RemoteService {
 }
 
 /**
- * @param {string} gdbserver
+ * @param {string} gdbserverPath
  * @param {string} host
  * @param {number} port
  * @param {string} binary
  * @returns { Promise<RemoteService> }
  */
-async function createRemoteService(gdbserver, host, port, binary) {
+async function createRemoteService(gdbserverPath, host, port, binary) {
   port = Number.parseInt(port)
   return new Promise((resolve, reject) => {
     let serviceReadyEmitter = new EventEmitter()
+    let settled = false
+    const settle = (fn) => (value) => {
+      if (settled) return
+      settled = true
+      fn(value)
+    }
+    resolve = settle(resolve)
+    reject = settle(reject)
 
     console.log(`spawning gdbserver...`)
-    let service = spawn(gdbserver, ['--multi', `${host}:${port}`, binary], {
+    let service = spawn(gdbserverPath, ['--multi', `${host}:${port}`, binary], {
       shell: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
+
+    // `spawn` returns a ChildProcess even when the process can't be launched;
+    // any failure to spawn surfaces asynchronously via the 'error' event.
+    service.on('error', (err) => {
+      reject(new Error(`Failed to spawn gdbserver (${gdbserverPath}): ${err.message}`))
+    })
+
+    // With `shell: true` a missing/failing gdbserver launches the shell fine and
+    // then exits nonzero, so 'error' never fires. Catch that case here: any exit
+    // before the service reports ready means startup failed.
+    service.on('exit', (code, signal) => {
+      if (!settled) {
+        reject(new Error(`gdbserver exited before it was ready (code=${code}, signal=${signal})`))
+      }
+    })
+
     console.log('setup listeners')
 
     process.stdout.on('data', (data) => {
@@ -112,10 +136,6 @@ async function createRemoteService(gdbserver, host, port, binary) {
     }
     service.stdout.addListener('data', waitUntilServiceReady)
     service.stderr.addListener('data', waitUntilServiceReady)
-
-    if (service == null) {
-      reject(`Failed to spawn service`)
-    }
 
     serviceReadyEmitter.once('init', (done) => {
       if (done) {
@@ -384,7 +404,9 @@ class Scope {
     if (this.#variables) {
       return this.#variables
     }
-    const response = await this.#client.variablesRequest({ variablesReference: this.id })
+    const response = await this.#client.variablesRequest({
+      variablesReference: this.id,
+    })
     const vars = response.body.variables.map((v) => new Variable(this.#client, v))
     this.#variables = vars
     return this.#variables
@@ -1054,7 +1076,10 @@ class DebugAdapterClient {
       },
       () => {
         for (const request of breakpointsRequests) {
-          this.setBreakpointsRequest({ ...request, configToken: this.configToken })
+          this.setBreakpointsRequest({
+            ...request,
+            configToken: this.configToken,
+          })
         }
       }
     )
@@ -1309,9 +1334,11 @@ class DebugAdapterClient {
   async setBreakpointsRequest(args, extensionArgs = null) {
     if (extensionArgs) {
       const { source, identifiers } = extensionArgs
-      if (
-        !(typeof source === 'string' && Array.isArray(identifiers) && identifiers.every((id) => typeof id === 'string'))
-      ) {
+      if (!(
+        typeof source === 'string' &&
+        Array.isArray(identifiers) &&
+        identifiers.every((id) => typeof id === 'string')
+      )) {
         throw new Error(
           `extensionArgs must be of type: { source: string, identifiers: string[] }, was: ${typeof source}, ${typeof identifiers}`
         )
@@ -1630,7 +1657,9 @@ async function launchToGetFramesAndScopes(debugAdapter, filePath, bpIdentifiers,
 
   frames[0].scopes()
 
-  const scopes_res = await debugAdapter.sendReqGetResponse('scopes', { frameId: frames[0].id })
+  const scopes_res = await debugAdapter.sendReqGetResponse('scopes', {
+    frameId: frames[0].id,
+  })
   const scopes = scopes_res.body.scopes
   assertLog(
     scopes.length == 3,
