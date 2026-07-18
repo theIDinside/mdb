@@ -2452,7 +2452,7 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
           mRequestSeq,
           mProcessId,
           v->mName,
-          v->EnsureTypeResolved()->mName);
+          v->GetType().Name());
         return result;
       }
     } else {

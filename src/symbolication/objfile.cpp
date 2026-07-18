@@ -543,20 +543,20 @@ void
 ObjectFile::SetSerializerFor(sym::Value &value) noexcept
 {
   if (!value.IsValidValue()) {
-    value.SetDapSerializer(Tracer::GetDataResolver<sym::InvalidValueSerializer>());
+    value.SetDapSerializer(Tracer::GetSerializer<sym::InvalidValueSerializer>());
   }
   if (value.HasVisualizer()) {
     return;
   }
 
-  sym::Type &type = *value.GetType()->ResolveAlias();
+  sym::Type *type = value.GetType()->ResolveAlias();
 
-  if (type.IsArrayType()) {
-    value.SetDapSerializer(Tracer::GetDataResolver<sym::ArraySerializer>());
-  } else if (type.IsPrimitive() || type.IsReference()) {
-    value.SetDapSerializer(Tracer::GetDataResolver<sym::PrimitiveSerializer>());
+  if (type->IsArrayType()) {
+    value.SetDapSerializer(Tracer::GetSerializer<sym::ArraySerializer>());
+  } else if (type->IsPrimitive() || type->IsReference()) {
+    value.SetDapSerializer(Tracer::GetSerializer<sym::PrimitiveSerializer>());
   } else {
-    value.SetDapSerializer(Tracer::GetDataResolver<sym::DefaultStructSerializer>());
+    value.SetDapSerializer(Tracer::GetSerializer<sym::DefaultStructSerializer>());
   }
 }
 
@@ -576,13 +576,17 @@ ObjectFile::SearchDebugSymbolStringTableParallelized(const std::string &regex) c
   auto jobSize = std::min<size_t>(stringTableView.size(), MegaByte(2));
   std::vector<std::pair<size_t, size_t>> positions;
   size_t previous = 0;
-  for (size_t i = jobSize; i < stringTableView.size(); i += jobSize) {
-    auto innerIndex = std::min(i, stringTableView.size());
-    while (innerIndex < stringTableView.size() && stringTableView[innerIndex] != 0) {
-      ++innerIndex;
+  if (MegaByte(2) > stringTableView.size()) {
+    positions.emplace_back(0, stringTableView.size());
+  } else {
+    for (size_t i = jobSize; i < stringTableView.size(); i += jobSize) {
+      auto innerIndex = std::min(i, stringTableView.size());
+      while (innerIndex < stringTableView.size() && stringTableView[innerIndex] != 0) {
+        ++innerIndex;
+      }
+      positions.emplace_back(previous, innerIndex - previous);
+      previous = innerIndex + 1;
     }
-    positions.emplace_back(previous, innerIndex - previous);
-    previous = innerIndex + 1;
   }
 
   // Split work into parallel tasks for large debug string sections
@@ -923,22 +927,22 @@ SymbolFile::GetStaticResolver(sym::Value &value) noexcept
   //   the idea, is that we later on should be able to extend this to plug in new resolvers & printers/visualizers.
   //   remember: we don't just lump everything into "pretty printer"; we have distinct ideas about how to resolve
   //   values and how to display them, which *is* the issue with GDB's pretty printers
-  sym::Type *type = value.GetType()->ResolveAlias();
+  const sym::CanonicalType type = value.GetType();
 
-  sym::Type *layoutType = type->TypeDescribingLayoutOfThis();
-
-  const auto arrayType = type->IsArrayType();
-  if (type->IsReference() && !arrayType) {
-    if (layoutType->IsCharType()) {
+  const bool isArrayType = type->IsArrayType();
+  if (type->IsReference() && !isArrayType) {
+    auto derefType = type.DerefType();
+    if (derefType->IsCharType()) {
       return Tracer::GetResolver<sym::ResolveCString>();
     }
     return Tracer::GetResolver<sym::ResolveReference>();
   }
 
   // todo: again, this is hardcoded, which is counter to the whole idea here.
-  if (arrayType) {
+  if (isArrayType) {
     return Tracer::GetResolver<sym::ResolveArray>();
   }
+
   return nullptr;
 }
 
@@ -954,10 +958,10 @@ SymbolFile::ResolveVariable(
     return {};
   }
 
-  sym::Type *type = value->EnsureTypeResolved()->SkipJunk();
+  sym::CanonicalType type = value->GetType();
 
   js::ResolverRegistry *registry = js::Scripting::GetResolverRegistry();
-  sym::IValueContentsResolver *resolver = registry->GetResolver(type);
+  sym::IValueContentsResolver *resolver = registry->GetResolver(type.TypeEntry());
 
   if (!resolver) {
     resolver = GetStaticResolver(*value);
@@ -1130,12 +1134,6 @@ SymbolFile::GetVariables(sym::FrameVariableKind variablesKind, tc::SupervisorSta
   frame.GetInitializedVariables(variablesKind, relevantSymbols);
 
   for (const sym::Symbol &symbol : relevantSymbols) {
-
-    if (symbol.mType->IsPrimitive() && !symbol.mType->IsResolved()) {
-      sym::dw::TypeSymbolicationContext symbolicationContext{ *this->GetObjectFile(), symbol.mType };
-      symbolicationContext.ResolveType();
-    }
-
     auto variableValue =
       sym::MemoryContentsObject::CreateFrameVariable(tc, frame, const_cast<sym::Symbol &>(symbol), true);
     ObjectFile::SetSerializerFor(*variableValue);

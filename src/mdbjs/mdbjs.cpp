@@ -356,8 +356,10 @@ Scripting::CreateArrayAt(
   }
 
   // Create synthetic variable at the given address using context from source variable
-  auto synthetic = sym::MemoryContentsObject::CreateSyntheticVariable(
-    *varContext, AddrPtr{ address }, sym::SyntheticType{ .mLayoutType = type, .mCount = u32(count) }, true);
+  auto synthetic = sym::MemoryContentsObject::CreateSyntheticVariable(*varContext,
+    AddrPtr{ address },
+    sym::SyntheticType{ .mLayoutType = sym::CanonicalType::From(*type), .mCount = u32(count) },
+    true);
 
   JSValue array = JS_NewArray(cx);
 

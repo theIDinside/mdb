@@ -32,41 +32,42 @@ ResolveReference::Resolve(const VariableContext &context, ValueRange valueRange)
   std::vector<Ref<Value>> results;
   auto value = *context.GetValue();
   // actual `T` type behind the reference
-  Type *dereferencedType = value.EnsureTypeResolved()->TypeDescribingLayoutOfThis();
+
+  CanonicalType derefType = value.GetType().DerefType();
   if (const auto address = value.ToRemotePointer(); address.has_value()) {
-    auto adjusted_address = address.value() + (valueRange.start.value_or(0) * dereferencedType->Size());
-    const auto requestedLengthInBytes = valueRange.count.value_or(1) * dereferencedType->Size();
+    auto adjusted_address = address.value() + (valueRange.start.value_or(0) * derefType->Size());
+    const auto requestedLengthInBytes = valueRange.count.value_or(1) * derefType->Size();
     auto memory = sym::MemoryContentsObject::ReadMemory(
       *context.mTask->GetSupervisor(), adjusted_address, requestedLengthInBytes);
     if (!memory.is_ok()) {
       results.push_back(Ref<Value>::MakeShared(
-        nullptr, *dereferencedType, 0U, nullptr, Tracer::GetDataResolver<sym::InvalidValueSerializer>()));
+        nullptr, *derefType.TypeEntry(), 0U, nullptr, Tracer::GetSerializer<sym::InvalidValueSerializer>()));
       return results;
     }
     auto indirectValueObject = std::make_shared<EagerMemoryContentsObject>(
       adjusted_address, adjusted_address + memory.value->Size(), std::move(memory.value));
 
-    auto clonedContext = dereferencedType->IsPrimitive() ? VariableContext::CloneFrom(0, context)
-                                                         : Tracer::CloneFromVariableContext(context);
+    auto clonedContext = derefType->IsPrimitive() ? VariableContext::CloneFrom(0, context)
+                                                  : Tracer::CloneFromVariableContext(context);
 
-    if (dereferencedType->IsArrayType()) {
+    if (derefType->IsArrayType()) {
       results.push_back(Ref<Value>::MakeShared(clonedContext,
-        *dereferencedType,
+        *derefType.TypeEntry(),
         0U,
         indirectValueObject,
-        Tracer::GetDataResolver<sym::ArraySerializer>()));
-    } else if (dereferencedType->IsPrimitive() || dereferencedType->IsReference()) {
+        Tracer::GetSerializer<sym::ArraySerializer>()));
+    } else if (derefType->IsPrimitive() || derefType->IsReference()) {
       results.push_back(Ref<Value>::MakeShared(clonedContext,
-        *dereferencedType,
+        *derefType.TypeEntry(),
         0U,
         indirectValueObject,
-        Tracer::GetDataResolver<sym::PrimitiveSerializer>()));
+        Tracer::GetSerializer<sym::PrimitiveSerializer>()));
     } else {
       results.push_back(Ref<Value>::MakeShared(clonedContext,
-        *dereferencedType,
+        *derefType.TypeEntry(),
         0U,
         indirectValueObject,
-        Tracer::GetDataResolver<sym::DefaultStructSerializer>()));
+        Tracer::GetSerializer<sym::DefaultStructSerializer>()));
     }
     ObjectFile::SetSerializerFor(*results.back());
     if (clonedContext->mId > 0) {
@@ -86,22 +87,20 @@ ResolveCString::Resolve(const VariableContext &context, ValueRange valueRange) n
     const auto requestedLength = valueRange.count.value_or(256);
     auto referencedMemory =
       sym::MemoryContentsObject::ReadMemory(*context.mTask->GetSupervisor(), adjustedAddress, requestedLength);
+    CanonicalType layoutType = value.GetType().DerefType();
     if (!referencedMemory.is_ok()) {
-      auto *layoutType = value.GetType()->TypeDescribingLayoutOfThis();
       results.push_back(Ref<Value>::MakeShared(
-        nullptr, *layoutType, 0U, nullptr, Tracer::GetDataResolver<InvalidValueSerializer>()));
+        nullptr, *layoutType, 0U, nullptr, Tracer::GetSerializer<InvalidValueSerializer>()));
       return results;
     }
     auto indirectValueObject = std::make_shared<EagerMemoryContentsObject>(
       adjustedAddress, adjustedAddress + referencedMemory.value->Size(), std::move(referencedMemory.value));
 
-    // actual `char` type
-    auto *layoutType = value.GetType()->TypeDescribingLayoutOfThis();
     auto stringValue = Ref<sym::Value>::MakeShared(VariableContext::CloneFrom(0, context),
       *layoutType,
       0U,
       indirectValueObject,
-      Tracer::GetDataResolver<CStringSerializer>());
+      Tracer::GetSerializer<CStringSerializer>());
 
     results.push_back(std::move(stringValue));
   }
@@ -112,10 +111,11 @@ std::vector<Ref<Value>>
 ResolveArray::Resolve(const VariableContext &context, ValueRange valueRange) noexcept
 {
   auto &value = *context.GetValue();
-  MDB_ASSERT(value.GetType() && value.GetType()->IsArrayType(), "Expected value-type to be an array-type");
+  CanonicalType type = value.GetType();
+  MDB_ASSERT(type->IsArrayType(), "Expected value-type to be an array-type");
   std::vector<Ref<Value>> results;
-  const auto arraySize = value.GetType()->ArraySize();
-  Type *elementsType = value.GetType()->TypeDescribingLayoutOfThis();
+  const auto arraySize = type->ArraySize();
+  CanonicalType elementsType = type.DerefType();
 
   if (valueRange.start.value() >= arraySize) {
     return {};
@@ -250,7 +250,8 @@ PrimitiveSerializer::FormatValue(const Value &valueObject, std::pmr::memory_reso
   if (span.empty()) {
     return std::nullopt;
   }
-  auto *type = valueObject.GetType();
+
+  CanonicalType type = valueObject.GetType();
   const auto size_of = type->size_of;
 
   std::pmr::string result{ allocator };
@@ -260,15 +261,8 @@ PrimitiveSerializer::FormatValue(const Value &valueObject, std::pmr::memory_reso
     FormatAndReturn(result, "0x{:x}", ptr);
   }
 
-  auto target_type = type->GetTargetType();
-  if (target_type->GetDwarfTag() == DwarfTag::DW_TAG_enumeration_type) {
-    if (!target_type->IsResolved()) {
-      dw::TypeSymbolicationContext ctx{ *target_type->mCompUnitDieReference->GetUnitData()->GetObjectFile(),
-        *target_type.ptr };
-      ctx.ResolveType();
-    }
-
-    return FormatEnum(*target_type, span, allocator);
+  if (type->GetDwarfTag() == DwarfTag::DW_TAG_enumeration_type) {
+    return FormatEnum(*type, span, allocator);
   }
 
   switch (type->GetBaseType().value()) {
@@ -423,37 +417,35 @@ ArraySerializer::SerializeVariable(const Value &value, std::pmr::memory_resource
     no_alias->ArraySize());
 }
 
-/** static */
-std::optional<std::pmr::string>
-CStringSerializer::FormatValue(
-  const Value &value, std::optional<u32> nullTerminator, std::pmr::memory_resource *allocator) noexcept
-{
-  const auto byte_span = value.FullMemoryView();
-  if (byte_span.empty()) {
-    return std::nullopt;
-  }
-  std::string_view cast{ (const char *)byte_span.data(), nullTerminator.value_or(byte_span.size_bytes()) };
-  std::pmr::string result{ allocator };
-  FormatAndReturn(result, "{}", cast);
-}
-
 std::optional<std::pmr::string>
 CStringSerializer::SerializeVariable(const Value &value, std::pmr::memory_resource *allocator) noexcept
 {
-  const auto byte_span = value.FullMemoryView();
-  if (byte_span.empty()) {
+  const auto byteSpan = value.FullMemoryView();
+
+  if (byteSpan.empty()) {
     return std::nullopt;
   }
+
+  auto type = value.GetType();
+  const auto baseEncoding = type->GetBaseType();
+  const u32 elemSize = type->size_of;
+
+  const bool isUtf16 =
+    elemSize == 2 && baseEncoding.has_value() &&
+    (baseEncoding.value() == BaseTypeEncoding::DW_ATE_UCS || baseEncoding.value() == BaseTypeEncoding::DW_ATE_UTF);
+
+  std::pmr::string result{ allocator };
+
   std::optional<u32> null_terminator = {};
-  for (const auto [index, ch] : Enumerate(byte_span)) {
-    if (ch == 0) {
-      null_terminator = index;
+  const auto size = byteSpan.size_bytes();
+  for (auto i = 0U; i < size; ++i) {
+    if (byteSpan[i] == 0) {
+      null_terminator = i;
       break;
     }
   }
 
-  std::string_view cast{ (const char *)byte_span.data(), null_terminator.value_or(byte_span.size_bytes()) };
-  std::pmr::string result{ allocator };
+  std::string_view cast{ (const char *)byteSpan.data(), null_terminator.value_or(byteSpan.size_bytes()) };
   FormatAndReturn(result,
     R"({{ "name": "{}", "value": "{}", "type": "const char *", "variablesReference": {}, "memoryReference": "{}" }})",
     value.mName,
@@ -534,23 +526,16 @@ FormatValue(Value &value, Iterator iter) noexcept
   if (span.empty()) {
     return std::format_to(iter, "<err:value had no memory contents>");
   }
-  Type *type = value.GetType();
-  const auto size_of = type->size_of;
+  CanonicalType type = value.GetType();
+  const auto size_of = type->SizeBytes();
 
   if (type->IsReference()) {
     const auto ptrValue = BitCopy<std::uintptr_t>(span);
     FormatAndReturn(iter, "0x{:x}", ptrValue);
   }
 
-  auto target_type = type->GetTargetType();
-  if (target_type->GetDwarfTag() == DwarfTag::DW_TAG_enumeration_type) {
-    if (!target_type->IsResolved()) {
-      dw::TypeSymbolicationContext ctx{ *target_type->mCompUnitDieReference->GetUnitData()->GetObjectFile(),
-        *target_type.ptr };
-      ctx.ResolveType();
-    }
-
-    return FormatEnum(*target_type, span, iter);
+  if (type->GetDwarfTag() == DwarfTag::DW_TAG_enumeration_type) {
+    return FormatEnum(*type, span, iter);
   }
 
   switch (type->GetBaseType().value()) {
@@ -677,32 +662,28 @@ JavascriptValueSerializer::Serialize(
     }
     return std::format_to(it, ", ");
   };
-  Type *valueType = value->GetType();
-  if (!valueType->IsResolved()) {
-    sym::dw::TypeSymbolicationContext symbolicationContext{
-      *valueType->mCompUnitDieReference->GetUnitData()->GetObjectFile(), *valueType
-    };
-    symbolicationContext.ResolveType();
-  }
+
+  CanonicalType valueType = value->GetType();
 
   auto indentLevel = options.mDepth - currentDepth;
   auto indent = GetIndent(options.mNewLineAfterMember ? indentLevel : 0);
-  if (value->GetType()->IsPrimitive()) {
+
+  if (valueType->IsPrimitive()) {
     auto it = std::format_to(fmtIterator, "{}{} : ", indent, value->mName);
     it = FormatValue(*value, it);
     return finalizeField(it, options);
   }
   if (currentDepth == 0) {
-    auto it =
-      std::format_to(fmtIterator, "{}{} : struct {}{{ .. }}", indent, value->mName, value->GetType()->mName);
+    auto it = std::format_to(fmtIterator, "{}{} : struct {}{{ .. }}", indent, value->mName, valueType.Name());
     return finalizeField(it, options);
   }
   // This is a struct/class
-  auto it = std::format_to(fmtIterator, "{}{} : {}{{", indent, value->mName, valueType->mName);
+  auto it = std::format_to(fmtIterator, "{}{} : {}{{", indent, value->mName, valueType.Name());
   if (options.mNewLineAfterMember) {
     it = std::format_to(it, "\n");
   }
-  for (const auto &m : value->GetType()->MemberFields()) {
+
+  for (const auto &m : valueType->MemberFields()) {
     auto v = value->GetMember(m.mName);
     it = Serialize(v, it, options, currentDepth - 1);
   }
@@ -717,15 +698,9 @@ JavascriptValueSerializer::Serialize(
   Value *value, StringType &outputBuffer, const SerializeOptions &options) noexcept
 {
   auto it = std::back_inserter(outputBuffer);
-  Type *valueType = value->GetType();
-  if (!valueType->IsResolved()) {
-    sym::dw::TypeSymbolicationContext symbolicationContext{
-      *valueType->mCompUnitDieReference->GetUnitData()->GetObjectFile(), *valueType
-    };
-    symbolicationContext.ResolveType();
-  }
+  CanonicalType valueType = value->GetType();
 
-  if (value->GetType()->IsPrimitive()) {
+  if (valueType->IsPrimitive()) {
     FormatValue(*value, it);
     return true;
   }
@@ -736,7 +711,7 @@ JavascriptValueSerializer::Serialize(
     it = std::format_to(it, "{{ ");
   }
 
-  for (const auto &m : value->GetType()->MemberFields()) {
+  for (const auto &m : valueType->MemberFields()) {
     auto v = value->GetMember(m.mName);
     it = Serialize(v, it, options, options.mDepth - 1);
   }

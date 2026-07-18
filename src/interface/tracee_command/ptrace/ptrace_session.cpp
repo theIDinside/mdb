@@ -26,6 +26,7 @@
 #include <link.h>
 #include <sys/personality.h>
 #include <sys/ptrace.h>
+#include <sys/syscall.h>
 #include <sys/user.h>
 #include <unistd.h>
 

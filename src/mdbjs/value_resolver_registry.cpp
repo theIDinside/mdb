@@ -23,10 +23,11 @@ Resolver::Resolve(const VariableContext &context, sym::ValueRange valueRange) no
   auto resolvedValues = Resolve(context.GetValue(), valueRange.start.value_or(0), valueRange.count.value_or(0));
 
   for (auto &value : resolvedValues) {
-    sym::Type *type = value->EnsureTypeResolved();
+    sym::CanonicalType type = value->GetType();
     auto variableContext =
       type->IsPrimitive() ? VariableContext::CloneFrom(0, context) : Tracer::CloneFromVariableContext(context);
 
+    ObjectFile::SetSerializerFor(*value);
     if (variableContext->mId > 0) {
       variableContext->mTask->CacheValueObject(variableContext->mId, value);
     }
@@ -56,6 +57,7 @@ Resolver::Resolve(Ref<sym::Value> baseValue, u32 offset, u32 count) const
   // Call the JS resolver function with arguments: (jsvariable, offset, count)
   JSValue args[] = { jsVariable, jsOffset, jsCount };
   JSValue thisValue = JS_UNDEFINED;
+  DBGLOG(core, "Calling resolver {}", mResolverName);
   auto callResult = CallFunction(mContext, mResolverFn, thisValue, args);
 
   // Check if the call was successful
@@ -87,13 +89,13 @@ Resolver::Resolve(Ref<sym::Value> baseValue, u32 offset, u32 count) const
     sym::Value *nativeValue = JsVariable::GetNative(mContext, element);
 
     if (nativeValue) {
-      // Increase reference count and add to result
-      result.push_back(Ref<sym::Value>{ nativeValue });
+      result.emplace_back(nativeValue);
     } else {
       DBGLOG(core, "Element {} in resolver '{}' result is not a valid JsVariable", i, mResolverName);
     }
   }
 
+  DBGLOG(core, "Resolver is returning a result of {} length", result.size());
   return result;
 }
 

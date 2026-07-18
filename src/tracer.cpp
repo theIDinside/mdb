@@ -520,7 +520,7 @@ Tracer::InitInterpreterAndStartDebugger(
 {
   Get().mDebugAdapterThread = std::move(debugAdapterThread);
 
-  auto interpreter = js::Scripting::Create();
+  auto *interpreter = js::Scripting::Create();
   MainLoop(eventSystem, interpreter);
   interpreter->Shutdown();
 }
@@ -529,12 +529,12 @@ void
 Tracer::MainLoop(EventSystem *eventSystem, mdb::js::Scripting *scriptRuntime) noexcept
 {
   auto &dbgInstance = Get();
-  dbgInstance.sScriptRuntime = scriptRuntime;
+  mdb::Tracer::sScriptRuntime = scriptRuntime;
 
   std::vector<ApplicationEvent> readInEvents{};
   readInEvents.reserve(128);
 
-  while (dbgInstance.IsRunning()) {
+  while (mdb::Tracer::IsRunning()) {
     if (eventSystem->PollBlocking(readInEvents)) {
       for (auto &&evt : readInEvents) {
         switch (evt.mEventType) {

@@ -42,6 +42,9 @@ class TypeStorage
 {
   friend class sym::dw::TypeSymbolicationContext;
   std::mutex mWriteMutex;
+
+  static sym::Type *sDebuggerStringType;
+
   // The u64 here is offset into the debug information .debug_info section
   // And effectively, a sym::Type* maps to a debug information entry containing a type
   // but that type can be const + another type, and this is where type chains come in.
@@ -115,51 +118,39 @@ class SymbolLocation
   friend struct Symbol;
 
   LocKind mKind;
-  union
-  {
-    std::span<const u8> uDwarfExpression;
-    u32 uLocListOffset;
-    LocationList *uLocationList;
-  };
+  // Offset into section where the location list can be read from
+  u32 mLocListOffset;
+  std::span<const u8> mDwarfExpression;
+  LocationList *mLocationList{ nullptr };
 
 public:
   MOVE_ONLY(SymbolLocation);
 
-  template <typename T> constexpr SymbolLocation(T &&t)
+  SymbolLocation(SymbolLocation &&move) noexcept
+      : mKind(move.GetKind()), mLocListOffset(move.mLocListOffset), mDwarfExpression(move.mDwarfExpression),
+        mLocationList(move.mLocationList)
   {
-    using mdb::IsSame;
-    if constexpr (IsSame<std::span<const u8>, T>()) {
-      mKind = LocKind::DwarfExpression;
-      uDwarfExpression = t;
-    } else if constexpr (IsSame<u32, T>()) {
-      mKind = LocKind::UnreadLocationList;
-      uLocListOffset = t;
-    } else if constexpr (IsSame<LocationList *, T>()) {
-      mKind = LocKind::LocationList;
-      uLocationList = t;
-    } else {
-      static_assert(always_false<T>, "Unhandled type");
-    }
   }
 
-  SymbolLocation &
-  operator=(SymbolLocation &&rhs) noexcept
+  explicit SymbolLocation(u32 locListOffset) noexcept
+      : mKind(LocKind::UnreadLocationList), mLocListOffset(locListOffset)
   {
-    if (this != &rhs) {
-      std::memcpy((void *)this, &rhs, sizeof(SymbolLocation));
-    }
-    if (rhs.mKind == LocKind::LocationList) {
-      rhs.uLocationList = nullptr;
-    }
-    return *this;
   }
 
-  SymbolLocation(SymbolLocation &&o) noexcept
+  void
+  SetLocationList(LocationList *locList) noexcept
   {
-    std::memcpy((void *)this, &o, sizeof(SymbolLocation));
-    if (o.mKind == LocKind::LocationList) {
-      o.uLocationList = nullptr;
-    }
+    MDB_ASSERT(mDwarfExpression.empty(), "Symbol location already defined!");
+    mKind = LocKind::LocationList;
+    mLocationList = locList;
+  }
+
+  void
+  SetDwarfExpression(std::span<const u8> expression) noexcept
+  {
+    MDB_ASSERT(mLocationList == nullptr, "Symbol location already defined!");
+    mKind = LocKind::DwarfExpression;
+    mDwarfExpression = expression;
   }
 
   static constexpr auto
@@ -168,35 +159,31 @@ public:
     return SymbolLocation{ value };
   }
 
-  static auto
-  CreateLocationList(std::vector<LocationListEntry> &&entries)
-  {
-    return SymbolLocation{ new LocationList{ std::move(entries) } };
-  }
-
   static constexpr auto
   Expression(std::span<const u8> expr) noexcept
   {
-    return SymbolLocation{ expr };
+    SymbolLocation symLoc{ 0 };
+    symLoc.SetDwarfExpression(expr);
+    return symLoc;
   }
 
   constexpr ~SymbolLocation() noexcept
   {
-    if (mKind == LocKind::LocationList && uLocationList) {
-      delete uLocationList;
+    if (mKind == LocKind::LocationList && mLocationList) {
+      delete mLocationList;
     }
   }
 
-  LocKind
+  [[nodiscard]] LocKind
   GetKind() const noexcept
   {
     return mKind;
   }
 
-  u32
+  [[nodiscard]] u32
   LocListOffset() const noexcept
   {
-    return uLocListOffset;
+    return mLocListOffset;
   }
 };
 
@@ -345,6 +332,7 @@ class Type
   static constexpr auto ModifierNameStrSize = "const"sv.size() + "volatile"sv.size() + " *"sv.size();
   friend sym::dw::TypeSymbolicationContext;
   friend std::formatter<sym::Type>;
+  friend class CanonicalType;
 
 public:
   Immutable<std::string_view> mName;
@@ -355,12 +343,12 @@ public:
 
 private:
   // Flags used when constructing and "realizing" a type from the debug info data.
-  bool mIsResolved;
-  bool mIsProcessing;
+  bool mIsResolved{ false };
   bool mIsDeclaration{ false };
 
   friend class TypeSymbolicationContext;
   Type *mTypeChain;
+  ObjectFile *mDefiningObjectFile;
   std::vector<Field> mFields;
   std::vector<TemplateParameter> mTemplateTypes;
 
@@ -369,24 +357,27 @@ private:
   std::optional<BaseTypeEncoding> mBaseType;
   u32 mArrayBounds{ 0 };
   EnumeratorValues mEnumValues{};
-  DwarfTag mDebugInfoEntryTag;
+  DwarfTag mDwarfTag;
 
 public:
   // Qualified, i.e. some variant of cvref-types or type defs
-  Type(DwarfTag debugInfoEntryTag,
+  Type(ObjectFile *definingObjectFile,
+    DwarfTag debugInfoEntryTag,
     dw::IndexedDieReference debugInfoEntryReference,
     u32 sizeOf,
     Type *target,
     bool isTypedef) noexcept;
 
   // "Normal" type constructor
-  Type(DwarfTag debugInfoEntryTag,
+  Type(ObjectFile *definingObjectFile,
+    DwarfTag debugInfoEntryTag,
     dw::IndexedDieReference debugInfoEntryReference,
     u32 sizeOf,
     std::string_view name) noexcept;
 
   // "Special" types. Like void, Unit. Types with no size - and most importantly, no DW_AT_type attr in the DIE.
   Type(std::string_view name, size_t size = 0) noexcept;
+
   Type(Type &&o) noexcept;
 
   // Resolves the alias that this type def/using decl actually is, if it is one. If it's a concrete type, return
@@ -395,17 +386,37 @@ public:
   void SetBaseTypeEncoding(BaseTypeEncoding enc) noexcept;
   bool SetProcessing() noexcept;
   void SetIsDeclaration() noexcept;
+  bool
+  IsDeclaration() const noexcept
+  {
+    return mIsDeclaration;
+  }
 
   Type *
   SkipJunk()
   {
-    if (mIsDeclaration) {
-      return mTypeChain;
+    Type *t = this;
+    while (t) {
+      if (t->mIsDeclaration) {
+        t = t->mTypeChain;
+        continue;
+      }
+      switch (t->mDwarfTag) {
+      // DWARF type qualifier tags — transparent wrappers that don't affect layout or member structure
+      case DwarfTag::DW_TAG_const_type:
+      case DwarfTag::DW_TAG_volatile_type:
+      case DwarfTag::DW_TAG_restrict_type:
+      case DwarfTag::DW_TAG_atomic_type:
+      case DwarfTag::DW_TAG_immutable_type:
+      case DwarfTag::DW_TAG_shared_type:
+        t = t->mTypeChain;
+        break;
+      default:
+        return t;
+      }
     }
-    return this;
+    return t;
   }
-
-  NonNullPtr<Type> GetTargetType() noexcept;
   // Walks the `type_chain` and if _any_ of the types in between this type element and the base target type is a
   // reference, so is this. this is because we can have something like const Foo&, which is 3 `Type`s, (const+, &+,
   // Foo). We do different than gdb though. We say all references are the same thing: an address value.
@@ -422,7 +433,7 @@ public:
   DwarfTag
   GetDwarfTag() const noexcept
   {
-    return mDebugInfoEntryTag;
+    return mDwarfTag;
   }
 
   const EnumeratorValues &
@@ -438,7 +449,7 @@ public:
   std::span<const Field> GetMemberFields() noexcept;
   std::span<const Field> MemberFields() noexcept;
   std::span<const TemplateParameter> TemplateParameters() noexcept;
-  Type *TypeDescribingLayoutOfThis() noexcept;
+
   // Todo: refactor this so we don't have to set it manually. It's ugly. It's easy to make it error prone.
   void SetArrayBounds(u32 bounds) noexcept;
 
@@ -461,6 +472,43 @@ public:
   {
     return mArrayBounds;
   }
+
+  void ResolveType() noexcept;
+};
+
+// A wrapper around `Type`
+// A canonical type is a type that describes something with size. Type* may be types parsed from DWARF DIE that are
+// type aliases, or declarations. As such, they hold no valuable metadata. Just noise. A canonical type, is always
+// a type with actual type info. It can be a T, T*, T& or T[]
+class CanonicalType
+{
+  // The type entry where this canonical type is resolved from
+  Type *mOriginType{ nullptr };
+  // The actual resolved canonical type.
+  Type *mCanonicalType{ nullptr };
+
+  CanonicalType(Type *startingTypeInfo, Type *type) noexcept;
+  CanonicalType() noexcept = default;
+
+public:
+  static CanonicalType From(NonNullPtr<Type> type);
+  static CanonicalType From(Type &type);
+
+  constexpr Type *
+  operator->() const noexcept
+  {
+    return mCanonicalType;
+  }
+
+  constexpr Type &
+  operator*() const noexcept
+  {
+    return *mCanonicalType;
+  }
+
+  [[nodiscard]] Type *TypeEntry() const noexcept;
+  [[nodiscard]] std::string_view Name() const;
+  [[nodiscard]] CanonicalType DerefType() const;
 };
 
 Modifier ToTypeModifierWillPanic(DwarfTag tag) noexcept;
@@ -469,13 +517,24 @@ Modifier ToTypeModifierWillPanic(DwarfTag tag) noexcept;
 bool IsReferenceLike(Modifier modifier) noexcept;
 bool IsReferenceLike(const dw::DieMetaData *die) noexcept;
 
-struct Symbol
+class Symbol
 {
-  NonNullPtr<Type> mType;
-  Immutable<SymbolLocation> mLocation;
-  Immutable<std::string_view> mName;
+  Type *mType;
+  SymbolLocation mLocation;
+  std::string_view mName;
+
+public:
+  Symbol(NonNullPtr<Type> type, SymbolLocation loc, std::string_view name) noexcept;
+  [[nodiscard]] CanonicalType Type() const;
   std::span<const u8> GetDwarfExpression(AddrPtr programCounter) noexcept;
   bool Computed() noexcept;
+  SymbolLocation &Location() noexcept;
+
+  [[nodiscard]] constexpr std::string_view
+  Name() const noexcept
+  {
+    return mName;
+  }
 };
 
 struct SymbolBlock
@@ -487,9 +546,9 @@ struct SymbolBlock
   AddressBounds() const noexcept
   {
     if (mRanges.empty()) {
-      return { nullptr, nullptr };
+      return { .low = nullptr, .high = nullptr };
     }
-    return { mRanges.front().low, mRanges.back().high };
+    return { .low = mRanges.front().low, .high = mRanges.back().high };
   }
 
   AddrPtr

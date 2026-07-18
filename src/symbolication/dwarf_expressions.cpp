@@ -606,8 +606,13 @@ op_entry_value(ExprByteCodeInterpreter &i)
       return reader.ReadUleb128<u64>();
     }();
 
-    auto *unwindState = i.mTask.GetUnwindState(i.mFrameLevel - 1);
-    MDB_ASSERT(unwindState, "Expected FrameUnwindState but got null");
+    auto *unwindState = i.mTask.GetUnwindState(i.mFrameLevel + 1);
+    MDB_ASSERT(unwindState,
+      "Trying to read entry value for register={}, Expected FrameUnwindState for level {} but got null (current "
+      "level={})",
+      registerNumber,
+      i.mFrameLevel + 1,
+      i.mFrameLevel);
     auto registerContentsAtEntry = unwindState->GetRegister(registerNumber);
     if (registerContentsAtEntry) {
       i.mStack.Push(registerContentsAtEntry.GetRaw());

@@ -461,7 +461,7 @@ TypeSymbolicationContext::ProcessMemberVariable(DieReference die) noexcept
       "Failed to get compilation unit & die reference from DIE offset: 0x{:x}",
       typeId->AsUnsignedValue());
     sym::Type *type = mObjectRef.GetTypeStorage()->GetOrCreateNewType(containingCompUnitDieReference->AsIndexed());
-    auto name = NameStringFromTag(type->mDebugInfoEntryTag);
+    std::string_view name = NameStringFromTag(type->mDwarfTag);
     this->mTypeFields.push_back(Field{ .mType = NonNull(*type),
       .mObjectBaseOffset = byteOffset,
       .mFieldOffset = bitFieldOffset,

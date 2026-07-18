@@ -60,7 +60,7 @@ JsType::SizeOf(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv))
 JsType::PointeeSize(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   sym::Type *type = GetThisOrReturnException(type, kTypeBindingDataError);
-  return JS_NewUint32(cx, type->TypeDescribingLayoutOfThis()->Size());
+  return JS_NewUint32(cx, sym::CanonicalType::From(*type).DerefType()->Size());
 }
 
 /* static */ JSValue
@@ -367,7 +367,7 @@ JsVariable::ToPrimitive(JSContext *cx, JSValue thisValue, int argCount, JSValue 
     hintArg = QuickJsString::FromValue(cx, argv[0]);
   }
 
-  sym::Type *type = value->GetType();
+  sym::CanonicalType type = value->GetType();
 
   if (const auto baseType = type->GetBaseTypeIfPrimitive(); baseType.has_value()) {
     auto byteSpan = value->MemoryView();
@@ -473,7 +473,7 @@ JsVariable::ToPrimitive(JSContext *cx, JSValue thisValue, int argCount, JSValue 
 JsVariable::Type(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   auto *value = GetThisOrReturnException(value, "Could not read sym::Value");
-  return JsType::CreateValue(cx, value->GetType());
+  return JsType::CreateValue(cx, value->GetType().TypeEntry());
 }
 
 /* static */ JSValue
@@ -486,7 +486,7 @@ JsVariable::Member(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv
   auto memberName = QuickJsString::FromValue(cx, argv[0]);
 
   sym::Value *value = GetThisOrReturnException(value, kTypeBindingDataError);
-  sym::Type *type = value->EnsureTypeResolved();
+  sym::CanonicalType type = value->GetType();
 
   auto memberValue = value->GetMember(memberName.mString);
 
@@ -519,7 +519,7 @@ JsVariable::Members(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, a
 JsVariable::MemberCount(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   sym::Value *pointer = GetThisOrReturnException(pointer, kBindingDataError);
-  const size_t count = pointer->EnsureTypeResolved()->MemberFields().size();
+  const size_t count = pointer->GetType()->MembersCount();
   return JS_NewUint32(cx, count);
 }
 
@@ -550,7 +550,7 @@ JsVariable::AsArray(JSContext *cx, JSValue thisValue, int argCount, JSValue *arg
 
   auto synthetic = sym::MemoryContentsObject::CreateSyntheticVariable(*varContext,
     res.value(),
-    sym::SyntheticType{ .mLayoutType = pointer->GetType()->TypeDescribingLayoutOfThis(), .mCount = count },
+    sym::SyntheticType{ .mLayoutType = pointer->GetType().DerefType(), .mCount = count },
     true);
 
   size_t i = 0;
@@ -589,8 +589,10 @@ JsVariable::GetMemberVariable(
 
   if (!member) {
     // TODO: Stop allocation error msg strings
-    const auto err = std::format(
-      "[mdbjs]: Type <{}> doesn't have a member called '{}'", pointer->GetType()->mName->data(), propertyName);
+    const auto err = std::format("[mdbjs]: Type <{}> doesn't have a member called '{}' (die=0x{:x})",
+      pointer->GetType()->mName->data(),
+      propertyName,
+      pointer->GetType()->mCompUnitDieReference->ToDieReference().SectionOffset());
     return JS_ThrowTypeError(cx, "%s", err.c_str());
   }
 

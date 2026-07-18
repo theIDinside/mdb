@@ -46,7 +46,7 @@ Value::SetKind(Type *type) noexcept
 void
 Value::SetKind(SyntheticType type) noexcept
 {
-  kind = ValueKind::Synthetic;
+  kind = ValueKind::SyntheticArray;
   uSynthetic = type;
 }
 
@@ -54,19 +54,6 @@ void
 Value::SetDapSerializer(DebugAdapterSerializer *serializer) noexcept
 {
   mVisualizer = serializer;
-}
-
-Type *
-Value::EnsureTypeResolved() const noexcept
-{
-  Type *type = GetType();
-
-  if (!type->IsResolved()) {
-    sym::dw::TypeSymbolicationContext typeResolver{ *type->mCompUnitDieReference->GetUnitData()->GetObjectFile(),
-      *type };
-    typeResolver.ResolveType();
-  }
-  return type->SkipJunk()->ResolveAlias();
 }
 
 bool
@@ -95,7 +82,7 @@ Value::Value(VarContext context,
   std::shared_ptr<MemoryContentsObject> &&valueObject,
   DebugAdapterSerializer *serializer) noexcept
     : mName(name), mMemoryContentsOffsets(memContentsOffset), mValueObject(std::move(valueObject)),
-      mVisualizer(serializer), mContext(std::move(context))
+      mVisualizer(serializer), mContext(std::move(context)), mCanonicalType(kind.Type())
 {
   SetKind(&kind);
 }
@@ -107,7 +94,8 @@ Value::Value(VarContext context,
   std::shared_ptr<MemoryContentsObject> valueObject,
   DebugAdapterSerializer *serializer) noexcept
     : mName(memberName), mMemoryContentsOffsets(containingStructureOffset + kind.mObjectBaseOffset),
-      mValueObject(std::move(valueObject)), mVisualizer(serializer), mContext(std::move(context))
+      mValueObject(std::move(valueObject)), mVisualizer(serializer), mContext(std::move(context)),
+      mCanonicalType(CanonicalType::From(kind.mType))
 {
   SetKind(&kind);
 }
@@ -118,7 +106,7 @@ Value::Value(VarContext context,
   std::shared_ptr<MemoryContentsObject> valueObject,
   DebugAdapterSerializer *serializer) noexcept
     : mName("value"), mMemoryContentsOffsets(memContentsOffset), mValueObject(std::move(valueObject)),
-      mVisualizer(serializer), mContext(std::move(context))
+      mVisualizer(serializer), mContext(std::move(context)), mCanonicalType(CanonicalType::From(type))
 {
   SetKind(&type);
 }
@@ -130,7 +118,7 @@ Value::Value(VarContext context,
   std::shared_ptr<MemoryContentsObject> valueObject,
   DebugAdapterSerializer *serializer) noexcept
     : mName(std::move(name)), mMemoryContentsOffsets(memContentsOffset), mValueObject(std::move(valueObject)),
-      mVisualizer(serializer), mContext(std::move(context))
+      mVisualizer(serializer), mContext(std::move(context)), mCanonicalType(CanonicalType::From(type))
 {
   SetKind(&type);
 }
@@ -141,7 +129,7 @@ Value::Value(VarContext context,
   u32 memContentsOffset,
   std::shared_ptr<MemoryContentsObject> valueObject) noexcept
     : mName(std::move(name)), mMemoryContentsOffsets(memContentsOffset), mValueObject(std::move(valueObject)),
-      mContext(std::move(context))
+      mContext(std::move(context)), mCanonicalType(CanonicalType::From(NonNull(*type.mLayoutType)))
 {
   SetKind(type);
 }
@@ -155,21 +143,10 @@ Value::Address() const noexcept
   return result;
 }
 
-Type *
+CanonicalType
 Value::GetType() const noexcept
 {
-  switch (kind) {
-  case ValueKind::Symbol:
-    return uSymbol->mType;
-  case ValueKind::Field:
-    return uField->mType;
-  case ValueKind::AbsoluteAddress:
-    return uType;
-  case ValueKind::Synthetic:
-    return uSynthetic.mLayoutType;
-  default:
-    PANIC("Unknown valueDescriptor kind");
-  }
+  return mCanonicalType;
 }
 
 std::expected<AddrPtr, ValueError>
@@ -179,9 +156,8 @@ Value::ToRemotePointer() const noexcept
   if (bytes.size_bytes() != 8) {
     return ValueError::InvalidSize(bytes.size_bytes());
   }
-  Type *type = GetType();
 
-  if (type->IsReference()) {
+  if (mCanonicalType->IsReference()) {
     std::uintptr_t ptr{};
     std::memcpy(&ptr, bytes.data(), 8);
     return AddrPtr{ ptr };
@@ -210,17 +186,17 @@ Value::Dereference(u32 count) const noexcept
   results.reserve(count);
 
   // Get the pointer value from this reference
-  Type *dereferencedType = GetType()->TypeDescribingLayoutOfThis();
-  const u64 sizePerElement = dereferencedType->SizeBytes();
+  CanonicalType derefType = GetType().DerefType();
+  const u64 sizePerElement = derefType->SizeBytes();
 
   const auto &memoryObject = *memoryObjectResult;
   for (u32 index = 0; index < count; ++index) {
-    auto variableContext = dereferencedType->IsPrimitive() ? VariableContext::CloneFrom(0, *mContext)
-                                                           : Tracer::CloneFromVariableContext(*mContext);
+    auto variableContext = derefType->IsPrimitive() ? VariableContext::CloneFrom(0, *mContext)
+                                                    : Tracer::CloneFromVariableContext(*mContext);
     const u32 offset = static_cast<u32>(index * sizePerElement);
 
     auto elementValue =
-      Ref<Value>::MakeShared(variableContext, std::format("[{}]", index), *dereferencedType, offset, memoryObject);
+      Ref<Value>::MakeShared(variableContext, std::format("[{}]", index), *derefType, offset, memoryObject);
 
     ObjectFile::SetSerializerFor(*elementValue);
 
@@ -250,17 +226,17 @@ Value::Dereference(u32 count, const std::function<bool(Ref<Value> value)> &onEac
   results.reserve(count);
 
   // Get the pointer value from this reference
-  Type *dereferencedType = GetType()->TypeDescribingLayoutOfThis();
-  const u64 sizePerElement = dereferencedType->SizeBytes();
+  CanonicalType derefType = mCanonicalType.DerefType();
+  const u64 sizePerElement = derefType->Size();
 
   u32 index = 0;
   for (; index < count; ++index) {
-    auto variableContext = dereferencedType->IsPrimitive() ? VariableContext::CloneFrom(0, *mContext)
-                                                           : Tracer::CloneFromVariableContext(*mContext);
+    auto variableContext = derefType->IsPrimitive() ? VariableContext::CloneFrom(0, *mContext)
+                                                    : Tracer::CloneFromVariableContext(*mContext);
     const u32 offset = static_cast<u32>(index * sizePerElement);
 
-    auto elementValue = Ref<Value>::MakeShared(
-      variableContext, std::format("[{}]", index), *dereferencedType, offset, *memoryObject);
+    auto elementValue =
+      Ref<Value>::MakeShared(variableContext, std::format("[{}]", index), *derefType, offset, *memoryObject);
 
     ObjectFile::SetSerializerFor(*elementValue);
 
@@ -293,7 +269,7 @@ Value::IsValidValue() const noexcept
 bool
 Value::HasMember(std::string_view memberName) const noexcept
 {
-  Type *type = EnsureTypeResolved();
+  CanonicalType type = GetType();
   return std::ranges::any_of(
     type->MemberFields(), [&memberName](const Field &field) { return field.mName == memberName; });
 }
@@ -301,13 +277,11 @@ Value::HasMember(std::string_view memberName) const noexcept
 Ref<Value>
 Value::GetMember(std::string_view memberName) noexcept
 {
-  Type *type = EnsureTypeResolved();
-
   if (!mContext) {
     return nullptr;
   }
 
-  for (const Field &member : type->GetMemberFields()) {
+  for (const Field &member : mCanonicalType->GetMemberFields()) {
     if (member.mName == memberName) {
       MDB_ASSERT(mContext, "Creating member from value that has no context");
       auto variableContext = member.mType->IsPrimitive() ? VariableContext::CloneFrom(0, *mContext)
@@ -332,18 +306,17 @@ Value::GetMember(std::string_view memberName) noexcept
 size_t
 Value::PushMemberValue(std::function<bool(Ref<Value> value)> &&onEachValue)
 {
-  Type *type = EnsureTypeResolved();
   if (!mContext) {
     return 0;
   }
 
   if (IsSynthetic()) {
     for (size_t i = 0; i < uSynthetic.mCount; ++i) {
-      auto variableContext = type->IsPrimitive() ? VariableContext::CloneFrom(0, *mContext)
-                                                 : Tracer::CloneFromVariableContext(*mContext);
-      const u32 elementOffset = static_cast<u32>(i * type->SizeBytes());
+      auto variableContext = mCanonicalType->IsPrimitive() ? VariableContext::CloneFrom(0, *mContext)
+                                                           : Tracer::CloneFromVariableContext(*mContext);
+      const u32 elementOffset = static_cast<u32>(i * mCanonicalType->SizeBytes());
       Ref<Value> elementValue = Ref<sym::Value>::MakeShared(
-        variableContext, std::format("{}", i), *type, elementOffset, TakeMemoryReference());
+        variableContext, std::format("{}", i), *mCanonicalType, elementOffset, TakeMemoryReference());
       ObjectFile::SetSerializerFor(*elementValue);
       if (variableContext->mId > 0) {
         variableContext->mTask->CacheValueObject(variableContext->mId, elementValue);
@@ -354,7 +327,7 @@ Value::PushMemberValue(std::function<bool(Ref<Value> value)> &&onEachValue)
   }
 
   size_t count = 0;
-  for (const Field &member : type->MemberFields()) {
+  for (const Field &member : mCanonicalType->MemberFields()) {
     MDB_ASSERT(mContext, "Creating member from value that has no context");
     auto variableContext = member.mType->IsPrimitive() ? VariableContext::CloneFrom(0, *mContext)
                                                        : Tracer::CloneFromVariableContext(*mContext);
@@ -431,7 +404,7 @@ template <typename Primitive>
 bool
 Value::WritePrimitive(Primitive value) noexcept
 {
-  Type *type = GetType();
+  CanonicalType type = GetType();
 
   if (type->IsReference()) {
     if constexpr (!std::is_integral_v<Primitive>) {
@@ -442,9 +415,9 @@ Value::WritePrimitive(Primitive value) noexcept
   }
 
   // if *not* a reference, or *is* array type, get layout describing type
-  if (!(GetType()->IsReference() || GetType()->IsArrayType())) {
-    type = type->TypeDescribingLayoutOfThis();
-  }
+  MDB_ASSERT(!GetType()->IsArrayType(),
+    "At some point in time, we supported type = type.DerefType() if type was array, but I don't remember why. It "
+    "doesn't make sense to me anymore.");
 
   auto baseType = type->GetBaseType();
   // TODO(simon): implement support for enum, which can have base type underlying types (at which point baseType ==
@@ -544,19 +517,18 @@ template bool Value::WritePrimitive<f64>(f64 value) noexcept;
 std::expected<std::shared_ptr<MemoryContentsObject>, ValueError>
 Value::DereferenceMemoryContentsObject(tc::SupervisorState *supervisor, u32 count) const
 {
+  if (!mContext) {
+    return ValueError::NoVariableContext();
+  }
   // Get the pointer value from this reference
   auto pointerResult = ToRemotePointer();
   if (!pointerResult.has_value()) {
     return std::unexpected(pointerResult.error());
   }
 
-  Type *dereferencedType = GetType()->TypeDescribingLayoutOfThis();
-  const u64 sizePerElement = dereferencedType->SizeBytes();
+  const auto derefType = mCanonicalType.DerefType();
+  const u64 sizePerElement = derefType->Size();
   const u64 totalSize = sizePerElement * count;
-
-  if (!mContext) {
-    return ValueError::NoVariableContext();
-  }
 
   const AddrPtr address = *pointerResult;
   auto memory = MemoryContentsObject::ReadMemory(*supervisor, address, totalSize);
@@ -586,18 +558,11 @@ Value::MemoryView() const noexcept
 {
   u32 size = 0;
   switch (kind) {
-  case ValueKind::Symbol:
-    size = uSymbol->mType->SizeBytes();
+  case ValueKind::SyntheticArray:
+    size = uSynthetic.Size();
     break;
-  case ValueKind::Field:
-    size = uField->SizeBytes();
-    break;
-  case ValueKind::AbsoluteAddress:
-    size = uType->SizeBytes();
-    break;
-  case ValueKind::Synthetic:
-    size = uSynthetic.mCount * uSynthetic.mLayoutType->SizeBytes();
-    break;
+  default:
+    size = mCanonicalType->Size();
   }
   return mValueObject->View(mMemoryContentsOffsets, size);
 }
@@ -710,7 +675,7 @@ ReadInLocationList(Symbol &symbol, alloc::ArenaResource *allocator, const ElfSec
   uint64_t start;
   uint64_t end;
 
-  std::span<const u8> loclist = locList.GetDataAs<const u8>().subspan(symbol.mLocation->LocListOffset());
+  std::span<const u8> loclist = locList.GetDataAs<const u8>().subspan(symbol.Location().LocListOffset());
 
   struct span
   {
@@ -765,7 +730,7 @@ ReadInLocationList(Symbol &symbol, alloc::ArenaResource *allocator, const ElfSec
   result.reserve(parsed.size());
   std::ranges::copy(parsed, std::back_inserter(result));
 
-  symbol.mLocation = SymbolLocation::CreateLocationList(std::move(result));
+  symbol.Location().SetLocationList(new LocationList{ std::move(result) });
 }
 
 /*static*/
@@ -773,7 +738,8 @@ Ref<Value>
 MemoryContentsObject::CreateFrameVariable(
   tc::SupervisorState &tc, const sym::Frame &frame, Symbol &symbol, bool lazy) noexcept
 {
-  const auto requested_byte_size = symbol.mType->Size();
+  CanonicalType type = symbol.Type();
+  const auto requestedByteSize = type->Size();
 
   auto *fnSymbol = frame.MaybeGetFullSymbolInfo();
   if (!fnSymbol) {
@@ -790,7 +756,8 @@ MemoryContentsObject::CreateFrameVariable(
   auto dwarfExpression = symbol.GetDwarfExpression(frame.GetSymbolFile()->UnrelocateAddress(frame.FramePc()));
 
   if (dwarfExpression.empty()) {
-    return Ref<Value>::MakeShared(nullptr, symbol.mName, symbol, u32{ 0 }, nullptr);
+    DBGLOG(core, "DWARF expression to get location description is empty for {}", symbol.Name());
+    return Ref<Value>::MakeShared(nullptr, symbol.Name(), symbol, u32{ 0 }, nullptr);
   }
   auto interp = ExprByteCodeInterpreter{ frame.FrameLevel(),
     tc,
@@ -799,10 +766,9 @@ MemoryContentsObject::CreateFrameVariable(
     fnSymbol->GetFrameBaseDwarfExpression(),
     frame.GetSymbolFile()->GetObjectFile() };
 
-  auto variableContext =
-    symbol.mType->IsPrimitive()
-      ? VariableContext::CreateFromFrame(0, ContextType::Variable, frame)
-      : VariableContext::CreateFromFrame(Tracer::NewVariablesReference(), ContextType::Variable, frame);
+  auto variableContext = type->IsPrimitive() ? VariableContext::CreateFromFrame(0, ContextType::Variable, frame)
+                                             : VariableContext::CreateFromFrame(
+                                                 Tracer::NewVariablesReference(), ContextType::Variable, frame);
 
   const auto location = interp.Run();
 
@@ -811,30 +777,36 @@ MemoryContentsObject::CreateFrameVariable(
   if (!location.IsSimple() || location.mKind != LocationKind::Memory) {
     DBGLOG(core,
       "Variable {} has non-simple location (composite/register/implicit) - not yet fully supported",
-      symbol.mName);
+      symbol.Name());
     // For now, treat as address nullptr (will show as unavailable)
     const AddrPtr address = nullptr;
     auto memoryObject = std::make_shared<LazyMemoryContentsObject>(tc, address, address);
     return Ref<sym::Value>::MakeShared(
-      std::move(variableContext), symbol.mName, symbol, u32{ 0 }, std::move(memoryObject));
+      std::move(variableContext), symbol.Name(), symbol, u32{ 0 }, std::move(memoryObject));
   }
 
   const AddrPtr address = AddrPtr{ location.uAddress };
 
   if (lazy) {
-    auto memoryObject = std::make_shared<LazyMemoryContentsObject>(tc, address, address + requested_byte_size);
+    DBGLOG(core,
+      "creating lazy memory object for symbol {} of requested size {}, for type=0x{:x}",
+      symbol.Name(),
+      requestedByteSize,
+      type->mCompUnitDieReference->ToDieReference().SectionOffset());
+    auto memoryObject = std::make_shared<LazyMemoryContentsObject>(tc, address, address + requestedByteSize);
     return Ref<sym::Value>::MakeShared(
-      std::move(variableContext), symbol.mName, symbol, u32{ 0 }, std::move(memoryObject));
+      std::move(variableContext), symbol.Name(), symbol, u32{ 0 }, std::move(memoryObject));
   }
 
-  auto res = tc.SafeRead(address, requested_byte_size);
+  auto res = tc.SafeRead(address, requestedByteSize);
   if (!res.is_expected()) {
     PANIC("Expected read to succeed");
   }
-  DBGLOG(dap, "[eager read]: {}:+{}", address, requested_byte_size);
+  DBGLOG(dap, "[eager read]: {}:+{}", address, requestedByteSize);
   auto memory_object =
-    std::make_shared<EagerMemoryContentsObject>(address, address + requested_byte_size, res.take_value());
-  return Ref<Value>::MakeShared(std::move(variableContext), symbol.mName, symbol, u32{}, std::move(memory_object));
+    std::make_shared<EagerMemoryContentsObject>(address, address + requestedByteSize, res.take_value());
+  return Ref<Value>::MakeShared(
+    std::move(variableContext), symbol.Name(), symbol, u32{}, std::move(memory_object));
 }
 
 /* static */

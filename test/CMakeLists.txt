@@ -153,4 +153,9 @@ foreach(name ${MultiProcessSubjects})
 endforeach()
 
 
+BuildTestSubject(
+  NAME strings
+  SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/strings.cpp
+)
+
 message("Test build type: ${CMAKE_BUILD_TYPE}")

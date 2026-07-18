@@ -1,6 +1,7 @@
 /** LICENSE TEMPLATE */
 #pragma once
 // mdb
+#include "lib/string_map.h"
 #include <common/typedefs.h>
 #include <utils/immutable.h>
 
@@ -16,7 +17,7 @@ using ElementList = std::vector<Immutable<XMLElementView>>;
 
 class RefMap
 {
-  std::unordered_map<std::string_view, std::string_view> storage{};
+  StringViewMap<std::string_view> storage;
 
 public:
   void insert(std::string_view attr, std::string_view value) noexcept;

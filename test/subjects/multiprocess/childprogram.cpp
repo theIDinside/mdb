@@ -3,9 +3,11 @@
 #include <csignal>
 #include <cstdlib>
 #include <filesystem>
+#include <mutex>
 #include <print>
 #include <string>
 #include <thread>
+#include <unistd.h>
 
 namespace fs = std::filesystem;
 

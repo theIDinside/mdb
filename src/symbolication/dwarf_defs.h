@@ -178,6 +178,19 @@ enum class DwarfTag : std::uint16_t
 #undef DW_DWARF_TAG
 };
 
+constexpr bool
+IsReferenceLike(DwarfTag tag)
+{
+  switch (tag) {
+  case DwarfTag::DW_TAG_array_type:
+  case DwarfTag::DW_TAG_pointer_type:
+  case DwarfTag::DW_TAG_reference_type:
+    return true;
+  default:
+    return false;
+  }
+}
+
 enum class RangeListEntry : std::uint8_t
 {
 #define DW_RANGE_LIST_ENTRY

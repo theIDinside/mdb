@@ -3,6 +3,7 @@
 #include "common.h"
 #include <cstring>
 #include <fcntl.h>
+#include <unistd.h>
 
 namespace mdb {
 int

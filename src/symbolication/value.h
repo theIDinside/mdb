@@ -88,8 +88,14 @@ struct ValueError
 // Dynamic representation of T
 struct SyntheticType
 {
-  Type *mLayoutType;
+  CanonicalType mLayoutType;
   u32 mCount;
+
+  [[nodiscard]] u32
+  Size() const noexcept
+  {
+    return mLayoutType->Size() * mCount;
+  }
 };
 
 using VarContext = std::shared_ptr<VariableContext>;
@@ -114,7 +120,7 @@ class Value
   Value(VarContext context,
     std::string_view memberName,
     Field &kind,
-    u32 memContentsOffset,
+    u32 containingStructureOffset,
     std::shared_ptr<MemoryContentsObject> valueObject,
     DebugAdapterSerializer *serializer = nullptr) noexcept;
 
@@ -157,15 +163,14 @@ public:
   void SetDapSerializer(DebugAdapterSerializer *serializer) noexcept;
 
   AddrPtr Address() const noexcept;
-  Type *GetType() const noexcept;
-  Type *EnsureTypeResolved() const noexcept;
+  CanonicalType GetType() const noexcept;
 
   std::optional<BitField> BitField() const noexcept;
 
   bool
   IsSynthetic() const
   {
-    return kind == ValueKind::Synthetic;
+    return kind == ValueKind::SyntheticArray;
   }
 
   std::span<const u8> MemoryView() const noexcept;
@@ -211,7 +216,8 @@ private:
     Symbol,
     Field,
     AbsoluteAddress,
-    Synthetic
+    // A synthetic array, constructed from a parsed debug info type + length
+    SyntheticArray,
   } kind;
   union
   {
@@ -220,6 +226,7 @@ private:
     Type *uType;
     SyntheticType uSynthetic;
   };
+  CanonicalType mCanonicalType;
   // The actual backing storage for this value. For instance, we may want to create multiple values out of a single
   // range of bytes in the target which is the case for struct Foo { int a; int b; } foo_val; we may want a Value
   // for a and b. The `MemoryContentsObject` is the storage for foo_val

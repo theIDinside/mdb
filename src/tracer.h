@@ -220,11 +220,11 @@ public:
   static void InitializeDapSerializers() noexcept;
 
   void Shutdown() noexcept;
-  void ShutdownProfiling() noexcept;
+  static void ShutdownProfiling() noexcept;
 
   template <typename DapSerializer>
   static DapSerializer *
-  GetDataResolver() noexcept
+  GetSerializer() noexcept
   {
     using namespace sym;
     if constexpr (std::is_same_v<DapSerializer, InvalidValueSerializer>) {
@@ -295,12 +295,12 @@ public:
   }
 
 private:
-  static void MainLoop(EventSystem *eventSystem, mdb::js::Scripting *interpreterInstance) noexcept;
+  static void MainLoop(EventSystem *eventSystem, mdb::js::Scripting *scriptRuntime) noexcept;
 
   std::unique_ptr<DebuggerThread> mDebugAdapterThread{ nullptr };
 
   // Processes under control (and visible to the user/where the user is interested in controlling them)
-  std::vector<UniquePtr<tc::SupervisorState>> mTracedProcesses{};
+  std::vector<UniquePtr<tc::SupervisorState>> mTracedProcesses;
   // Processes that has exited, or has been disconnected (or just ignored)
   std::vector<UniquePtr<tc::SupervisorState>> mDetachedProcesses;
 
@@ -317,7 +317,7 @@ private:
   // value!). It just means we can't guarantee it anymore. To guarantee, we need to `refresh` the backing memory
   // (and update the `Value`'s `mVariableReference`)
   VariableReferenceId mVariablesReferenceCounter{ 0 };
-  std::unordered_map<VariableReferenceId, sym::VarContext> mVariablesReferenceContext{};
+  std::unordered_map<VariableReferenceId, sym::VarContext> mVariablesReferenceContext;
 
   UniquePtr<SessionTaskMap> mDebugSessionTasks;
 

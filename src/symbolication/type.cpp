@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "type.h"
+#include "symbolication/dwarf/typeread.h"
 
 // mdb
 #include <symbolication/dwarf/attribute_read.h>
@@ -187,9 +188,12 @@ TypeStorage::CreateTypeFromQualifiedTypeDie(sym::dw::DieReference dieRef)
     size = baseType->Size();
   }
 
-  auto *type = new sym::Type{
-    dieRef.GetDie()->mTag, dieRef.AsIndexed(), size, baseType, dieRef.GetDie()->mTag == DwarfTag::DW_TAG_typedef
-  };
+  auto *type = new sym::Type{ dieRef.GetUnitData()->GetObjectFile(),
+    dieRef.GetDie()->mTag,
+    dieRef.AsIndexed(),
+    size,
+    baseType,
+    dieRef.GetDie()->mTag == DwarfTag::DW_TAG_typedef };
   type->SetArrayBounds(arrayBounds);
   AddType(dieRef.GetDie()->mSectionOffset, type);
   return type;
@@ -208,7 +212,9 @@ TypeStorage::CreateTypeFromDeclarationDie(sym::dw::DieReference dieRef)
     return nullptr;
   }
 
-  auto *type = new sym::Type{ dieRef.GetDie()->mTag, dieRef.AsIndexed(), static_cast<u32>(size), *name };
+  auto *type = new sym::Type{
+    dieRef.GetObjectFile(), dieRef.GetDie()->mTag, dieRef.AsIndexed(), static_cast<u32>(size), *name
+  };
   type->SetIsDeclaration();
   AddType(dieRef.GetDie()->mSectionOffset, type);
   return type;
@@ -228,7 +234,8 @@ TypeStorage::CreateTypeFromTypeSignatureDie(sym::dw::DieReference dieRef, u64 ty
   const auto name = typeUnitDieRef.ReadAttribute(Attribute::DW_AT_name)
                       .transform(AttributeValue::ToStringView)
                       .value_or("<no name>");
-  auto *type = new sym::Type{ dieRef.GetDie()->mTag, typeUnitDieRef.AsIndexed(), sz, name };
+  auto *type =
+    new sym::Type{ dieRef.GetObjectFile(), dieRef.GetDie()->mTag, typeUnitDieRef.AsIndexed(), sz, name };
   AddType(dieRef.GetDie()->mSectionOffset, type);
   return type;
 }
@@ -243,7 +250,7 @@ TypeStorage::CreateTypeFallback(sym::dw::DieReference dieRef)
                       .value_or("lambda");
   const u32 sz =
     dieRef.ReadAttribute(Attribute::DW_AT_byte_size).transform(AttributeValue::AsUnsigned).value_or(0);
-  auto *type = new sym::Type{ dieRef.GetDie()->mTag, dieRef.AsIndexed(), sz, name };
+  auto *type = new sym::Type{ dieRef.GetObjectFile(), dieRef.GetDie()->mTag, dieRef.AsIndexed(), sz, name };
   AddType(dieRef.GetDie()->mSectionOffset, type);
   return type;
 }
@@ -282,7 +289,8 @@ TypeStorage::CreateNewType(DwarfTag tag,
   std::string_view name) noexcept
 {
   std::lock_guard lock(mWriteMutex);
-  auto pair = mTypeStorage.emplace(typeDieOffset, new sym::Type{ tag, dieReference, typeSize, name });
+  auto pair = mTypeStorage.emplace(
+    typeDieOffset, new sym::Type{ dieReference.GetObjectFile(), tag, dieReference, typeSize, name });
   if (pair.second) {
     return pair.first->second;
   }
@@ -301,10 +309,21 @@ TypeStorage::FindTypeByOffset(u64 dieOffset) noexcept
 
 namespace sym {
 
+[[nodiscard]] CanonicalType
+Symbol::Type() const
+{
+  return CanonicalType::From(*mType);
+}
+
+Symbol::Symbol(NonNullPtr<class Type> type, SymbolLocation loc, std::string_view name) noexcept
+    : mType(type), mLocation(std::move(loc)), mName(name)
+{
+}
+
 bool
 Symbol::Computed() noexcept
 {
-  switch (mLocation->mKind) {
+  switch (mLocation.mKind) {
   case LocKind::DwarfExpression:
   case LocKind::LocationList:
     return true;
@@ -313,17 +332,25 @@ Symbol::Computed() noexcept
   }
 }
 
+SymbolLocation &
+Symbol::Location() noexcept
+{
+  return mLocation;
+}
+
 std::span<const u8>
 Symbol::GetDwarfExpression(AddrPtr programCounter) noexcept
 {
   MDB_ASSERT(Computed(), "Symbol information not read in yet");
-  switch (mLocation->mKind) {
+  switch (mLocation.mKind) {
   case LocKind::UnreadLocationList:
+    DBGLOG(core, "Symbol {} has unread location list?", mName);
     break;
   case LocKind::DwarfExpression:
-    return mLocation->uDwarfExpression;
+    return mLocation.mDwarfExpression;
   case LocKind::LocationList: {
-    auto span = mLocation->uLocationList->Get();
+    DBGLOG(core, "Symbol {} uses location lists", mName);
+    auto span = mLocation.mLocationList->Get();
     auto it = std::ranges::find_if(
       span, [programCounter](auto &r) { return r.mStart <= programCounter && programCounter <= r.mEnd; });
     if (it != std::end(span)) {
@@ -361,41 +388,40 @@ Field::GetBitField() const
   return BitField{ .mOffset = mFieldOffset, .mSize = mBitFieldSize };
 }
 
-Type::Type(DwarfTag debugInfoEntryTag,
+Type::Type(ObjectFile *definingObjectFile,
+  DwarfTag debugInfoEntryTag,
   dw::IndexedDieReference debugInfoEntryReference,
   u32 sizeOf,
   Type *target,
   bool isTypedef) noexcept
     : mName(target->mName), mCompUnitDieReference(debugInfoEntryReference),
       mModifier{ ToTypeModifierWillPanic(debugInfoEntryReference.GetDie()->mTag) }, mIsTypedef(isTypedef),
-      size_of(sizeOf), mIsResolved(false), mIsProcessing(false), mTypeChain(target),
-      mDebugInfoEntryTag(debugInfoEntryTag)
+      size_of(sizeOf), mTypeChain(target), mDwarfTag(debugInfoEntryTag), mDefiningObjectFile(definingObjectFile)
 {
 }
 
-Type::Type(DwarfTag debugInfoEntryTag,
+Type::Type(ObjectFile *definingObjectFile,
+  DwarfTag debugInfoEntryTag,
   dw::IndexedDieReference debugInfoEntryReference,
   u32 sizeOf,
   std::string_view name) noexcept
     : mName(name), mCompUnitDieReference(debugInfoEntryReference),
       mModifier{ ToTypeModifierWillPanic(debugInfoEntryReference.GetDie()->mTag) }, mIsTypedef(false),
-      size_of(sizeOf), mIsResolved(false), mIsProcessing(false), mTypeChain(nullptr),
-      mDebugInfoEntryTag(debugInfoEntryTag)
+      size_of(sizeOf), mTypeChain(nullptr), mDwarfTag(debugInfoEntryTag), mDefiningObjectFile(definingObjectFile)
 {
 }
 
 Type::Type(std::string_view name, size_t size) noexcept
     : mName(name), mModifier(Modifier::None), mIsTypedef(false), size_of(size), mIsResolved(true),
-      mIsProcessing(false), mTypeChain(nullptr)
+      mTypeChain(nullptr), mDefiningObjectFile(nullptr)
 {
 }
 
 Type::Type(Type &&o) noexcept
     : mName(o.mName), mCompUnitDieReference(o.mCompUnitDieReference), mModifier(o.mModifier), size_of(o.size_of),
-      mIsResolved(o.mIsResolved), mIsProcessing(o.mIsProcessing), mTypeChain(o.mTypeChain),
-      mFields(std::move(o.mFields)), mBaseType(o.mBaseType)
+      mIsResolved(o.mIsResolved), mTypeChain(o.mTypeChain), mFields(std::move(o.mFields)), mBaseType(o.mBaseType),
+      mDefiningObjectFile(o.mDefiningObjectFile)
 {
-  MDB_ASSERT(!mIsProcessing, "Moving a type that's being processed is guaranteed to have undefined behavior");
 }
 
 Type *
@@ -421,19 +447,6 @@ void
 Type::SetIsDeclaration() noexcept
 {
   mIsDeclaration = true;
-}
-
-NonNullPtr<Type>
-Type::GetTargetType() noexcept
-{
-  if (mTypeChain == nullptr) {
-    return NonNull(*this);
-  }
-  Type *t = mTypeChain;
-  while (t->mTypeChain) {
-    t = t->mTypeChain;
-  }
-  return NonNull<Type>(*t);
 }
 
 bool
@@ -477,18 +490,13 @@ Type::Size() noexcept
 u32
 Type::SizeBytes() noexcept
 {
-  if (mModifier == Modifier::Array) {
-    auto bounds = Size();
-    auto layout_type_size = TypeDescribingLayoutOfThis()->SkipJunk()->Size();
-    return bounds * layout_type_size;
-  }
   return Size();
 }
 
 std::optional<BaseTypeEncoding>
 Type::GetBaseTypeIfPrimitive() const noexcept
 {
-  if (mBaseType.has_value() || mDebugInfoEntryTag == DwarfTag::DW_TAG_enumeration_type) {
+  if (mBaseType.has_value() || mDwarfTag == DwarfTag::DW_TAG_enumeration_type) {
     return mBaseType;
   }
 
@@ -498,7 +506,7 @@ Type::GetBaseTypeIfPrimitive() const noexcept
 
   Type *it = mTypeChain;
   while (it != nullptr) {
-    if (it->mBaseType.has_value() || it->mDebugInfoEntryTag == DwarfTag::DW_TAG_enumeration_type) {
+    if (it->mBaseType.has_value() || it->mDwarfTag == DwarfTag::DW_TAG_enumeration_type) {
       return it->mBaseType;
     }
     it = it->mTypeChain;
@@ -509,7 +517,7 @@ Type::GetBaseTypeIfPrimitive() const noexcept
 bool
 Type::IsPrimitive() const noexcept
 {
-  if (mBaseType.has_value() || mDebugInfoEntryTag == DwarfTag::DW_TAG_enumeration_type) {
+  if (mBaseType.has_value() || mDwarfTag == DwarfTag::DW_TAG_enumeration_type) {
     return true;
   }
 
@@ -517,9 +525,9 @@ Type::IsPrimitive() const noexcept
     return false;
   }
 
-  auto it = mTypeChain;
+  Type *it = mTypeChain;
   while (it != nullptr) {
-    if (it->mBaseType.has_value() || it->mDebugInfoEntryTag == DwarfTag::DW_TAG_enumeration_type) {
+    if (it->mBaseType.has_value() || it->mDwarfTag == DwarfTag::DW_TAG_enumeration_type) {
       return true;
     }
     it = it->mTypeChain;
@@ -570,7 +578,7 @@ u32
 Type::MembersCount() noexcept
 {
   MDB_ASSERT(mIsResolved, "Type is not fully resolved!");
-  return GetTargetType()->mFields.size();
+  return mFields.size();
 }
 
 std::span<const Field>
@@ -583,8 +591,7 @@ std::span<const Field>
 Type::MemberFields() noexcept
 {
   MDB_ASSERT(mIsResolved, "Type is not fully resolved!");
-  auto t = GetTargetType();
-  return t->mFields;
+  return mFields;
 }
 
 std::span<const TemplateParameter>
@@ -594,30 +601,65 @@ Type::TemplateParameters() noexcept
   return mTemplateTypes;
 }
 
-Type *
-Type::TypeDescribingLayoutOfThis() noexcept
-{
-  // We have to check if it's a typedef here too. const int& which is considered a reference in the type
-  // information howoever using IntRef = const int&; makes IntRef have a modifier list of none, which is a DWARF
-  // side effect, making type aliases behave as their own types, instead of just names.
-
-  if (mModifier == Modifier::None && !mIsTypedef) {
-    return SkipJunk();
-  }
-
-  Type *t = ResolveAlias();
-  MDB_ASSERT(t, "Debug Symbolication Error: Resolving a typedef should not result in a nullptr for type.");
-  if (t->IsReference()) {
-    t = t->mTypeChain->ResolveAlias();
-  }
-
-  return t->SkipJunk();
-}
-
 void
 Type::SetArrayBounds(u32 bounds) noexcept
 {
   mArrayBounds = bounds;
 }
+
+void
+Type::ResolveType() noexcept
+{
+  if (mIsResolved) {
+    return;
+  }
+  sym::dw::TypeSymbolicationContext ctx{ *mDefiningObjectFile, *this };
+  ctx.ResolveType();
+}
+
+CanonicalType::CanonicalType(Type *startingTypeInfo, Type *type) noexcept
+    : mOriginType(startingTypeInfo), mCanonicalType(type)
+{
+}
+
+/* static */
+CanonicalType
+CanonicalType::From(NonNullPtr<Type> type)
+{
+  type->ResolveType();
+
+  Type *canonical = type->ResolveAlias()->SkipJunk();
+  MDB_ASSERT(canonical->IsResolved(), "Canonical type not resolved!");
+  return CanonicalType{ type, canonical };
+}
+
+/* static */
+CanonicalType
+CanonicalType::From(Type &type)
+{
+  return From(NonNull(type));
+}
+
+Type *
+CanonicalType::TypeEntry() const noexcept
+{
+  return mCanonicalType;
+}
+
+std::string_view
+CanonicalType::Name() const
+{
+  return *mOriginType->mName;
+}
+
+CanonicalType
+CanonicalType::DerefType() const
+{
+  MDB_ASSERT(IsReferenceLike(mCanonicalType->mDwarfTag), "Type is not reference type.");
+  Type *deref = mCanonicalType->mTypeChain;
+  MDB_ASSERT(deref, "deref type should never be null.");
+  return CanonicalType::From(NonNull(*deref));
+}
+
 } // namespace sym
 } // namespace mdb

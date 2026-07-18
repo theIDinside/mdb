@@ -19,6 +19,7 @@
 #include <string>
 #include <utility>
 // system
+#include <climits>
 #include <sys/user.h>
 
 // rr
