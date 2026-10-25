@@ -515,7 +515,7 @@ class DebugAdapterClient {
   /** The MDB process */
   mdb
 
-  /** @type { {next_packet_length: number, receive_buffer: string } } Parsed stdout contents */
+  /** @type { {next_packet_length: number, receive_buffer: Buffer } } Parsed stdout contents */
   buf
 
   /** @type { RemoteService } */
@@ -627,7 +627,7 @@ class DebugAdapterClient {
     this.events = new EventEmitter()
     this.buf = {
       next_packet_length: null,
-      receive_buffer: '',
+      receive_buffer: Buffer.alloc(0),
     }
 
     // Emit processed DAP Events to this event handler
@@ -642,13 +642,14 @@ class DebugAdapterClient {
     })
 
     this.mdb.stdout.on('data', (data) => {
-      const str_data = data.toString()
-      this.appendBuffer(str_data)
-      let msgs = this.parseContents(this.buf.receive_buffer)
+      // Content-Length counts bytes, so parse on bytes: a chunk may also end in the middle of a UTF-8 sequence.
+      this.appendBuffer(data)
+      // latin1 maps every byte to one character, so string indices are byte offsets.
+      let msgs = this.parseContents(this.buf.receive_buffer.toString('latin1'))
       let last_ends = 0
       for (const { content_start, length } of msgs.filter((i) => i.all_received)) {
         const end = content_start + length
-        const data = this.buf.receive_buffer.slice(content_start, end)
+        const data = this.buf.receive_buffer.subarray(content_start, end).toString('utf8')
         try {
           const json = JSON.parse(data)
           if (!this.events.emit(json.type, json)) {
@@ -661,7 +662,7 @@ class DebugAdapterClient {
           process.exit(-1)
         }
       }
-      this.buf.receive_buffer = this.buf.receive_buffer.slice(last_ends)
+      this.buf.receive_buffer = this.buf.receive_buffer.subarray(last_ends)
     })
   }
 
@@ -749,7 +750,7 @@ class DebugAdapterClient {
     }
     this.seq += 1
     const data = JSON.stringify(json)
-    const length = data.length
+    const length = Buffer.byteLength(data, 'utf8')
     const res = `Content-Length: ${length}\r\n\r\n${data}`
     return res
   }
@@ -968,7 +969,7 @@ class DebugAdapterClient {
   }
 
   appendBuffer(data) {
-    this.buf.receive_buffer = this.buf.receive_buffer.concat(data)
+    this.buf.receive_buffer = Buffer.concat([this.buf.receive_buffer, data])
   }
 
   /**
