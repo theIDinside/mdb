@@ -290,13 +290,19 @@ TypeSymbolicationContext::ProcessInheritanceDie(DieReference die) noexcept
   TypeSymbolicationContext ctx = TypeSymbolicationContext::ContinueWith(*this, type);
   ctx.ResolveType();
 
-  if (!type->mFields.empty()) {
-    const auto member_offset = location->AsUnsignedValue();
-    for (auto t : type->mFields) {
+  // The base may be referenced through a typedef or a declaration DIE; the fields live on the definition.
+  sym::Type *base = type->ResolveAlias()->SkipJunk();
+  if (base && base != type) {
+    base->ResolveType();
+  }
+
+  if (base && !base->mFields.empty()) {
+    const auto member_offset = location.transform(AttributeValue::AsUnsigned).value_or(0);
+    for (const auto &t : base->mFields) {
       mTypeFields.push_back(Field{ .mType = t.mType,
-        .mObjectBaseOffset = *t.mObjectBaseOffset + member_offset,
-        .mFieldOffset = 0,
-        .mBitFieldSize = 0,
+        .mObjectBaseOffset = static_cast<u32>(*t.mObjectBaseOffset + member_offset),
+        .mFieldOffset = *t.mFieldOffset,
+        .mBitFieldSize = *t.mBitFieldSize,
         .mName = t.mName });
     }
   }
