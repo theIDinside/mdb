@@ -75,13 +75,13 @@ struct ValueError
   constexpr static Error
   InvalidMemoryAddress(AddrPtr addr = nullptr) noexcept
   {
-    return Error(ValueError{ .mType = ValueErrorType::NotAReference, .mAddress = addr, .mSize = 0 });
+    return Error(ValueError{ .mType = ValueErrorType::InvalidMemoryAddress, .mAddress = addr, .mSize = 0 });
   }
 
   constexpr static Error
   NoVariableContext() noexcept
   {
-    return Error(ValueError{ .mType = ValueErrorType::NotAReference, .mAddress = nullptr, .mSize = 0 });
+    return Error(ValueError{ .mType = ValueErrorType::NoVariableContext, .mAddress = nullptr, .mSize = 0 });
   }
 };
 
