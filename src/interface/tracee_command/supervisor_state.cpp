@@ -1329,7 +1329,7 @@ SupervisorState::SafeRead(AddrPtr addr, u64 bytes) noexcept
 
   auto totalRead = 0UL;
   while (totalRead < bytes) {
-    auto res = DoReadBytes(addr, bytes - totalRead, buffer->Next());
+    auto res = DoReadBytes(offset(addr, totalRead), bytes - totalRead, buffer->Next());
     if (!res.WasSuccessful()) {
       return mdb::unexpected(NonFullRead{
         .mBytes = std::move(buffer), .mUnreadBytes = static_cast<u32>(bytes - totalRead), .mErrorNumber = errno });
@@ -1347,7 +1347,7 @@ SupervisorState::SafeRead(std::pmr::memory_resource *allocator, AddrPtr addr, u6
 
   auto totalRead = 0ull;
   while (totalRead < bytes) {
-    auto res = DoReadBytes(addr, bytes - totalRead, buffer->Next());
+    auto res = DoReadBytes(offset(addr, totalRead), bytes - totalRead, buffer->Next());
     if (!res.WasSuccessful()) {
       return mdb::unexpected(NonFullRead{
         .mBytes = std::move(buffer), .mUnreadBytes = static_cast<u32>(bytes - totalRead), .mErrorNumber = errno });
