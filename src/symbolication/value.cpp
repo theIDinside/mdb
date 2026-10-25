@@ -143,6 +143,12 @@ Value::Address() const noexcept
   return result;
 }
 
+bool
+Value::HasTargetAddress() const noexcept
+{
+  return mValueObject != nullptr && mValueObject->HasTargetAddress();
+}
+
 CanonicalType
 Value::GetType() const noexcept
 {

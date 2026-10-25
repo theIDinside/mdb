@@ -1,0 +1,27 @@
+view MdbTree {
+  fn walk(MdbTreeNode *n) {
+    if (!n) return;
+    walk(n->mLeft);
+    yield [n->mKey] n->mValue;
+    walk(n->mRight);
+  }
+  fn count(MdbTreeNode *n) -> u64 {
+    if (!n) return 0;
+    return count(n->mLeft) + 1 + count(n->mRight);
+  }
+  fn sum(MdbTreeNode *n, u64 &acc) -> u64 {
+    if (!n) return acc;
+    acc += n->mValue;
+    sum(n->mLeft, acc);
+    sum(n->mRight, acc);
+    return acc;
+  }
+  fn total() -> u64 {
+    u64 acc = 0;
+    sum(mRoot, acc);
+    return acc;
+  }
+  let size = count(mRoot);
+  summary "size={size} sum={total()}"
+  children (size: mSize) walk(mRoot)
+}

@@ -13,6 +13,7 @@
 #include <session_task_map.h>
 #include <tracer.h>
 #include <utils/logger.h>
+#include <views/registry.h>
 
 // system
 // dependency
@@ -300,6 +301,23 @@ Scripting::LoadScript(
   };
 
   return JS_UNDEFINED;
+}
+
+/* static */ JSValue
+Scripting::LoadViews(
+  JSContext *cx, [[maybe_unused]] JSValueConst thisValue, int argCount, JSValueConst *argv) noexcept
+{
+  if (argCount < 1 || !JS_IsString(argv[0])) {
+    return JS_ThrowTypeError(cx, "Invalid args: loadViews requires a file path string argument");
+  }
+
+  auto pathString = QuickJsString::FromValue(cx, argv[0]);
+  const auto result = views::ViewRegistry::Get().LoadFile(std::filesystem::path{ pathString.mString });
+  if (result.mError) {
+    return JS_ThrowTypeError(cx, "%s", result.mError->c_str());
+  }
+  const auto message = result.ToString();
+  return JS_NewStringLen(cx, message.data(), message.size());
 }
 
 /* static */ JSValue

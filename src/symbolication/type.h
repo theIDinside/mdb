@@ -436,6 +436,20 @@ public:
     return mDwarfTag;
   }
 
+  ObjectFile *
+  DefiningObjectFile() const noexcept
+  {
+    return mDefiningObjectFile;
+  }
+
+  // The type this type modifies/aliases (pointee for pointers, element for arrays, target for typedefs and
+  // qualifiers), or nullptr.
+  Type *
+  TypeChain() const noexcept
+  {
+    return mTypeChain;
+  }
+
   const EnumeratorValues &
   GetEnumerations() const noexcept
   {

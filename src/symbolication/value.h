@@ -163,6 +163,7 @@ public:
   void SetDapSerializer(DebugAdapterSerializer *serializer) noexcept;
 
   AddrPtr Address() const noexcept;
+  bool HasTargetAddress() const noexcept;
   CanonicalType GetType() const noexcept;
 
   std::optional<BitField> BitField() const noexcept;
@@ -275,6 +276,11 @@ public:
   virtual bool Refresh(tc::SupervisorState &supervisor) noexcept = 0;
   virtual std::span<const u8> RawView() noexcept = 0;
   virtual std::span<const u8> View(u32 offset, u32 size) noexcept = 0;
+  virtual bool
+  HasTargetAddress() const noexcept
+  {
+    return true;
+  }
 
   // constructs a Value, essentially the "master value"; which represents the full MemoryContentsObject
   // Then we can chop that up into more sub values, all referring back to this MemoryContentsObject
@@ -342,6 +348,11 @@ public:
   bool Refresh(tc::SupervisorState &supervisor) noexcept final;
   std::span<const u8> RawView() noexcept final;
   std::span<const u8> View(u32 offset, u32 size) noexcept final;
+  bool
+  HasTargetAddress() const noexcept final
+  {
+    return false;
+  }
 };
 
 } // namespace mdb::sym

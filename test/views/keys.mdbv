@@ -1,0 +1,10 @@
+// Used by the keyedChildren test in test/driver/views.js: child names that contain quotes.
+view MdbTArray_Impl<Name> {
+  summary "length={mHdr->mLength}"
+  children (size: mHdr->mLength) {
+    for (u32 i = 0; i < mHdr->mLength; ++i) {
+      auto e = (Name*)(mHdr + 1) + i;
+      yield [text(e->mStr, e->mLen)] *e;
+    }
+  }
+}

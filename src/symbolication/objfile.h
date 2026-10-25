@@ -197,7 +197,6 @@ public:
 
   auto InitializeMinimalSymbolLookup() noexcept -> void;
 
-  auto FindCustomDataVisualizerFor(sym::Type &type) noexcept -> std::unique_ptr<sym::DebugAdapterSerializer>;
   static auto SetSerializerFor(sym::Value &value) noexcept -> void;
 
   /**

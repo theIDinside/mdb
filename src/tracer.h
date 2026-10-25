@@ -218,6 +218,8 @@ public:
   static void InitInterpreterAndStartDebugger(
     std::unique_ptr<DebuggerThread> debugAdapterThread, EventSystem *eventSystem) noexcept;
   static void InitializeDapSerializers() noexcept;
+  // Load view files from the user's views directory (see docs/views.md).
+  static void LoadUserViews() noexcept;
 
   void Shutdown() noexcept;
   static void ShutdownProfiling() noexcept;

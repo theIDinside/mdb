@@ -1,0 +1,15 @@
+// Views for test/strings.cpp. text() picks the encoding from the element type: char is UTF-8, char16_t UTF-16.
+
+view MdbCString {
+  summary text(mData, mLength)
+  children none
+}
+
+view MdbString {
+  summary text(mData, mLength)
+  children none
+}
+
+view StringPair {
+  summary "{utf8.mLength} bytes / {utf16.mLength} code units"
+}

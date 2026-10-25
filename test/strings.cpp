@@ -277,9 +277,9 @@ void
 unicode_strings()
 {
   // Non-ASCII content: emoji, CJK, combining characters
-  MdbCString emoji_utf8{ "Hello \xF0\x9F\x98\x80 World" };        // U+1F600 GRINNING FACE
+  MdbCString emoji_utf8{ "Hello \xF0\x9F\x98\x80 World" };       // U+1F600 GRINNING FACE
   MdbCString cjk_utf8{ "\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E" }; // 日本語
-  MdbCString latin_ext{ "\xC3\xA9\xC3\xA0\xC3\xBC" };             // éàü
+  MdbCString latin_ext{ "\xC3\xA9\xC3\xA0\xC3\xBC" };            // éàü
 
   MdbString emoji_utf16{ u"Hello \U0001F600 World" };
   MdbString cjk_utf16{ u"\u65E5\u672C\u8A9E" };       // 日本語
