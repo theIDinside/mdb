@@ -575,6 +575,17 @@ Value::FullMemoryView() const noexcept
 
 MemoryContentsObject::MemoryContentsObject(AddrPtr start, AddrPtr end) noexcept : start(start), end(end) {}
 
+// A read of target memory may have been partial; never hand out a view that extends past the bytes we actually
+// have. A view that can't be fully satisfied is empty, which serializers treat as "value unavailable".
+static std::span<const u8>
+ClampedSubspan(std::span<const u8> bytes, u32 offset, u32 size) noexcept
+{
+  if (static_cast<u64>(offset) + size > bytes.size()) {
+    return {};
+  }
+  return bytes.subspan(offset, size);
+}
+
 EagerMemoryContentsObject::EagerMemoryContentsObject(
   AddrPtr start, AddrPtr end, MemoryContentBytes &&data) noexcept
     : MemoryContentsObject(start, end), mContents(std::move(data))
@@ -605,7 +616,7 @@ EagerMemoryContentsObject::RawView() noexcept
 std::span<const u8>
 EagerMemoryContentsObject::View(u32 offset, u32 size) noexcept
 {
-  return mContents->Span().subspan(offset, size);
+  return ClampedSubspan(mContents->Span(), offset, size);
 }
 
 void
@@ -643,7 +654,7 @@ LazyMemoryContentsObject::View(u32 offset, u32 size) noexcept
     CacheMemory();
   }
 
-  return mContents->Span().subspan(offset, size);
+  return ClampedSubspan(mContents->Span(), offset, size);
 }
 
 /*static*/
@@ -828,12 +839,11 @@ MemoryContentsObject::CreateSyntheticVariable(
   }
 
   auto res = supervisor->SafeRead(address, requestedByteSize);
-  if (!res.is_expected()) {
-    PANIC("Expected read to succeed");
-  }
-  DBGLOG(dap, "[eager read]: {}:+{}", address, requestedByteSize);
+  DBGLOG(dap, "[eager read]: {}:+{} (success={})", address, requestedByteSize, res.is_expected());
+  // A failed (or partial) read keeps whatever bytes were read. Views into missing bytes come back empty.
+  auto bytes = res.is_expected() ? res.take_value() : std::move(res.take_error().mBytes);
   auto memoryObject =
-    std::make_shared<EagerMemoryContentsObject>(address, address + requestedByteSize, res.take_value());
+    std::make_shared<EagerMemoryContentsObject>(address, address + requestedByteSize, std::move(bytes));
   return Ref<Value>::MakeShared(
     std::move(variableContext), std::format("${}", ref), type, u32{}, std::move(memoryObject));
 }
@@ -855,12 +865,10 @@ MemoryContentsObject::CreateSyntheticVariable(
   }
 
   auto res = tc.SafeRead(address, requestedByteSize);
-  if (!res.is_expected()) {
-    PANIC("Expected read to succeed");
-  }
-  DBGLOG(dap, "[eager read]: {}:+{}", address, requestedByteSize);
+  DBGLOG(dap, "[eager read]: {}:+{} (success={})", address, requestedByteSize, res.is_expected());
+  auto bytes = res.is_expected() ? res.take_value() : std::move(res.take_error().mBytes);
   auto memoryObject =
-    std::make_shared<EagerMemoryContentsObject>(address, address + requestedByteSize, res.take_value());
+    std::make_shared<EagerMemoryContentsObject>(address, address + requestedByteSize, std::move(bytes));
   return Ref<Value>::MakeShared(
     std::move(variableContext), std::format("${}", ref), type, u32{}, std::move(memoryObject));
 }
@@ -886,7 +894,7 @@ SynthesizedMemoryContentsObject::RawView() noexcept
 std::span<const u8>
 SynthesizedMemoryContentsObject::View(u32 offset, u32 size) noexcept
 {
-  return mContents->Span().subspan(offset, size);
+  return ClampedSubspan(mContents->Span(), offset, size);
 }
 
 } // namespace mdb::sym
