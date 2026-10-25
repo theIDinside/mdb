@@ -1,0 +1,51 @@
+// Views for test/containers.cpp
+
+// Applies to MdbTArray<T> and MdbAutoTArray<T, N> too, through their base class.
+view MdbTArray_Impl<.*> {
+  using T = template_arg(0)
+  let hdr = mHdr;
+  summary "length={hdr->mLength}"
+  children array((T*)(hdr + 1), hdr->mLength)
+}
+
+view Name {
+  summary text(mStr, mLen)
+  children none
+}
+
+// Bitfields; also used for DerivedFlags
+view Flags {
+  summary "a={a} b={b} c={c}"
+}
+
+view Broken {
+  summary "{mMissing}"
+}
+
+view NullElements {
+  summary "count={mCount}"
+  children array(mPtr, mCount)
+}
+
+// A value template argument, and a type taken from an expression
+view FixedBuffer<.*> {
+  using T = template_arg(0)
+  using Item = typeof(mItems[0])
+  summary "{mUsed} of {template_arg(1)}, {sizeof(Item)} bytes each"
+  children array((T*)mItems, mUsed)
+}
+
+// Qualified names; inline namespaces are left out
+view outer::inner::Scoped {
+  // Named types: fully qualified, rooted, and a partially qualified (nested) name
+  summary "scoped={mValue} {sizeof(outer::inner::Scoped)} {sizeof(::outer::inner::Scoped)} {sizeof(inner::Scoped)}"
+}
+
+view outer::Versioned {
+  summary "version={mVersion}"
+}
+
+view NotATemplate {
+  using T = template_arg(0)
+  summary "{x}"
+}

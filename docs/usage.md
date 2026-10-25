@@ -2,9 +2,13 @@
 
 ## Index
 
-- [Resolvers](#resolvers) - Displaying variables in a user friendly way
+- [Views](views.md) - Displaying variables in a user friendly way
+- [Resolvers](#resolvers) - The older JavaScript mechanism for the same thing
 
 ## Resolvers
+
+> Views ([views.md](views.md)) replace resolvers. A view gives a type both a summary and its children in a few
+> lines, without JavaScript. Resolvers keep working for now, but views take precedence for the same type.
 
 Resolvers are custom functions that transform complex data structures into a list of members to display to the user. When debugging, native data structures like `std::vector`, `std::string`, or custom container types often expose internal implementation details that make it difficult to inspect their actual contents. Resolvers allow you to define how these types should be displayed and accessed, showing the meaningful data rather than raw pointers and internal bookkeeping.
 

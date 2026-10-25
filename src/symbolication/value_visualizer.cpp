@@ -12,6 +12,7 @@
 #include <tracer.h>
 #include <utils/enumerator.h>
 #include <utils/todo.h>
+#include <views/text.h>
 
 // std
 #include <algorithm>
@@ -371,14 +372,20 @@ PrimitiveSerializer::SerializeVariable(const Value &value, std::pmr::memory_reso
   auto value_field =
     FormatValue(value, allocator).value_or(std::pmr::string{ "could not serialize value", allocator });
   std::pmr::string result{ allocator };
+  std::string name;
+  std::string memoryReference;
+  views::AppendJsonEscaped(value.mName.StringView(), name);
+  if (value.HasTargetAddress()) {
+    memoryReference = std::format(R"(, "memoryReference": "{}")", value.Address());
+  }
 
   FormatAndReturn(result,
-    R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }})",
-    value.mName,
+    R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}{} }})",
+    name,
     value_field,
     *(value.GetType()),
     value.ReferenceId(),
-    value.Address());
+    memoryReference);
 }
 
 std::optional<std::pmr::string>
@@ -387,23 +394,31 @@ DefaultStructSerializer::SerializeVariable(const Value &value, std::pmr::memory_
 
   const auto &t = *value.GetType();
   std::pmr::string result{ allocator };
+  std::string name;
+  std::string memoryReference;
+  views::AppendJsonEscaped(value.mName.StringView(), name);
+  if (value.HasTargetAddress()) {
+    memoryReference = std::format(R"(, "memoryReference": "{}")", value.Address());
+  }
   FormatAndReturn(result,
-    R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }})",
-    value.mName,
+    R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}{} }})",
+    name,
     t,
     t,
     value.ReferenceId(),
-    value.Address());
+    memoryReference);
 }
 
 std::optional<std::pmr::string>
 InvalidValueSerializer::SerializeVariable(const Value &value, std::pmr::memory_resource *allocator) noexcept
 {
   std::pmr::string result{ allocator };
+  std::string name;
+  views::AppendJsonEscaped(value.mName.StringView(), name);
   FormatAndReturn(result,
     R"({{ "name": "{}", "value": "could not resolve {}", "type": "{}", "variablesReference": 0 }})",
-    value.mName,
-    value.mName,
+    name,
+    name,
     *value.GetType());
 }
 
@@ -413,13 +428,19 @@ ArraySerializer::SerializeVariable(const Value &value, std::pmr::memory_resource
   auto &t = *value.GetType();
   const Type *no_alias = t.ResolveAlias();
   std::pmr::string result{ allocator };
+  std::string name;
+  std::string memoryReference;
+  views::AppendJsonEscaped(value.mName.StringView(), name);
+  if (value.HasTargetAddress()) {
+    memoryReference = std::format(R"(, "memoryReference": "{}")", value.Address());
+  }
   FormatAndReturn(result,
-    R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}", "indexedVariables": {} }})",
-    value.mName,
+    R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}{}, "indexedVariables": {} }})",
+    name,
     t,
     t,
     value.ReferenceId(),
-    value.Address(),
+    memoryReference,
     no_alias->ArraySize());
 }
 
@@ -452,12 +473,18 @@ CStringSerializer::SerializeVariable(const Value &value, std::pmr::memory_resour
   }
 
   std::string_view cast{ (const char *)byteSpan.data(), null_terminator.value_or(byteSpan.size_bytes()) };
+  std::string name;
+  std::string memoryReference;
+  views::AppendJsonEscaped(value.mName.StringView(), name);
+  if (value.HasTargetAddress()) {
+    memoryReference = std::format(R"(, "memoryReference": "{}")", value.Address());
+  }
   FormatAndReturn(result,
-    R"({{ "name": "{}", "value": "{}", "type": "const char *", "variablesReference": {}, "memoryReference": "{}" }})",
-    value.mName,
+    R"({{ "name": "{}", "value": "{}", "type": "const char *", "variablesReference": {}{} }})",
+    name,
     DAPStringView{ cast },
     0,
-    value.Address());
+    memoryReference);
 }
 
 #undef FormatAndReturn

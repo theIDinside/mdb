@@ -25,6 +25,7 @@ async function programExit(debugAdapter) {
     `Expected to see ${threads[0].id} exit`,
     `Saw ${event_body.threadId}`
   )
+  await debugAdapter.disconnect()
 }
 
 /**

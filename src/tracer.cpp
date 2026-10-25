@@ -38,12 +38,15 @@
 #include <utils/thread_pool.h>
 #include <utils/todo.h>
 #include <utils/util.h>
+#include <views/registry.h>
 
 // dependency
 #include <mdbjs/include-quickjs.h>
 
 // stdlib
 #include <algorithm>
+#include <cstdlib>
+#include <filesystem>
 #include <utility>
 
 // system
@@ -515,12 +518,33 @@ Tracer::NewSupervisorId() noexcept
 
 /* static */
 void
+Tracer::LoadUserViews() noexcept
+{
+  // $MDB_VIEWS_DIR, or $XDG_CONFIG_HOME/mdb/views, or ~/.config/mdb/views
+  std::filesystem::path directory;
+  if (const char *dir = std::getenv("MDB_VIEWS_DIR"); dir) {
+    directory = dir;
+  } else if (const char *config = std::getenv("XDG_CONFIG_HOME"); config && *config) {
+    directory = std::filesystem::path{ config } / "mdb" / "views";
+  } else if (const char *home = std::getenv("HOME"); home) {
+    directory = std::filesystem::path{ home } / ".config" / "mdb" / "views";
+  } else {
+    return;
+  }
+  for (const auto &result : views::ViewRegistry::Get().LoadDirectory(directory)) {
+    DBGLOG(core, "[views] {}: {}", directory.c_str(), result.ToString());
+  }
+}
+
+/* static */
+void
 Tracer::InitInterpreterAndStartDebugger(
   std::unique_ptr<DebuggerThread> debugAdapterThread, EventSystem *eventSystem) noexcept
 {
   Get().mDebugAdapterThread = std::move(debugAdapterThread);
 
   auto *interpreter = js::Scripting::Create();
+  LoadUserViews();
   MainLoop(eventSystem, interpreter);
   interpreter->Shutdown();
 }

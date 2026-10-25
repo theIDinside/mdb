@@ -32,6 +32,7 @@
 #include <utils/task_list.h>
 #include <utils/todo.h>
 #include <utils/worker_task.h>
+#include <views/registry.h>
 
 // std
 #include <algorithm>
@@ -532,18 +533,19 @@ ObjectFile::ParseELFSymbols(Elf64Header *header, std::vector<ElfSection> &&secti
   }
 }
 
-std::unique_ptr<sym::DebugAdapterSerializer>
-ObjectFile::FindCustomDataVisualizerFor(sym::Type &) noexcept
-{
-  return nullptr;
-}
-
 /* static */
 void
 ObjectFile::SetSerializerFor(sym::Value &value) noexcept
 {
   if (!value.IsValidValue()) {
     value.SetDapSerializer(Tracer::GetSerializer<sym::InvalidValueSerializer>());
+    return;
+  }
+  // A view for the value's type takes precedence over the default serializers, even if one has been assigned
+  // already.
+  if (auto *viewSerializer = views::ViewRegistry::Get().SerializerFor(value); viewSerializer) {
+    value.SetDapSerializer(viewSerializer);
+    return;
   }
   if (value.HasVisualizer()) {
     return;
@@ -959,6 +961,11 @@ SymbolFile::ResolveVariable(
   }
 
   sym::CanonicalType type = value->GetType();
+
+  if (auto children = views::ViewRegistry::Get().ResolveChildren(ctx, *value, { .start = start, .count = count });
+    children) {
+    return std::move(*children);
+  }
 
   js::ResolverRegistry *registry = js::Scripting::GetResolverRegistry();
   sym::IValueContentsResolver *resolver = registry->GetResolver(type.TypeEntry());

@@ -1,0 +1,16 @@
+// Views for the MdbHashMap in test/containers.cpp, used by the hashTableChildren test in test/driver/views.js.
+//
+// The children are the live slots of the table: slots whose hash is > 1 (0 is free, 1 is removed). Entries are
+// stored mEntrySize bytes apart, so the address of the entry in a slot has to be computed.
+
+view MdbHashMap<.*> {
+  using Entry = template_arg(0)
+  summary "count={mTable.mEntryCount}"
+  children (size: mTable.mEntryCount) {
+    for (i64 slot = 0; slot < mTable.mCapacity; ++slot) {
+      if (mTable.mHashes[slot] <= 1) continue;
+      auto entry = (Entry*)(mTable.mEntries + slot * mTable.mEntrySize);
+      yield [entry->mKey] *entry;
+    }
+  }
+}

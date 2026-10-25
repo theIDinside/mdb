@@ -1,0 +1,36 @@
+// Views for the lists in test/containers.cpp, used by the listChildren and runawayLoops tests in
+// test/driver/views.js.
+
+// Follows mNext until a null pointer. The size is known, so the client can page through the children.
+view MdbList {
+  summary "length={mLength}"
+  children (size: mLength) {
+    for (auto node = mHead; node; node = node->mNext)
+      yield node->mValue;
+  }
+}
+
+// Circular through a sentinel: the walk ends when it is back at the sentinel. Elements derive from the link type,
+// so a link is cast to the element. No size: the client asks for all children at once.
+view MdbCircularList {
+  children {
+    for (auto link = mSentinel.mNext; link != &mSentinel; link = link->mNext)
+      yield *(MdbItem*)link;
+  }
+}
+
+// The list loops forever. The limit stops the walk after 10 elements.
+view MdbCorruptList {
+  children (limit: 10) {
+    for (auto node = mHead; node; node = node->mNext)
+      yield node->mValue;
+  }
+}
+
+// Never yields and never ends: the step budget stops it.
+view MdbForever {
+  children {
+    while (true) {
+    }
+  }
+}

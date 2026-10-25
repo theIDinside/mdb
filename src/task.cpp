@@ -14,6 +14,7 @@
 #include <utils/format_utils.h>
 #include <utils/logger.h>
 #include <utils/util.h>
+#include <views/registry.h>
 
 // system
 #include <sys/user.h>
@@ -321,6 +322,7 @@ TaskInfo::SetInvalidCache() noexcept
 
   variableReferences.clear();
   mVariablesCache.clear();
+  views::ViewRegistry::Get().ForgetCursors();
 }
 
 void

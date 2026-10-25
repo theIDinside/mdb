@@ -32,6 +32,7 @@
 #include <utils/logger.h>
 #include <utils/todo.h>
 #include <utils/util.h>
+#include <views/registry.h>
 
 // system
 
@@ -1451,8 +1452,14 @@ struct Launch : public UICommand
 
   static RefPtr<ui::UICommand> CreateRequest(UICommandArg arg, const mdbjson::JsonValue &args) noexcept;
 
+  // The optional `views` launch argument: view files (.mdbv) to load for this session.
+  static std::vector<std::string> ParseViewFiles(const mdbjson::JsonValue &args) noexcept;
+  // Loads `mViewFiles`. Problems are reported to the user in the debug console.
+  void LoadViewFiles(SessionId sessionId) noexcept;
+
   bool mStopOnEntry;
   std::optional<BreakpointBehavior> mBreakpointBehavior;
+  std::vector<std::string> mViewFiles;
 
   DEFINE_NAME("launch"sv);
   RequiredArguments({ "type"sv });
@@ -1491,6 +1498,7 @@ struct NativeLaunch final : public Launch
 
     tc::ptrace::Session *process = tc::ptrace::Session::ForkExec(
       mDebugAdapterManager, mStopOnEntry, mProgram, mProgramArgs, mBreakpointBehavior);
+    LoadViewFiles(process->TaskLeaderTid());
 
     // Queue a pseudo stop event that will force a start during configurationDone by processing deferred events.
     process->QueuePending(StopStatus{ .ws = StopKind::Stopped, .mPid = process->TaskLeaderTid(), .uSignal = 0 });
@@ -1559,7 +1567,7 @@ NativeLaunch::CreateRequest(UICommandArg arg,
   auto configTokenValue = get<std::string_view>(args, kConfigToken);
   MDB_ASSERT(configTokenValue.has_value(), "configToken field missing from LaunchRequest");
 
-  return RefPtr<NativeLaunch>::MakeShared(std::move(arg),
+  auto launch = RefPtr<NativeLaunch>::MakeShared(std::move(arg),
     stopOnEntry,
     behaviorSetting,
     *configTokenValue,
@@ -1567,6 +1575,8 @@ NativeLaunch::CreateRequest(UICommandArg arg,
     std::move(programArguments),
     std::move(environVars),
     std::move(currentWorkingDir));
+  launch->mViewFiles = ParseViewFiles(args);
+  return launch;
 }
 
 struct RRLaunch final : public Launch
@@ -1604,6 +1614,7 @@ struct RRLaunch final : public Launch
     const bool hasReplayedStep = true;
     replay::Session *session =
       replay::Session::Create(replaySupervisor, processes.front(), mDebugAdapterManager, hasReplayedStep);
+    LoadViewFiles(session->TaskLeaderTid());
 
     WriteResponse(RRLaunchResponse{
       replaySupervisor->CurrentLiveProcesses().front(), replaySupervisor->CurrentLiveProcesses(), true, this });
@@ -1647,9 +1658,39 @@ struct RRLaunch final : public Launch
     auto configTokenValue = get<std::string_view>(args, kConfigToken);
     MDB_ASSERT(configTokenValue.has_value(), "configToken field missing from LaunchRequest");
 
-    return RefPtr<RRLaunch>::MakeShared(std::move(arg), stopOnEntry, behaviorSetting, traceDir, *configTokenValue);
+    auto launch =
+      RefPtr<RRLaunch>::MakeShared(std::move(arg), stopOnEntry, behaviorSetting, traceDir, *configTokenValue);
+    launch->mViewFiles = ParseViewFiles(args);
+    return launch;
   }
 };
+
+/* static */
+std::vector<std::string>
+Launch::ParseViewFiles(const mdbjson::JsonValue &args) noexcept
+{
+  std::vector<std::string> files;
+  if (args.Contains("views") && args["views"]->IsArray()) {
+    for (const auto &file : args["views"]->AsSpan()) {
+      if (file.IsString()) {
+        files.emplace_back(*file.GetString());
+      }
+    }
+  }
+  return files;
+}
+
+void
+Launch::LoadViewFiles(SessionId sessionId) noexcept
+{
+  for (const auto &file : mViewFiles) {
+    const auto result = views::ViewRegistry::Get().LoadFile(file);
+    if (result.mError || !result.mDiagnostics.empty()) {
+      mDebugAdapterManager->PostDapEvent(new ui::dap::OutputEvent{
+        sessionId, "console", std::format("[views] {}: {}\n", file, result.ToString()) });
+    }
+  }
+}
 
 /* static */
 RefPtr<ui::UICommand>

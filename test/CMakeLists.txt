@@ -158,4 +158,19 @@ BuildTestSubject(
   SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/strings.cpp
 )
 
+BuildTestSubject(
+  NAME containers
+  SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/containers.cpp
+)
+
+# The same program, but the compiler leaves template arguments out of type names; views must rebuild them from the
+# template parameters in the debug info.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  BuildTestSubject(
+    NAME containers_simple_template_names
+    SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/containers.cpp
+  )
+  target_compile_options(containers_simple_template_names PRIVATE -gsimple-template-names)
+endif()
+
 message("Test build type: ${CMAKE_BUILD_TYPE}")

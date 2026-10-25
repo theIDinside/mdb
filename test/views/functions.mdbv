@@ -1,0 +1,27 @@
+view outer::inner::Scoped {
+  fn text() {}
+}
+
+view outer::Versioned {
+  fn walk() {}
+  summary "value={walk()}"
+}
+
+view NotATemplate {
+  fn walk() { return 1; }
+}
+
+view Broken {
+  fn value(int &n) -> int { return n; }
+  summary "value={value(mPresent + 1)}"
+}
+
+view MdbForever {
+  fn never() -> int {}
+  summary "value={never()}"
+}
+
+view MdbCorruptList {
+  fn count(MdbListNode *n) -> u64 { return 1; }
+  children (size: 1) count(mHead)
+}

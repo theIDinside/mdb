@@ -28,6 +28,26 @@ set(MDBDEPS "${CMAKE_SOURCE_DIR}/dependencies")
 
 set(MDB_ROOT ${PROJECT_SOURCE_DIR})
 
+# The parts of views that don't depend on the rest of the debugger; unit tests build these directly.
+set(MDB_VIEWS_CORE_SOURCES
+  src/views/ast.h
+  src/views/bound_ir.h
+  src/views/bytecode.h
+  src/views/codegen.cpp
+  src/views/codegen.h
+  src/views/builtin_types.cpp
+  src/views/builtin_types.h
+  src/views/diagnostic.h
+  src/views/evaluator.cpp
+  src/views/evaluator.h
+  src/views/lexer.cpp
+  src/views/lexer.h
+  src/views/parser.cpp
+  src/views/parser.h
+  src/views/text.cpp
+  src/views/text.h
+)
+
 set(MIDAS_SOURCES
   src/app.cpp
   src/main.cpp
@@ -233,6 +253,17 @@ set(MIDAS_SOURCES
   src/mdbjs/variablejs.h
   src/mdbjs/value_resolver_registry.cpp
   src/mdbjs/value_resolver_registry.h
+
+  # Views: declarative value visualization (see docs/views.md)
+  ${MDB_VIEWS_CORE_SOURCES}
+  src/views/binder.cpp
+  src/views/binder.h
+  src/views/matcher.cpp
+  src/views/matcher.h
+  src/views/registry.cpp
+  src/views/registry.h
+  src/views/runtime.cpp
+  src/views/view_serializer.h
 )
 
 set(COMMON_SRC src/common.cpp src/common.h src/common/panic.cpp src/common/panic.h)
@@ -299,6 +330,14 @@ if(BUILD_MDB_TESTS)
 
   AddTest(NAME xml_tests
     SOURCES test/unittest/xml_tests.cpp src/utils/xml.cpp src/utils/xml.h
+    LIBS)
+
+  AddTest(NAME views_frontend_tests
+    SOURCES test/unittest/views_frontend.cpp ${MDB_VIEWS_CORE_SOURCES}
+    LIBS)
+
+  AddTest(NAME views_eval_tests
+    SOURCES test/unittest/views_eval.cpp ${MDB_VIEWS_CORE_SOURCES}
     LIBS)
 
   # The Driver Test Suite
