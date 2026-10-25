@@ -117,13 +117,13 @@ ResolveArray::Resolve(const VariableContext &context, ValueRange valueRange) noe
   const auto arraySize = type->ArraySize();
   CanonicalType elementsType = type.DerefType();
 
-  if (valueRange.start.value() >= arraySize) {
+  const u32 startIndex = valueRange.start.value_or(0);
+  if (startIndex >= arraySize) {
     return {};
   }
 
-  auto count = std::min(valueRange.count.value_or(100), arraySize - valueRange.start.value());
+  auto count = std::min(valueRange.count.value_or(100), arraySize - startIndex);
 
-  const u32 startIndex = valueRange.start.value();
   const u32 endIndex = startIndex + count;
 
   const auto arrayBaseAddress = value.Address();
@@ -265,6 +265,10 @@ PrimitiveSerializer::FormatValue(const Value &valueObject, std::pmr::memory_reso
     return FormatEnum(*type, span, allocator);
   }
 
+  if (!type->GetBaseType()) {
+    return std::nullopt;
+  }
+
   switch (type->GetBaseType().value()) {
   case BaseTypeEncoding::DW_ATE_address: {
     auto value = BitCopyAndMaybeProcessBitField<std::uintptr_t>(span, valueObject);
@@ -283,7 +287,8 @@ PrimitiveSerializer::FormatValue(const Value &valueObject, std::pmr::memory_reso
       auto value = BitCopy<double>(span);
       FormatAndReturn(result, "{}", value);
     }
-    PANIC("Expected byte size of a floating point to be 4 or 8");
+    // long double, _Float16 etc.
+    return std::nullopt;
   }
   case BaseTypeEncoding::DW_ATE_signed_char:
   case BaseTypeEncoding::DW_ATE_signed:
@@ -344,14 +349,15 @@ PrimitiveSerializer::FormatValue(const Value &valueObject, std::pmr::memory_reso
   case BaseTypeEncoding::DW_ATE_complex_float:
 
   case BaseTypeEncoding::DW_ATE_UCS: {
-    TODO_FMT("Currently not implemented base type encoding: {}", to_str(type->GetBaseType().value()));
+    DBGLOG(core, "Currently not implemented base type encoding: {}", to_str(type->GetBaseType().value()));
     break;
   }
   case BaseTypeEncoding::DW_ATE_lo_user:
   case BaseTypeEncoding::DW_ATE_hi_user:
     break;
   }
-  PANIC("unknown base type encoding");
+  // Unsupported encodings, or an integer of a size we don't handle (e.g. __int128).
+  return std::nullopt;
 }
 
 std::optional<std::pmr::string>
@@ -556,7 +562,7 @@ FormatValue(Value &value, Iterator iter) noexcept
       auto value = BitCopy<double>(span);
       FormatAndReturn(iter, "{}", value);
     }
-    PANIC("Expected byte size of a floating point to be 4 or 8");
+    FormatAndReturn(iter, "<unsupported float size {}>", size_of);
   }
   case BaseTypeEncoding::DW_ATE_signed_char:
   case BaseTypeEncoding::DW_ATE_signed:
@@ -617,14 +623,15 @@ FormatValue(Value &value, Iterator iter) noexcept
   case BaseTypeEncoding::DW_ATE_complex_float:
 
   case BaseTypeEncoding::DW_ATE_UCS: {
-    TODO_FMT("Currently not implemented base type encoding: {}", to_str(type->GetBaseType().value()));
+    DBGLOG(core, "Currently not implemented base type encoding: {}", to_str(type->GetBaseType().value()));
     break;
   }
   case BaseTypeEncoding::DW_ATE_lo_user:
   case BaseTypeEncoding::DW_ATE_hi_user:
     break;
   }
-  PANIC("unknown base type encoding");
+  // Unsupported encodings, or an integer of a size we don't handle (e.g. __int128).
+  FormatAndReturn(iter, "<unsupported>");
 }
 
 template <size_t N>
