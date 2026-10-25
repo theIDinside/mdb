@@ -2446,14 +2446,12 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
       if (opt) {
         it = std::format_to(it, "{},", *opt);
       } else {
-        std::format_to(std::back_inserter(result),
-          R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"variables","message":"serializer failed","body":{{"error":{{"id": -1, "format": "Could not serializer value for '{}:{}'"}} }} }})",
-          seq,
-          mRequestSeq,
-          mProcessId,
-          v->mName,
-          v->GetType().Name());
-        return result;
+        // One value we can't serialize (unreadable memory, unsupported encoding, ...) must not take the whole
+        // response down with it.
+        it = std::format_to(it,
+          R"({{ "name": "{}", "value": "<unavailable>", "type": "{}", "variablesReference": 0 }},)",
+          DAPStringView{ v->mName.StringView() },
+          *v->GetType());
       }
     } else {
       MDB_ASSERT(v->GetType()->IsReference(),
