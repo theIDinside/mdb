@@ -44,6 +44,7 @@ diagnostics, and the launch request prints them to the debug console.
 view <pattern> [in "<object file>"] {
   using <Name> = <type>;            // any number
   let <name> = <expression>;        // any number
+  fn <name>(<parameters>) [-> <type>] { ... } // any number
   summary <template or expression>  // optional
   children <none | default | array(...) | { ... }> // optional
 }
@@ -216,6 +217,65 @@ child saying `stopped after N steps`. Summaries, `let` values and sizes each hav
 optional `limit: N` ends the children after N elements and adds a `[view error]` child saying `limit of N elements
 reached`; use it to guard against a corrupt list that loops back on itself.
 
+### Functions
+
+A view can define value functions and void functions:
+
+```
+fn count(Node *node) -> u64 { ... }  // returns a number or pointer
+fn walk(Node *node) { ... }          // can yield children
+```
+
+A value function has a return type and can't yield. Call it wherever an expression is allowed, such as in a
+summary, a `let`, a `size`, or another function. A void function has no return type and can yield. Call it as a
+statement from a children block or another void function, or use it directly as the children item:
+
+```
+children (size: mSize) walk(mRoot)
+```
+
+Functions can be written in any order, call themselves recursively, and call each other. A function can also see
+the view's members, `using` declarations and `let` values. Parameters are passed by value unless declared as
+references, such as `u64 &acc`. A reference parameter can only be given a local (or another reference parameter),
+and lets a function update a caller's local or return more than one value. You can't pass a member or an expression
+as a reference argument.
+
+Calls can be nested up to 1024 levels. Going deeper is an error: a summary shows
+`<view error: ...: call depth exceeded 1024>`, and while producing children, the page ends with a `[view error]`
+child that says so. This also stops a walk over a corrupt tree whose nodes point back at each other.
+
+For example, this view walks a binary search tree in key order and computes its size and sum:
+
+```
+view MdbTree {
+  fn walk(MdbTreeNode *n) {
+    if (!n) return;
+    walk(n->mLeft);
+    yield [n->mKey] n->mValue;
+    walk(n->mRight);
+  }
+  fn count(MdbTreeNode *n) -> u64 {
+    if (!n) return 0;
+    return count(n->mLeft) + 1 + count(n->mRight);
+  }
+  fn sum(MdbTreeNode *n, u64 &acc) -> u64 {
+    if (!n) return acc;
+    acc += n->mValue;
+    sum(n->mLeft, acc);
+    sum(n->mRight, acc);
+    return acc;
+  }
+  fn total() -> u64 {
+    u64 acc = 0;
+    sum(mRoot, acc);
+    return acc;
+  }
+  let size = count(mRoot);
+  summary "size={size} sum={total()}"
+  children (size: mSize) walk(mRoot)
+}
+```
+
 ## When something goes wrong
 
 A view that doesn't fit the type it matched is shown in place of the value, with the location in the view file.
@@ -232,8 +292,10 @@ so.
 
 ## Not yet supported
 
-- Trees: walking them needs recursion, which needs functions. Functions are planned. The form
-  `children (size: n) walk(root)` already parses, but calling a function isn't supported yet.
+- Functions shared between views.
+- Locals that hold text, records or fixed-size arrays, such as `u64 stack[64]`.
+- Containers such as a visited set.
+- Delegation and `template_arg(i, j)`.
 - Named children next to the indexed ones, such as a `[length]` child before the elements.
 - Nested summaries: a member with its own view shows as `{TypeName}` inside a summary.
 - Template types written out in expressions or `using` (`(Foo<int>*)p`); use `template_arg(N)` or `typeof(...)`
