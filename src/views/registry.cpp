@@ -50,7 +50,7 @@ ViewRegistry::Get() noexcept
 void
 ViewRegistry::Rebuild() noexcept
 {
-  ForgetCursors();
+  ++mGeneration;
   mViews.clear();
   mBoundViews.clear();
   for (const auto &file : mFiles) {

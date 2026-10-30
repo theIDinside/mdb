@@ -2,6 +2,7 @@
 // MdbTArray mimics Gecko's nsTArray: the elements are stored right after a header that the array points to, and an
 // "auto" array keeps its header and first N elements inline.
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -63,7 +64,7 @@ template <typename Entry> struct MdbHashMap
   Entry *
   EntryAt(uint32_t slot)
   {
-    return reinterpret_cast<Entry *>(mTable.mEntries + slot * mTable.mEntrySize);
+    return reinterpret_cast<Entry *>(mTable.mEntries + static_cast<size_t>(slot * mTable.mEntrySize));
   }
 
   // Assumes the key isn't in the table yet, and that the table isn't full.

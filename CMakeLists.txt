@@ -260,8 +260,10 @@ set(MIDAS_SOURCES
   src/views/binder.h
   src/views/matcher.cpp
   src/views/matcher.h
+  src/views/cursor_cache.h
   src/views/registry.cpp
   src/views/registry.h
+  src/views/resolver.h
   src/views/runtime.cpp
   src/views/view_serializer.h
 )

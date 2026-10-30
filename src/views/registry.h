@@ -2,6 +2,7 @@
 #pragma once
 
 // mdb
+#include <common.h>
 #include <symbolication/value_visualizer.h>
 #include <utils/smartptr.h>
 #include <views/ast.h>
@@ -11,15 +12,12 @@
 
 // std
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
-
-namespace mdb {
-struct VariableContext;
-}
 
 namespace mdb::sym {
 class Type;
@@ -56,16 +54,8 @@ class ViewRegistry
   // nullptr = this type has no view
   std::unordered_map<sym::Type *, std::unique_ptr<BoundView>> mBoundViews;
   std::unique_ptr<ViewSerializer> mSerializer;
-  struct Checkpoint
-  {
-    u64 mYieldIndex;
-    ProgramState mState;
-  };
-  struct Cursor
-  {
-    std::vector<Checkpoint> mCheckpoints;
-  };
-  std::unordered_map<u64, Cursor> mCursors;
+  // Bumped whenever the set of views changes and all bound views are thrown away.
+  u64 mGeneration{ 0 };
 
   ViewRegistry() noexcept;
 
@@ -85,10 +75,12 @@ public:
   // Load all `*.mdbv` files in a directory, in name order.
   std::vector<LoadResult> LoadDirectory(const fs::path &directory, const OnProcessedView &onProcessed) noexcept;
   void Clear() noexcept;
-  void
-  ForgetCursors() noexcept
+
+  // Changes every time the loaded views change. Anything derived from a BoundView must not outlive its generation.
+  [[nodiscard]] u64
+  Generation() const noexcept
   {
-    mCursors.clear();
+    return mGeneration;
   }
 
   [[nodiscard]] bool
@@ -102,11 +94,6 @@ public:
 
   // The serializer for `value` if a view applies to it, otherwise nullptr.
   sym::DebugAdapterSerializer *SerializerFor(sym::Value &value) noexcept;
-
-  // The children of `value` according to its view. Returns nothing if the value has no view or the view shows the
-  // type's own members (`children default`).
-  std::optional<std::vector<Ref<sym::Value>>> ResolveChildren(
-    const VariableContext &context, sym::Value &value, sym::ValueRange range) noexcept;
 };
 
 } // namespace mdb::views

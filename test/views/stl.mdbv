@@ -1,0 +1,30 @@
+// Views for libstdc++ types in test/stl.cpp, used by the stdVector test in test/driver/views.js.
+
+// The elements are [_M_start, _M_finish), and the allocation ends at _M_end_of_storage. The members are in
+// _Vector_base's _M_impl.
+view std::vector<.*> {
+  let begin = _M_impl._M_start;
+  let size = _M_impl._M_finish - begin;
+  summary "size={size} capacity={_M_impl._M_end_of_storage - begin}"
+  children array(begin, size)
+}
+
+// vector<bool> packs its elements into 64-bit words. An iterator is a word pointer and a bit offset in that word.
+// This view is loaded after the one above, so it wins for vector<bool>.
+view std::vector<bool,.*> {
+  let words = _M_impl._M_start._M_p;
+  let first = _M_impl._M_start._M_offset;
+  let size = (_M_impl._M_finish._M_p - words) * 64 + _M_impl._M_finish._M_offset - first;
+  summary "size={size}"
+  children (size: size) {
+    for (u64 i = first; i < first + size; ++i)
+      yield (bool)((words[i / 64] >> (i % 64)) & 1);
+  }
+}
+
+// std::array view
+view std::array<.*> {
+  using T = template_arg(0)
+  summary "size of array={template_arg(1)}"
+  children array((T*)_M_elems, template_arg(1))
+}
