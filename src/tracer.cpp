@@ -531,9 +531,9 @@ Tracer::LoadUserViews() noexcept
   } else {
     return;
   }
-  for (const auto &result : views::ViewRegistry::Get().LoadDirectory(directory)) {
-    DBGLOG(core, "[views] {}: {}", directory.c_str(), result.ToString());
-  }
+  views::ViewRegistry::Get().LoadDirectory(directory, [](const fs::path &file, const auto &result) {
+    DBGLOG(core, "[views] {}: {}", file.c_str(), result.ToString());
+  });
 }
 
 /* static */

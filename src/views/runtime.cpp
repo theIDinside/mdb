@@ -244,7 +244,7 @@ MakeYieldedChild(const VariableContext &context,
     u64 bits = element.mValue.mBits;
     if (view.Type(element.mType).mKind == TypeKind::Float) {
       if (size == sizeof(float)) {
-        const float value = static_cast<float>(element.mValue.mFloat);
+        const auto value = static_cast<float>(element.mValue.mFloat);
         u32 floatBits = 0;
         std::memcpy(&floatBits, &value, sizeof(float));
         bits = floatBits;

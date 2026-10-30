@@ -81,7 +81,7 @@ ViewRegistry::LoadSource(std::string name, std::string source) noexcept
 }
 
 LoadResult
-ViewRegistry::LoadFile(const std::filesystem::path &path) noexcept
+ViewRegistry::LoadFile(const fs::path &path) noexcept
 {
   std::ifstream stream{ path, std::ios::binary };
   if (!stream) {
@@ -93,22 +93,25 @@ ViewRegistry::LoadFile(const std::filesystem::path &path) noexcept
 }
 
 std::vector<LoadResult>
-ViewRegistry::LoadDirectory(const std::filesystem::path &directory) noexcept
+ViewRegistry::LoadDirectory(const fs::path &directory, const OnProcessedView &onProcessed) noexcept
 {
   std::vector<LoadResult> results;
   std::error_code error;
-  if (!std::filesystem::is_directory(directory, error)) {
+  if (!fs::is_directory(directory, error)) {
+    DBGLOG(core, "Could not read views from directory {}", directory.c_str());
     return results;
   }
-  std::vector<std::filesystem::path> files;
-  for (const auto &entry : std::filesystem::directory_iterator{ directory, error }) {
+  std::vector<fs::path> files;
+  for (const auto &entry : fs::directory_iterator{ directory, error }) {
     if (entry.is_regular_file(error) && entry.path().extension() == ".mdbv") {
       files.push_back(entry.path());
     }
   }
   std::ranges::sort(files);
   for (const auto &file : files) {
-    results.push_back(LoadFile(file));
+    auto result = LoadFile(file);
+    onProcessed(file, result);
+    results.push_back(std::move(result));
   }
   return results;
 }

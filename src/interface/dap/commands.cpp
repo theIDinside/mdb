@@ -1670,8 +1670,10 @@ std::vector<std::string>
 Launch::ParseViewFiles(const mdbjson::JsonValue &args) noexcept
 {
   std::vector<std::string> files;
+  DBGLOG(core, "Parse view files");
   if (args.Contains("views") && args["views"]->IsArray()) {
     for (const auto &file : args["views"]->AsSpan()) {
+      DBGLOG(core, "Parse {}", *file.GetStringView());
       if (file.IsString()) {
         files.emplace_back(*file.GetString());
       }
@@ -1683,11 +1685,21 @@ Launch::ParseViewFiles(const mdbjson::JsonValue &args) noexcept
 void
 Launch::LoadViewFiles(SessionId sessionId) noexcept
 {
-  for (const auto &file : mViewFiles) {
-    const auto result = views::ViewRegistry::Get().LoadFile(file);
+  const auto processResult = [&](const fs::path &file, const auto &result) {
     if (result.mError || !result.mDiagnostics.empty()) {
       mDebugAdapterManager->PostDapEvent(new ui::dap::OutputEvent{
-        sessionId, "console", std::format("[views] {}: {}\n", file, result.ToString()) });
+        sessionId, "console", std::format("[views] {}: {}\n", file.c_str(), result.ToString()) });
+    } else {
+      DBGLOG(core, "Loaded view file {}", file.c_str());
+    }
+  };
+  DBGLOG(core, "Load view files: {}", mViewFiles);
+  for (const auto &file : mViewFiles) {
+    if (fs::is_directory(file)) {
+      views::ViewRegistry::Get().LoadDirectory(file, processResult);
+    } else {
+      const auto result = views::ViewRegistry::Get().LoadFile(file);
+      processResult(file, result);
     }
   }
 }
