@@ -74,15 +74,16 @@ class ViewRegistry
   std::unique_ptr<BoundView> FindAndBind(sym::Type *type, u32 depth) noexcept;
 
 public:
+  using OnProcessedView = std::function<void(const fs::path &, const LoadResult &)>;
   ~ViewRegistry() noexcept;
   static ViewRegistry &Get() noexcept;
 
   // Load (or reload, if a file with the same path was loaded before) a view file. Views in files loaded later take
   // precedence over earlier ones.
-  LoadResult LoadFile(const std::filesystem::path &path) noexcept;
+  LoadResult LoadFile(const fs::path &path) noexcept;
   LoadResult LoadSource(std::string name, std::string source) noexcept;
   // Load all `*.mdbv` files in a directory, in name order.
-  std::vector<LoadResult> LoadDirectory(const std::filesystem::path &directory) noexcept;
+  std::vector<LoadResult> LoadDirectory(const fs::path &directory, const OnProcessedView &onProcessed) noexcept;
   void Clear() noexcept;
   void
   ForgetCursors() noexcept
