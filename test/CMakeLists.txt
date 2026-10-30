@@ -163,6 +163,11 @@ BuildTestSubject(
   SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/containers.cpp
 )
 
+BuildTestSubject(
+  NAME stl
+  SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/stl.cpp
+)
+
 # The same program, but the compiler leaves template arguments out of type names; views must rebuild them from the
 # template parameters in the debug info.
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")

@@ -11,8 +11,10 @@
 #include <tracer.h>
 #include <utils/byte_buffer.h>
 #include <utils/logger.h>
+#include <views/cursor_cache.h>
 #include <views/evaluator.h>
 #include <views/registry.h>
+#include <views/resolver.h>
 #include <views/text.h>
 #include <views/view_serializer.h>
 
@@ -273,23 +275,116 @@ MakeYieldedChild(const VariableContext &context,
   return child;
 }
 
-std::optional<std::vector<Ref<sym::Value>>>
-ViewRegistry::ResolveChildren(const VariableContext &context, sym::Value &value, sym::ValueRange range) noexcept
+static bool
+RunBlock(GlobalCursorCache::Cursor &cursor,
+  tc::SupervisorState *supervisor,
+  Evaluator &evaluator,
+  const BoundView &view,
+  const VariableContext &context,
+  sym::Value &value,
+  sym::ValueRange range,
+  std::vector<Ref<sym::Value>> &result) noexcept
 {
-  if (IsEmpty()) {
-    return std::nullopt;
+  const u64 start = range.start.value_or(0);
+  const u64 count = range.count.value_or(kDefaultChildrenPage);
+  if (cursor.mCheckpoints.empty()) {
+    auto thisPointer = evaluator.ThisArgument();
+    if (!thisPointer) {
+      result.emplace_back(MakeErrorChild(context, value, FormatError(view, thisPointer.error())));
+      return true;
+    }
+    cursor.mCheckpoints.push_back(GlobalCursorCache::Checkpoint{
+      .mYieldIndex = 0, .mState = evaluator.Start(view.mChildrenFunction, std::span{ &*thisPointer, 1 }) });
   }
-  const BoundView *view = Lookup(value.GetType().TypeEntry());
-  if (view == nullptr || view->mBindError || view->mChildrenKind == ChildrenSpec::Kind::Default) {
-    return std::nullopt;
+
+  const GlobalCursorCache::Checkpoint *checkpoint = nullptr;
+  for (const auto &candidate : cursor.mCheckpoints) {
+    if (candidate.mYieldIndex <= start &&
+        (checkpoint == nullptr || candidate.mYieldIndex > checkpoint->mYieldIndex)) {
+      checkpoint = &candidate;
+    }
   }
-  if (view->mChildrenKind == ChildrenSpec::Kind::None) {
-    return std::vector<Ref<sym::Value>>{};
+  if (checkpoint == nullptr) {
+    checkpoint = &cursor.mCheckpoints.front();
+  }
+  ProgramState state = checkpoint->mState;
+  u64 index = checkpoint->mYieldIndex;
+  u64 budgetLeft = 1'000'000;
+  std::vector<std::pair<u64, YieldedElement>> collected;
+  std::optional<Ref<sym::Value>> errorChild;
+
+  while (collected.size() < count && !state.mDone) {
+    if (view.mChildrenLimit && index >= view.mChildrenLimit) {
+      errorChild =
+        MakeErrorChild(context, value, std::format("limit of {} elements reached", *view.mChildrenLimit));
+      break;
+    }
+
+    u64 maxYields = 100 - (index % 100);
+    if (view.mChildrenLimit) {
+      maxYields = std::min(maxYields, view.mChildrenLimit.value() - index);
+    }
+    const auto onYield = [&](const YieldedElement &element) {
+      if (index >= start && collected.size() < count) {
+        collected.emplace_back(index, element);
+      }
+      ++index;
+    };
+    auto run = evaluator.Run(state, RunLimits{ .mMaxYields = maxYields, .mBudget = budgetLeft }, onYield);
+    if (!run) {
+      errorChild = MakeErrorChild(context, value, FormatError(view, run.error()));
+      break;
+    }
+    budgetLeft -= run->mSteps;
+    if (run->mStop == RunStop::Budget) {
+      errorChild = MakeErrorChild(context, value, std::format("stopped after {} steps", 1'000'000 - budgetLeft));
+      break;
+    }
+    if (run->mStop == RunStop::Paused && index % 100 == 0 && index > cursor.mCheckpoints.back().mYieldIndex) {
+      cursor.mCheckpoints.push_back(GlobalCursorCache::Checkpoint{ .mYieldIndex = index, .mState = state });
+    }
+  }
+
+  result.reserve(collected.size() + (errorChild ? 1 : 0));
+  for (const auto &[yieldIndex, element] : collected) {
+    result.push_back(MakeYieldedChild(context, *supervisor, view, element, yieldIndex));
+  }
+  if (errorChild) {
+    result.push_back(std::move(*errorChild));
+  }
+  return true;
+}
+
+bool
+ResolveUsingView(const VariableContext &context,
+  sym::Value &value,
+  sym::ValueRange range,
+  std::vector<Ref<sym::Value>> &result) noexcept
+{
+
+  auto &registry = views::ViewRegistry::Get();
+  if (registry.IsEmpty()) {
+    return false;
+  }
+
+  const BoundView *view = registry.Lookup(value.GetType().TypeEntry());
+
+  if (!view) {
+    return false;
+  }
+
+  if (view->mBindError || view->mChildrenKind == ChildrenSpec::Kind::Default) {
+    return false;
   }
 
   tc::SupervisorState *supervisor = SupervisorOf(value);
   if (supervisor == nullptr) {
-    return std::nullopt;
+    return false;
+  }
+
+  // Success, but result == empty
+  if (view->mChildrenKind == ChildrenSpec::Kind::None) {
+    return true;
   }
 
   TargetReader reader{ supervisor };
@@ -297,83 +392,20 @@ ViewRegistry::ResolveChildren(const VariableContext &context, sym::Value &value,
   Evaluator evaluator{ *view, reader, std::span{ &root, 1 } };
 
   if (view->mChildrenKind == ChildrenSpec::Kind::Block) {
-    const u64 start = range.start.value_or(0);
-    const u64 count = range.count.value_or(kDefaultChildrenPage);
-    Cursor &cursor = mCursors[context.mId];
-    if (cursor.mCheckpoints.empty()) {
-      auto thisPointer = evaluator.ThisArgument();
-      if (!thisPointer) {
-        return std::vector<Ref<sym::Value>>{ MakeErrorChild(
-          context, value, FormatError(*view, thisPointer.error())) };
-      }
-      cursor.mCheckpoints.push_back(Checkpoint{
-        .mYieldIndex = 0, .mState = evaluator.Start(view->mChildrenFunction, std::span{ &*thisPointer, 1 }) });
-    }
-
-    const Checkpoint *checkpoint = nullptr;
-    for (const auto &candidate : cursor.mCheckpoints) {
-      if (candidate.mYieldIndex <= start &&
-          (checkpoint == nullptr || candidate.mYieldIndex > checkpoint->mYieldIndex)) {
-        checkpoint = &candidate;
-      }
-    }
-    if (checkpoint == nullptr) {
-      checkpoint = &cursor.mCheckpoints.front();
-    }
-    ProgramState state = checkpoint->mState;
-    u64 index = checkpoint->mYieldIndex;
-    u64 budgetLeft = 1'000'000;
-    std::vector<std::pair<u64, YieldedElement>> collected;
-    std::optional<Ref<sym::Value>> errorChild;
-
-    while (collected.size() < count && !state.mDone) {
-      if (view->mChildrenLimit && index >= *view->mChildrenLimit) {
-        errorChild =
-          MakeErrorChild(context, value, std::format("limit of {} elements reached", *view->mChildrenLimit));
-        break;
-      }
-
-      u64 maxYields = 100 - index % 100;
-      if (view->mChildrenLimit) {
-        maxYields = std::min(maxYields, *view->mChildrenLimit - index);
-      }
-      const auto onYield = [&](const YieldedElement &element) {
-        if (index >= start && collected.size() < count) {
-          collected.emplace_back(index, element);
-        }
-        ++index;
-      };
-      auto run = evaluator.Run(state, RunLimits{ .mMaxYields = maxYields, .mBudget = budgetLeft }, onYield);
-      if (!run) {
-        errorChild = MakeErrorChild(context, value, FormatError(*view, run.error()));
-        break;
-      }
-      budgetLeft -= run->mSteps;
-      if (run->mStop == RunStop::Budget) {
-        errorChild = MakeErrorChild(context, value, std::format("stopped after {} steps", 1'000'000 - budgetLeft));
-        break;
-      }
-      if (run->mStop == RunStop::Paused && index % 100 == 0 && index > cursor.mCheckpoints.back().mYieldIndex) {
-        cursor.mCheckpoints.push_back(Checkpoint{ .mYieldIndex = index, .mState = state });
-      }
-    }
-
-    std::vector<Ref<sym::Value>> result;
-    result.reserve(collected.size() + (errorChild ? 1 : 0));
-    for (const auto &[yieldIndex, element] : collected) {
-      result.push_back(MakeYieldedChild(context, *supervisor, *view, element, yieldIndex));
-    }
-    if (errorChild) {
-      result.push_back(std::move(*errorChild));
-    }
-    return result;
+    return RunBlock(views::GlobalCursorCache::Get().For(context.mId, registry.Generation()),
+      supervisor,
+      evaluator,
+      *view,
+      context,
+      value,
+      range,
+      result);
   }
 
   auto children = evaluator.Children();
   if (!children) {
-    std::vector<Ref<sym::Value>> result;
     result.push_back(MakeErrorChild(context, value, FormatError(*view, children.error())));
-    return result;
+    return true;
   }
 
   const BoundType &elementType = view->Type(children->mElement);
@@ -381,11 +413,11 @@ ViewRegistry::ResolveChildren(const VariableContext &context, sym::Value &value,
   const u64 elementSize = element->Size();
   const u64 start = range.start.value_or(0);
   if (start >= children->mCount || elementSize == 0) {
-    return std::vector<Ref<sym::Value>>{};
+    return false;
   }
   const u64 count = std::min<u64>(range.count.value_or(kDefaultChildrenPage), children->mCount - start);
 
-  const AddrPtr first{ children->mBase + start * elementSize };
+  const AddrPtr first{ children->mBase + (start * elementSize) };
   // One read of the target for the whole page, shared by all elements.
   auto memory =
     std::make_shared<sym::LazyMemoryContentsObject>(*supervisor, first, offset(first, count * elementSize));
@@ -394,7 +426,6 @@ ViewRegistry::ResolveChildren(const VariableContext &context, sym::Value &value,
   // Primitive elements aren't expandable, so they can all share one context.
   const auto primitiveContext = isPrimitive ? VariableContext::CloneFrom(0, context) : nullptr;
 
-  std::vector<Ref<sym::Value>> result;
   result.reserve(count);
   for (u64 i = 0; i < count; ++i) {
     auto elementContext = isPrimitive ? primitiveContext : Tracer::CloneFromVariableContext(context);
@@ -406,7 +437,8 @@ ViewRegistry::ResolveChildren(const VariableContext &context, sym::Value &value,
     }
     result.push_back(std::move(child));
   }
-  return result;
+
+  return true;
 }
 
 } // namespace mdb::views

@@ -32,7 +32,9 @@
 #include <utils/task_list.h>
 #include <utils/todo.h>
 #include <utils/worker_task.h>
+#include <views/cursor_cache.h>
 #include <views/registry.h>
+#include <views/resolver.h>
 
 // std
 #include <algorithm>
@@ -961,10 +963,13 @@ SymbolFile::ResolveVariable(
   }
 
   sym::CanonicalType type = value->GetType();
+  std::vector<Ref<sym::Value>> result{};
+  if (count) {
+    result.reserve(*count);
+  }
 
-  if (auto children = views::ViewRegistry::Get().ResolveChildren(ctx, *value, { .start = start, .count = count });
-    children) {
-    return std::move(*children);
+  if (views::ResolveUsingView(ctx, *value, { .start = start, .count = count }, result)) {
+    return result;
   }
 
   js::ResolverRegistry *registry = js::Scripting::GetResolverRegistry();
@@ -977,7 +982,7 @@ SymbolFile::ResolveVariable(
   if (resolver != nullptr) {
     return resolver->Resolve(ctx, { .start = start, .count = count });
   }
-  std::vector<Ref<sym::Value>> result{};
+
   result.reserve(type->MemberFields().size());
 
   for (const sym::Field &memberField : type->MemberFields()) {
