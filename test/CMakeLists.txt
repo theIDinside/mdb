@@ -152,6 +152,28 @@ foreach(name ${MultiProcessSubjects})
   )
 endforeach()
 
+add_library(miniipc SHARED
+  ${CMAKE_CURRENT_SOURCE_DIR}/subjects/minibrowser/ipc.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/subjects/minibrowser/ipc.h)
+set_target_properties(miniipc PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+if(USE_DWARF5)
+  target_compile_options(miniipc PRIVATE -O0 -g3 -gdwarf-5 -fdebug-types-section)
+else()
+  target_compile_options(miniipc PRIVATE -O0 -g3 -gdwarf-4)
+endif()
+
+set(MiniBrowserSubjects browser content)
+
+foreach(name ${MiniBrowserSubjects})
+  BuildTestSubject(
+    NAME ${name}
+    SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/subjects/minibrowser/${name}.cpp
+    LIBS miniipc
+    INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/subjects/minibrowser
+  )
+endforeach()
+
 
 BuildTestSubject(
   NAME strings

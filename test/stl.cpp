@@ -1,6 +1,8 @@
 // Test subject for views of standard library types (test/views/stl.mdbv, test/driver/views.js).
 
 #include <iostream>
+#include <string>
+#include <string_view>
 #include <vector>
 
 struct Point
@@ -45,10 +47,30 @@ main()
   bools[64] = true;
   bools[69] = true;
 
+  // Short strings live in the inline buffer, long ones on the heap.
+  std::string emptyString;
+  std::string shortString{ "short" };
+  std::string longString{ "a string that is too long for the inline buffer" };
+  std::u16string utf16String{ u"日本語" };
+  // const -> typedef std::string -> basic_string: the typedef is under the qualifier.
+  const std::string constString{ "const" };
+  std::vector<std::string> strings{ "one", "two" };
+
+  // A view of part of a string: not NUL-terminated, so only its length is shown.
+  std::string_view hello{ longString.data() + 2, 6 };
+  std::string_view emptyView;
+
   use(empty);
   use(ints);
   use(points);
   use(nested);
   use(bools);
+  use(emptyString);
+  use(shortString);
+  use(utf16String);
+  use(constString);
+  use(strings);
+  use(hello);
+  use(emptyView);
   return 0; // STL_BP
 }
