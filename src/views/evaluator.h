@@ -160,7 +160,6 @@ public:
   std::expected<std::string, EvalError> Summary(u64 budget = kDefaultBudget) noexcept;
   std::expected<ArrayChildren, EvalError> Children(u64 budget = kDefaultBudget) noexcept;
   std::expected<EvalValue, EvalError> ThisArgument() const noexcept;
-  std::expected<i64, EvalError> Size(u64 budget = kDefaultBudget) noexcept;
   std::expected<std::string, EvalError> Format(const EvalValue &value, FormatSpec format) noexcept;
 };
 

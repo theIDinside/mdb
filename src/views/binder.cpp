@@ -1887,20 +1887,8 @@ Binder::BindAll() noexcept
     expressionCall = expr.mKind == ExprKind::Call && mFunctionIndex.contains(expr.mName);
     expressionCallId = children.mExpr;
   }
-  const Expr *callForm = nullptr;
-  if (children.mIsCallForm && children.mBody != kNoStmt) {
-    const Stmt &block = mArena.GetStmt(children.mBody);
-    if (block.mKind == StmtKind::Block && block.mCount == 1) {
-      const Stmt &call = mArena.GetStmt(mArena.BlockItems(block).front());
-      if (call.mKind == StmtKind::Call) {
-        callForm = &mArena.Get(call.mExpr);
-      }
-    }
-  } else if (expressionCall) {
-    callForm = &mArena.Get(expressionCallId);
-  }
-  if (callForm != nullptr) {
-    const auto function = mFunctionIndex.find(callForm->mName);
+  if (expressionCall) {
+    const auto function = mFunctionIndex.find(mArena.Get(expressionCallId).mName);
     if (function != mFunctionIndex.end()) {
       if (!EnsureSignature(function->second)) {
         return false;
@@ -1922,14 +1910,6 @@ Binder::BindAll() noexcept
     }
     mChildrenNode = bound->mNode;
   } else if (children.mKind == ChildrenSpec::Kind::Block || expressionCall) {
-    if (children.mSize != kNoExpr) {
-      auto size = IntegerRValue(children.mSize, "the size of children");
-      if (!size) {
-        return false;
-      }
-      mView.mSizeFunction = mCodeGen.EmitExprFunction("size", *size);
-    }
-    mView.mChildrenLimit = children.mLimit;
     mCurrentFunction = mCodeGen.BeginFunction("children", true);
     mView.mChildrenFunction = mCurrentFunction;
     mScopes.emplace_back();

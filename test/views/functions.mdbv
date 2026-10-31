@@ -23,5 +23,5 @@ view MdbForever {
 
 view MdbCorruptList {
   fn count(MdbListNode *n) -> u64 { return 1; }
-  children (size: 1) count(mHead)
+  children count(mHead)
 }

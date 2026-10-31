@@ -12,7 +12,7 @@ reference parameters. Calling mscript from QuickJS is described in an appendix, 
 view MdbHashMap<.*> {
   using Entry = template_arg(0)
   summary "count={mTable.mEntryCount}"
-  children (size: mTable.mEntryCount) {
+  children {
     for (i64 slot = 0; slot < mTable.mCapacity; ++slot) {
       if (mTable.mHashes[slot] <= 1) continue;
       auto entry = (Entry*)(mTable.mEntries + slot * mTable.mEntrySize);
@@ -33,7 +33,7 @@ view MdbTree {
     return count(n->mLeft) + 1 + count(n->mRight);
   }
   summary "size={count(mRoot)}"
-  children (size: mSize) walk(mRoot)
+  children walk(mRoot)
 }
 ```
 
@@ -70,14 +70,14 @@ so you lose `->`, casts and pointer arithmetic over target memory.
 ### 1. A children block is a function
 
 Internally it is one: the binder compiles the block into a `Function` named "children", with no parameters and
-`mCanYield` set. Nothing in the VM or the runtime treats it specially. The only special parts are the header
-(`size:` and `limit:`, which describe the *result* and not the code) and the shorthand syntax.
+`mCanYield` set. Nothing in the VM or the runtime treats it specially. The only special part is the shorthand
+syntax.
 
 The language says so too:
 
 ```
-children (size: mSize) { walk(mRoot); }    // shorthand: an anonymous void function
-children (size: mSize) walk(mRoot)         // the same: a call to a void function
+children { walk(mRoot); }    // an anonymous void function
+children walk(mRoot)         // the same: a call to a void function
 ```
 
 `children array(p, n)` stays as its own form. It isn't a generator: elements next to each other in memory are
@@ -85,7 +85,7 @@ served directly, without running anything. That's also why it can page without c
 
 ### 2. Compile everything to a stack bytecode
 
-Lets, summaries, `size` and `array(...)` run on the VM too, not only the children blocks.
+Lets, summaries and `array(...)` run on the VM too, not only the children blocks.
 - *Why:* calls can appear inside expressions, any instruction can pause, the budget counts every instruction, and
   there's one evaluator instead of two.
 - *Cost:* `evaluator.cpp` (~670 lines) is rewritten as a VM loop.
@@ -198,11 +198,10 @@ appendix.
 
 ### 9. Limits
 
-- 100,000 steps for each summary part, `let` and `size`. The serializer runs on every display, and summaries can
+- 100,000 steps for each summary part and `let`. The serializer runs on every display, and summaries can
   loop through functions;
-- 1,000,000 steps per children request;
-- a call depth of 1024 frames;
-- `limit:` is an integer literal.
+- 1,000,000 steps per children request. This is also what stops a corrupt list that loops back on itself;
+- a call depth of 1024 frames.
 
 Frames are heap data, so the depth limit could be raised if 1024 turns out to be too low for degenerate trees. The
 cost is bigger checkpoints.
@@ -280,7 +279,7 @@ Some features need code bound for one type to call code bound for **another** ty
 The calls themselves are deferred. Two choices in the implementation keep them possible without reworking the VM:
 
 - **`this` is a hidden first parameter.** Every function of a view has `this` as local 0, a pointer to the viewed
-  type: lets, summary parts, `size`, the children block, every `fn`. Implicit member access (`mLength`) compiles to
+  type: lets, summary parts, the children block, every `fn`. Implicit member access (`mLength`) compiles to
   `LoadLocal 0 ; Deref ; Member +8 ; Load`. Declared locals and parameters start at local 1.
 
   If functions read root 0 instead, a function of `MdbTree`'s view called from another view would see the other
@@ -405,17 +404,14 @@ like Python's `yield from`. The statement form stays the fast way to pass everyt
 ### `children`
 
 ```
-children (size: expr, limit: N) { statements }   // a block: an anonymous void function
-children (size: expr, limit: N) name(args)       // a call to a void function
-children array(ptr, count)                       // contiguous elements
+children { statements }      // a block: an anonymous void function
+children name(args)          // a call to a void function
+children array(ptr, count)   // contiguous elements
 children none | default
 ```
 
-The options are optional, and so are the parentheses when there are none.
-
-- `size` is evaluated *without* running the block. It gives the client `indexedVariables`, so it can page.
-- `limit` caps the number of elements. Reaching it ends the page with an error child that says so. `N` is an integer
-  literal.
+- A block or a void-function call doesn't report `indexedVariables`: the client doesn't know the count up front,
+  and asks for the children without a range. Pages after the first resume from the nearest checkpoint.
 - **What `yield` takes.** Each child is a `sym::Value`, so the value needs a type from the debug info. It is one of:
   - **an lvalue** (`yield *entry;`, `yield n->mValue;`): an object in target memory. The child has an address, can be
     expanded, and is displayed with its own view;
@@ -436,7 +432,7 @@ fn name(Type a, Type &b) { statements }                  // a void function
 ```
 
 - **Value functions** (`-> T`) return a scalar or pointer and **can't yield**. They can be called anywhere an
-  expression can go: in `summary`, `let`, `size`, conditions, and other functions.
+  expression can go: in `summary`, `let`, conditions, and other functions.
 - **Void functions** **can yield**. They can only be called as a statement, from a `children` block or another void
   function, or as the `children` item itself. This rule decides, without any analysis, whether a call can pause
   (decision 5).
@@ -454,7 +450,7 @@ Every run of the VM has limits, so a broken view can't hang the debugger:
 
 | Context | Can yield | Step budget | On exceeding it |
 |---|---|---|---|
-| each summary part, `let`, `size` | no | 100,000 instructions | the value shows `<view error: …: stopped after N steps>` |
+| each summary part, `let` | no | 100,000 instructions | the value shows `<view error: …: stopped after N steps>` |
 | `children` block | yes | 1,000,000 instructions per request | the page ends with a `[view error]` child, "stopped after N steps" |
 
 The call depth is limited to **1024 frames**: "call depth exceeded 1024", shown the same way. A cycle in a corrupt
@@ -541,10 +537,7 @@ The work was done in four parts, each split into steps that compile and are test
 
 ### Known issues
 
-- **A spurious limit error.** A block that yields exactly `limit` elements and would then finish still ends with
-  "limit of N elements reached". The runtime stops at the limit without checking whether the program was about to
-  end.
-- **Untested paths.** Mutual recursion, `children walk(root)` without options, and several binder errors have no
+- **Untested paths.** Mutual recursion, and several binder errors have no
   test: "can yield, it can only be called from…", "'f' must return a value", argument count and positional
   arguments, a reference type mismatch, "can't take the address of a local".
 - **Call cost.** Each `Call` copies the callee's list of local types. It's cheap, but easy to avoid.
@@ -662,7 +655,7 @@ must never change the program being debugged. View functions used as methods (de
 |---|---|---|
 | **Delegation**: `RefPtr<Foo>` displayed *as* its `Foo`, with `Foo`'s summary and children, without the extra level | Natvis `ExpandedItem`, LLDB synthetic children | a runtime substitution before serializing, from a view item such as `display *mRawPtr` (decision 12). No calls between views |
 | **A raw view**: the type's own members next to the view's children | Natvis `[Raw View]`, LLDB `--raw` | an extra child, added by the runtime only. Without it, a view hides the real struct, which hurts when the view is wrong |
-| **Random-access children**: element `i` computed directly, without walking | Natvis `IndexListItems`, LLDB `get_child_at_index` | `children (size: n) index(i) expr`. Needed for `std::deque` and segmented arrays: jumping to the last page of a million-element deque would otherwise walk from the nearest checkpoint |
+| **Random-access children**: element `i` computed directly, without walking | Natvis `IndexListItems`, LLDB `get_child_at_index` | a children form with an element count and an `index(i) expr`. Needed for `std::deque` and segmented arrays: jumping to the last page of a million-element deque would otherwise walk from the nearest checkpoint |
 | **Tolerating missing members** across library versions | Natvis `Optional="true"` and `Condition` | a condition evaluated when binding, such as `if (has(mFoo))`, where the branch not taken isn't bound. Today one renamed member fails the whole view |
 | **Building strings**: flag enums as `A \| C`, conditional summaries | Natvis (several `DisplayString`s with conditions), LLDB/GDB in Python | a summary block that yields text pieces: `summary { if (mFlags & 1) yield "A"; … }`. Same model as children blocks, and text values are copies |
 | **Dynamic types**: an `nsISupports*` displayed as its concrete class | LLDB dynamic values, Natvis | look up the vtable to find the real type, then apply that type's view. Independent of mscript |

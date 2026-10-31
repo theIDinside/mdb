@@ -157,25 +157,20 @@ sequences (bad UTF-8, unpaired surrogates) show as U+FFFD. A null pointer with l
 
 ### Children blocks
 
-Use a block when your elements aren't stored in one contiguous array. This view walks a linked list and reports
-its known length, so the UI can request pages of children:
+Use a block when your elements aren't stored in one contiguous array. This view walks a linked list:
 
 ```
 view MdbList {
-  children (size: mLength) {
+  children {
     for (auto node = mHead; node; node = node->mNext)
       yield node->mValue;
   }
 }
 ```
 
-Write `children { ... }` or `children (size: expression, limit: N) { ... }`. Either option can be omitted, and
-you can write them in either order. `size` is evaluated without running the block and must be an integer. It tells
-the UI how many children to expect, so the UI can ask for them a page at a time. Without a size, the value is
-expandable and the UI asks for all its children at once; mdb returns at most 1,000 children per request. Write a
-size whenever your container knows its length. While paging through a block, mdb remembers its progress every
-100 children, so later pages don't have to start at the beginning. That progress is cleared when the program
-continues.
+The value is expandable, and the UI asks for its children without knowing how many there are; mdb returns at
+most 1,000 children per request. While running a block, mdb remembers its progress every 100 children, so later
+requests don't have to start at the beginning. That progress is cleared when the program continues.
 
 Inside the block, you can use:
 
@@ -202,7 +197,7 @@ For example, this hash table view skips free or removed slots and names each chi
 ```
 view MdbHashMap<.*> {
   using Entry = template_arg(0)
-  children (size: mTable.mEntryCount) {
+  children {
     for (i64 slot = 0; slot < mTable.mCapacity; ++slot) {
       if (mTable.mHashes[slot] <= 1) continue;
       auto entry = (Entry*)(mTable.mEntries + slot * mTable.mEntrySize);
@@ -213,9 +208,8 @@ view MdbHashMap<.*> {
 ```
 
 Each request for children can run up to 1,000,000 steps. If it runs out, the page ends with a `[view error]`
-child saying `stopped after N steps`. Summaries, `let` values and sizes each have a 100,000-step limit. The
-optional `limit: N` ends the children after N elements and adds a `[view error]` child saying `limit of N elements
-reached`; use it to guard against a corrupt list that loops back on itself.
+child saying `stopped after N steps`. This also stops a corrupt list that loops back on itself. Summaries and
+`let` values each have a 100,000-step limit.
 
 ### Functions
 
@@ -227,11 +221,11 @@ fn walk(Node *node) { ... }          // can yield children
 ```
 
 A value function has a return type and can't yield. Call it wherever an expression is allowed, such as in a
-summary, a `let`, a `size`, or another function. A void function has no return type and can yield. Call it as a
+summary, a `let`, or another function. A void function has no return type and can yield. Call it as a
 statement from a children block or another void function, or use it directly as the children item:
 
 ```
-children (size: mSize) walk(mRoot)
+children walk(mRoot)
 ```
 
 Functions can be written in any order, call themselves recursively, and call each other. A function can also see
@@ -272,7 +266,7 @@ view MdbTree {
   }
   let size = count(mRoot);
   summary "size={size} sum={total()}"
-  children (size: mSize) walk(mRoot)
+  children walk(mRoot)
 }
 ```
 
@@ -287,7 +281,7 @@ For example, it might refer to a member that doesn't exist:
 
 The value's members can still be expanded. Errors while evaluating (unreadable memory, a null pointer) are shown
 the same way. If a value's children can't be produced, expanding it shows a single `[view error]` child that
-explains why. A block that runs too long, or yields more than its limit, ends with a `[view error]` child saying
+explains why. A block that runs too long ends with a `[view error]` child saying
 so.
 
 ## Not yet supported

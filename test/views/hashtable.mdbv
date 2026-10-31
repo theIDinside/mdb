@@ -6,7 +6,7 @@
 view MdbHashMap<.*> {
   using Entry = template_arg(0)
   summary "count={mTable.mEntryCount}"
-  children (size: mTable.mEntryCount) {
+  children {
     for (i64 slot = 0; slot < mTable.mCapacity; ++slot) {
       if (mTable.mHashes[slot] <= 1) continue;
       auto entry = (Entry*)(mTable.mEntries + slot * mTable.mEntrySize);

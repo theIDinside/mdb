@@ -190,8 +190,6 @@ struct BoundView
 
   ChildrenSpec::Kind mChildrenKind{ ChildrenSpec::Kind::Default };
   u32 mChildrenFunction{ kNoFunction };
-  u32 mSizeFunction{ kNoFunction };
-  std::optional<u64> mChildrenLimit;
 
   // If binding the view against the type failed, this is why. The view is then still "the view for this type",
   // but it displays the error instead of a summary.

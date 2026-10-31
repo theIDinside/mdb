@@ -23,5 +23,5 @@ view MdbTree {
   }
   let size = count(mRoot);
   summary "size={size} sum={total()}"
-  children (size: mSize) walk(mRoot)
+  children walk(mRoot)
 }
