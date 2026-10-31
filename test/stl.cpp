@@ -31,7 +31,7 @@ main()
     ints.push_back(i * 2);
   }
 
-  std::vector<Point> points{ { 1, 2 }, { 3, 4 } };
+  std::vector<Point> points{ { .x = 1, .y = 2 }, { .x = 3, .y = 4 } };
 
   // Elements with a view of their own.
   std::vector<std::vector<int>> nested{ { 1 }, { 2, 3 }, {} };
@@ -67,6 +67,13 @@ main()
   std::string_view hello{ longString.data() + 2, 6 };
   std::string_view emptyView;
 
+  std::unordered_map<int, Point> emptyMap;
+  std::unordered_map<int, Point> pointsById{
+    { 1, { .x = 10, .y = 20 } }, { 2, { .x = 30, .y = 40 } }, { 3, { .x = 50, .y = 60 } }
+  };
+  // std::string keys: the hash code is cached in each node, after the element.
+  std::unordered_map<std::string, int> wordCounts{ { "one", 1 }, { "two", 2 } };
+
   use(empty);
   use(ints);
   use(points);
@@ -79,5 +86,8 @@ main()
   use(strings);
   use(hello);
   use(emptyView);
+  use(emptyMap);
+  use(pointsById);
+  use(wordCounts);
   return 0; // STL_BP
 }

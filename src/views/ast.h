@@ -335,7 +335,10 @@ struct UsingBinding
     TypeOf,
     // using T = template_arg(0): the matched type's first template argument
     TemplateArgument,
+    // using T = template_arg_of(SomeType, 0)
+    TemplateArgumentOf
   } mKind{ Kind::Type };
+  std::string_view mOf;
   std::string_view mName;
   // Kind::Type: index into ExprArena::mTypes
   u32 mType{ 0 };

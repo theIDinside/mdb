@@ -176,7 +176,7 @@ private:
   }
 
   TypeId FromDwarf(sym::Type *type) noexcept;
-  const sym::TemplateParameter *TemplateArgument(u64 index, SourceLoc loc) noexcept;
+  const sym::TemplateParameter *TemplateArgumentOf(sym::Type *type, u64 index, SourceLoc loc) noexcept;
   std::optional<TypeId> BindUsing(const UsingBinding &binding) noexcept;
   TypeId FromBuiltin(const BuiltinType &builtin) noexcept;
   TypeId PointerTo(TypeId element) noexcept;
@@ -231,8 +231,7 @@ public:
     };
     binder.mSignatureState.resize(mDef.mFunctions.size());
     binder.mFunctionReferences.resize(mDef.mFunctions.size());
-    for (u32 i = 0; i < mDef.mFunctions.size(); ++i) {
-      const FunctionDef &function = mDef.mFunctions[i];
+    for (const auto &function : mDef.mFunctions) {
       if (std::ranges::find(builtins, function.mName) != std::end(builtins)) {
         binder.Fail(
           function.mLoc, std::format("'{}' is a builtin and can't be used as a function name", function.mName));
@@ -1138,10 +1137,10 @@ Binder::BindCast(const Expr &expr) noexcept
 }
 
 const sym::TemplateParameter *
-Binder::TemplateArgument(u64 index, SourceLoc loc) noexcept
+Binder::TemplateArgumentOf(sym::Type *type, u64 index, SourceLoc loc) noexcept
 {
-  mMatchedType->ResolveType();
-  const auto params = mMatchedType->TemplateParameters();
+  type->ResolveType();
+  const auto params = type->TemplateParameters();
   if (index >= params.size()) {
     Fail(loc,
       params.empty() ? std::format("'{}' has no template arguments", Type(mView.mRootType).mName)
@@ -1155,13 +1154,21 @@ Binder::TemplateArgument(u64 index, SourceLoc loc) noexcept
   return &params[index];
 }
 
+#define BINDING_FAILURE(Condition, MessageFormat, ...)                                                            \
+  if ((Condition)) {                                                                                              \
+    Fail(binding.mLoc, std::format(MessageFormat __VA_OPT__(, ) __VA_ARGS__));                                    \
+    return std::nullopt;                                                                                          \
+  }
+
 std::optional<TypeId>
 Binder::BindUsing(const UsingBinding &binding) noexcept
 {
+  using Kind = UsingBinding::Kind;
+  sym::Type *ofType = mMatchedType;
   switch (binding.mKind) {
-  case UsingBinding::Kind::Type:
+  case Kind::Type:
     return ResolveTypeExpr(mArena.mTypes[binding.mType]);
-  case UsingBinding::Kind::TypeOf: {
+  case Kind::TypeOf: {
     // The expression is bound for its type only; it is never evaluated.
     auto bound = Bind(binding.mExpr);
     if (!bound) {
@@ -1169,25 +1176,31 @@ Binder::BindUsing(const UsingBinding &binding) noexcept
     }
     const TypeId type = TypeOf(bound->mNode);
     const auto kind = Type(type).mKind;
-    if (kind == TypeKind::Text || kind == TypeKind::ArrayProvider) {
-      Fail(binding.mLoc, std::format("typeof() needs an expression with a C++ type, not '{}'", Type(type).mName));
-      return std::nullopt;
-    }
+    BINDING_FAILURE(kind == TypeKind::Text || kind == TypeKind::ArrayProvider,
+      "typeof() needs an expression with a C++ type, not '{}'",
+      Type(type).mName);
     return type;
   }
-  case UsingBinding::Kind::TemplateArgument: {
-    const auto *param = TemplateArgument(binding.mIndex, binding.mLoc);
+  case Kind::TemplateArgumentOf: {
+    BINDING_FAILURE(binding.mOf.empty(), "Expected a name for the template argument type variant");
+    const ScopeEntry *entry = LookupName(binding.mOf);
+    BINDING_FAILURE(
+      !entry || entry->mKind != ScopeEntry::Kind::Type, "could not find type from binding: '{}'", binding.mOf);
+    ofType = Type(entry->mType).mDwarf;
+    BINDING_FAILURE(!ofType, "Could not find bound type for '{}'", binding.mOf);
+    ofType->ResolveAlias()->SkipJunk();
+    [[fallthrough]];
+  }
+  case Kind::TemplateArgument: {
+    const auto *param = TemplateArgumentOf(ofType, binding.mIndex, binding.mLoc);
     if (param == nullptr) {
       return std::nullopt;
     }
-    if (param->IsTemplateValueParameter()) {
-      Fail(binding.mLoc,
-        std::format("template argument {} of '{}' is a value, not a type; use template_arg({}) in an expression",
-          binding.mIndex,
-          Type(mView.mRootType).mName,
-          binding.mIndex));
-      return std::nullopt;
-    }
+    BINDING_FAILURE(param->IsTemplateValueParameter(),
+      "template argument {} of '{}' is a value, not a type; use template_arg({}) in an expression",
+      binding.mIndex,
+      ofType->mName,
+      binding.mIndex);
     return FromDwarf(param->mType);
   }
   }
@@ -1206,7 +1219,7 @@ Binder::BindCall(const Expr &expr) noexcept
     if (index == nullptr || index->mKind != ExprKind::IntLiteral) {
       return FailExpr(expr.mLoc, "template_arg() takes the index of a template argument, e.g. template_arg(1)");
     }
-    const auto *param = TemplateArgument(index->mInteger, expr.mLoc);
+    const auto *param = TemplateArgumentOf(mMatchedType, index->mInteger, expr.mLoc);
     if (param == nullptr) {
       return std::nullopt;
     }
