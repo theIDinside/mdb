@@ -295,7 +295,6 @@ async function hashTableChildren(debugAdapter) {
 
   // Capacity 8: 30 is in slot 0, 40 in 2, 10 in 4, 18 in 5 (it collided with 10), and slot 6 is a removed entry.
   const small = await expectValue(debugAdapter, locals, 'hashmap', 'count=4', { expandable: true })
-  await debugAdapter.assert(small.indexedVariables == 4, 'hashmap has 4 indexed children', prettyJson(small))
   const entries = await childrenOf(debugAdapter, small)
   await debugAdapter.assert(
     entries.length == 4 && entries.every((entry, i) => entry.name == `${[30, 40, 10, 18][i]}`),
@@ -311,7 +310,6 @@ async function hashTableChildren(debugAdapter) {
 
   // Keys 0..299, without the keys divisible by 10. Children are numbered by live entry, not by slot.
   const big = await expectValue(debugAdapter, locals, 'bigHashmap', 'count=270', { expandable: true })
-  await debugAdapter.assert(big.indexedVariables == 270, 'bigHashmap has 270 indexed children', prettyJson(big))
   const liveKeys = [...Array(300).keys()].filter((key) => key % 10 != 0)
   const page = await childrenOf(debugAdapter, big, { start: 100, count: 10 })
   await debugAdapter.assert(page.length == 10, 'Got a page of 10 children', prettyJson(page))
@@ -368,7 +366,6 @@ async function computedChildren(debugAdapter) {
   const locals = await localsOf(debugAdapter, scopes)
 
   const bits = await expectValue(debugAdapter, locals, 'bits', 'count=70', { expandable: true })
-  await debugAdapter.assert(bits.indexedVariables == 70, 'bits has 70 indexed children', prettyJson(bits))
   const values = await childrenOf(debugAdapter, bits)
   await debugAdapter.assert(values.length == 70, 'Got all 70 bits', prettyJson(values))
   for (let i = 0; i < values.length; ++i) {
@@ -439,7 +436,6 @@ async function listChildren(debugAdapter) {
 
   // 1, 2, 3, 4, 5
   const shortList = await expectValue(debugAdapter, locals, 'shortList', 'length=5', { expandable: true })
-  await debugAdapter.assert(shortList.indexedVariables == 5, 'shortList has 5 indexed children', prettyJson(shortList))
   const values = await childrenOf(debugAdapter, shortList)
   await debugAdapter.assert(
     values.length == 5 && values.every((v, i) => v.name == `[${i}]` && v.value == `${i + 1}`),
@@ -458,7 +454,7 @@ async function listChildren(debugAdapter) {
   const last = await childrenOf(debugAdapter, longList, { start: 245, count: 10 })
   await debugAdapter.assert(last.length == 5, 'The last page of longList has 5 children', prettyJson(last))
 
-  // Sentinel list: no size, so no indexedVariables; the walk stops back at the sentinel.
+  // Sentinel list: the walk stops back at the sentinel.
   const circularList = locals['circularList']
   await debugAdapter.assert(
     circularList.variablesReference != 0 && circularList.indexedVariables == undefined,
@@ -474,9 +470,8 @@ async function listChildren(debugAdapter) {
 }
 
 /**
- * Blocks that would never end on their own: a list that loops back on itself (stopped by `limit: 10`), and an
- * endless `while (true) {}` (stopped by the step budget). Both end with an error child, and the debugger stays
- * responsive.
+ * A block that would never end on its own: an endless `while (true) {}` is stopped by the step budget. It ends with
+ * an error child, and the debugger stays responsive.
  * @param { DebugAdapterClient } debugAdapter
  */
 async function runawayLoops(debugAdapter) {
@@ -489,19 +484,6 @@ async function runawayLoops(debugAdapter) {
   )
   await loadViews(debugAdapter, 'test/views/loops.mdbv')
   const locals = await localsOf(debugAdapter, scopes)
-
-  const corrupt = await childrenOf(debugAdapter, locals['corruptList'])
-  await debugAdapter.assert(corrupt.length == 11, '10 elements and an error child', prettyJson(corrupt))
-  await debugAdapter.assert(
-    corrupt.slice(0, 10).every((v, i) => v.value == `${100 + (i % 3)}`),
-    'The elements cycle through 100, 101, 102',
-    prettyJson(corrupt)
-  )
-  await debugAdapter.assert(
-    corrupt[10].name == '[view error]' && corrupt[10].value.includes('limit'),
-    'The last child says the limit was reached',
-    prettyJson(corrupt[10])
-  )
 
   const forever = await childrenOf(debugAdapter, locals['forever'])
   await debugAdapter.assert(
@@ -531,7 +513,6 @@ async function treeChildren(debugAdapter) {
   const locals = await localsOf(debugAdapter, scopes)
 
   const tree = await expectValue(debugAdapter, locals, 'tree', 'size=7 sum=3500', { expandable: true })
-  await debugAdapter.assert(tree.indexedVariables == 7, 'tree has seven indexed children', prettyJson(tree))
   const treeChildren = await childrenOf(debugAdapter, tree)
   const treeKeys = [20, 30, 40, 50, 60, 70, 80]
   await debugAdapter.assert(treeChildren.length == treeKeys.length, 'tree has seven children', prettyJson(treeChildren))
@@ -544,7 +525,6 @@ async function treeChildren(debugAdapter) {
   }
 
   const bigTree = await expectValue(debugAdapter, locals, 'bigTree', 'size=300 sum=448500', { expandable: true })
-  await debugAdapter.assert(bigTree.indexedVariables == 300, 'bigTree has 300 indexed children', prettyJson(bigTree))
   const page = await childrenOf(debugAdapter, bigTree, { start: 150, count: 10 })
   await debugAdapter.assert(page.length == 10, 'Got ten children from bigTree', prettyJson(page))
   for (let i = 0; i < page.length; ++i) {
@@ -695,7 +675,6 @@ async function stdVector(debugAdapter) {
 
   // vector<bool> has a view of its own; its elements are bits, so they are computed and have no address.
   const bools = await expectValue(debugAdapter, locals, 'bools', 'size=70', { expandable: true })
-  await debugAdapter.assert(bools.indexedVariables == 70, 'bools has 70 indexed children', prettyJson(bools))
   const bits = await childrenOf(debugAdapter, bools)
 
   await debugAdapter.assert(bits.length == 70, 'Got all 70 bits', prettyJson(bits))

@@ -378,8 +378,10 @@ private:
   void SkipView(u32 viewStart) noexcept;
   bool ParsePattern(TypePattern &pattern) noexcept;
   bool ParseUsing(ViewDefinition &view) noexcept;
-  bool IsDeclared(const ViewDefinition &view, std::string_view name) const noexcept;
+  [[nodiscard]] bool IsDeclared(const ViewDefinition &view, std::string_view name) const noexcept;
+  bool ParseChildren(ViewDefinition &view) noexcept;
   bool ParseViewBody(ViewDefinition &view) noexcept;
+
   StmtId ParseBlock() noexcept;
   StmtId ParseStatement() noexcept;
   StmtId ParseSimpleStatement() noexcept;
@@ -608,6 +610,32 @@ Parser::ParseUsing(ViewDefinition &view) noexcept
 }
 
 bool
+Parser::ParseChildren(ViewDefinition &view) noexcept
+{
+  Advance();
+  view.mChildren.mLoc = Peek().mLoc;
+
+  if (AcceptIdentifier("none")) {
+    view.mChildren.mKind = ChildrenSpec::Kind::None;
+  } else if (AcceptIdentifier("default")) {
+    view.mChildren.mKind = ChildrenSpec::Kind::Default;
+  } else if (Peek().Is(TokenKind::LBrace)) {
+    view.mChildren.mKind = ChildrenSpec::Kind::Block;
+    view.mChildren.mBody = ParseBlock();
+    if (Failed()) {
+      return false;
+    }
+  } else {
+    view.mChildren.mKind = ChildrenSpec::Kind::Expression;
+    view.mChildren.mExpr = ParseExpression();
+    if (Failed()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool
 Parser::ParseViewBody(ViewDefinition &view) noexcept
 {
   if (!Expect(TokenKind::LBrace, "to start the view body")) {
@@ -719,99 +747,8 @@ Parser::ParseViewBody(ViewDefinition &view) noexcept
         return false;
       }
       seenChildren = true;
-      Advance();
-      view.mChildren.mLoc = Peek().mLoc;
-      if (AcceptIdentifier("none")) {
-        view.mChildren.mKind = ChildrenSpec::Kind::None;
-      } else if (AcceptIdentifier("default")) {
-        view.mChildren.mKind = ChildrenSpec::Kind::Default;
-      } else if (Peek().Is(TokenKind::LBrace)) {
-        view.mChildren.mKind = ChildrenSpec::Kind::Block;
-        view.mChildren.mBody = ParseBlock();
-        if (Failed()) {
-          return false;
-        }
-      } else if (Peek().Is(TokenKind::LParen) && Peek(1).Is(TokenKind::Identifier) &&
-                 Peek(2).Is(TokenKind::Colon)) {
-        view.mChildren.mKind = ChildrenSpec::Kind::Block;
-        bool seenSize = false;
-        bool seenLimit = false;
-        Advance();
-        while (true) {
-          const Token &option = Peek();
-          if (!option.Is(TokenKind::Identifier)) {
-            Error(option, "expected a children option");
-            return false;
-          }
-          Advance();
-          if (!Expect(TokenKind::Colon, "after the children option")) {
-            return false;
-          }
-          if (option.mText == "size") {
-            if (seenSize) {
-              Error(option, "repeated children option 'size'");
-              return false;
-            }
-            seenSize = true;
-            view.mChildren.mSize = ParseExpression();
-            if (Failed()) {
-              return false;
-            }
-          } else if (option.mText == "limit") {
-            if (seenLimit) {
-              Error(option, "repeated children option 'limit'");
-              return false;
-            }
-            seenLimit = true;
-            if (!Peek().Is(TokenKind::Integer)) {
-              Error(Peek(), "children limit must be an integer literal");
-              return false;
-            }
-            view.mChildren.mLimit = Advance().mInteger;
-          } else {
-            Error(option, std::format("unknown children option '{}'", option.mText));
-            return false;
-          }
-          if (!Accept(TokenKind::Comma)) {
-            break;
-          }
-        }
-        if (!Expect(TokenKind::RParen, "after the children options")) {
-          return false;
-        }
-        if (Peek().Is(TokenKind::LBrace)) {
-          view.mChildren.mBody = ParseBlock();
-        } else if (Peek().Is(TokenKind::Identifier) && Peek(1).Is(TokenKind::LParen)) {
-          const ExprId call = ParseExpression();
-          if (Failed()) {
-            return false;
-          }
-          if (mFile.mArena.Get(call).mKind != ExprKind::Call) {
-            Error(Peek(), "children options must be followed by a block or a call");
-            return false;
-          }
-          const StmtId callStmt =
-            AddStatement(Stmt{ .mKind = StmtKind::Call, .mLoc = mFile.mArena.Get(call).mLoc, .mExpr = call });
-          Stmt block{ .mKind = StmtKind::Block,
-            .mLoc = view.mChildren.mLoc,
-            .mFirst = static_cast<u32>(mFile.mArena.mBlockItems.size()),
-            .mCount = 1 };
-          mFile.mArena.mBlockItems.push_back(callStmt);
-          view.mChildren.mBody = AddStatement(std::move(block));
-          view.mChildren.mIsCallForm = true;
-        } else {
-          Error(Peek(), "children options must be followed by a block or a call");
-          return false;
-        }
-        if (Failed()) {
-          return false;
-        }
-      } else {
-        view.mChildren.mKind = ChildrenSpec::Kind::Expression;
-        view.mChildren.mExpr = ParseExpression();
-        if (Failed()) {
-          return false;
-        }
+      if (!ParseChildren(view)) {
+        return false;
       }
     } else {
       Error(item, std::format("expected 'let', 'using', 'summary', 'children' or '}}', found '{}'", item.mText));

@@ -316,7 +316,7 @@ TEST(ViewsParser, StatementsAndChildrenBlocks)
   auto file = Parse(R"(
     view V {
       using T = template_arg(0)
-      children (size: n, limit: 10) {
+      children {
         auto a = n;
         T *p = (T*)mData;
         p = p;
@@ -336,16 +336,13 @@ TEST(ViewsParser, StatementsAndChildrenBlocks)
       }
     }
     view Empty { children {} }
-    view Shorthand { children (size: n) walk(root) }
   )");
   ASSERT_TRUE(file->mDiagnostics.empty()) << file->mDiagnostics[0].ToString();
-  ASSERT_EQ(file->mViews.size(), 3);
+  ASSERT_EQ(file->mViews.size(), 2);
 
   const auto &arena = file->mArena;
   const auto &children = file->mViews[0].mChildren;
   EXPECT_EQ(children.mKind, ChildrenSpec::Kind::Block);
-  EXPECT_EQ(arena.Get(children.mSize).mKind, ExprKind::Identifier);
-  ASSERT_EQ(children.mLimit, 10);
   const Stmt &body = arena.GetStmt(children.mBody);
   ASSERT_EQ(body.mKind, StmtKind::Block);
   const auto bodyItems = arena.BlockItems(body);
@@ -371,9 +368,6 @@ TEST(ViewsParser, StatementsAndChildrenBlocks)
 
   const Stmt &empty = arena.GetStmt(file->mViews[1].mChildren.mBody);
   EXPECT_TRUE(arena.BlockItems(empty).empty());
-  const Stmt &wrappedCall = arena.GetStmt(file->mViews[2].mChildren.mBody);
-  ASSERT_EQ(arena.BlockItems(wrappedCall).size(), 1);
-  EXPECT_EQ(arena.GetStmt(arena.BlockItems(wrappedCall)[0]).mKind, StmtKind::Call);
 }
 
 TEST(ViewsParser, StatementErrorsAndExpressionChildren)
@@ -384,8 +378,6 @@ TEST(ViewsParser, StatementErrorsAndExpressionChildren)
   };
   EXPECT_NE(errorOf("view V { children { auto x = 1 } }").find("expected ';'"), std::string::npos);
   EXPECT_NE(errorOf("view V { children { x + 1; } }").find("expected a statement"), std::string::npos);
-  EXPECT_NE(
-    errorOf("view V { children (size: n) x + 1 }").find("children options must be followed"), std::string::npos);
 
   auto file = Parse("view V { children (array(p, n)) }");
   ASSERT_TRUE(file->mDiagnostics.empty()) << file->mDiagnostics[0].ToString();
@@ -399,7 +391,7 @@ TEST(ViewsParser, StatementViewFiles)
     view MdbHashMap<.*> {
       using Entry = template_arg(0)
       summary "count={mTable.mEntryCount}"
-      children (size: mTable.mEntryCount) {
+      children {
         for (i64 slot = 0; slot < mTable.mCapacity; ++slot) {
           if (mTable.mHashes[slot] <= 1) continue;
           auto entry = (Entry*)(mTable.mEntries + slot * mTable.mEntrySize);
@@ -413,7 +405,7 @@ TEST(ViewsParser, StatementViewFiles)
   auto loops = Parse(R"(
     view MdbList {
       summary "length={mLength}"
-      children (size: mLength) {
+      children {
         for (auto node = mHead; node; node = node->mNext)
           yield node->mValue;
       }
@@ -422,12 +414,6 @@ TEST(ViewsParser, StatementViewFiles)
       children {
         for (auto link = mSentinel.mNext; link != &mSentinel; link = link->mNext)
           yield *(MdbItem*)link;
-      }
-    }
-    view MdbCorruptList {
-      children (limit: 10) {
-        for (auto node = mHead; node; node = node->mNext)
-          yield node->mValue;
       }
     }
     view MdbForever {
@@ -447,7 +433,7 @@ TEST(ViewsParser, Functions)
       fn empty() { return; }
       fn value(int x, unsigned long &acc) -> int { return x; }
       summary fn + 1
-      children (size: 1) walk(value)
+      children walk(value)
     }
   )");
   ASSERT_TRUE(file->mDiagnostics.empty()) << file->mDiagnostics[0].ToString();
@@ -461,7 +447,7 @@ TEST(ViewsParser, Functions)
   EXPECT_EQ(view.mFunctions[1].mParams[1].mName, "acc");
   EXPECT_TRUE(view.mFunctions[1].mParams[1].mIsReference);
   EXPECT_TRUE(view.mFunctions[1].mReturnType.has_value());
-  EXPECT_TRUE(view.mChildren.mIsCallForm);
+  EXPECT_EQ(view.mChildren.mKind, ChildrenSpec::Kind::Expression);
 
   auto duplicate = Parse("view V { fn f() {} fn f() {} }");
   ASSERT_FALSE(duplicate->mDiagnostics.empty());

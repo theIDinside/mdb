@@ -100,7 +100,7 @@ struct Instruction
 
 struct Function
 {
-  // "summary", "let hdr", "children", "size", or the name after `fn`
+  // "summary", "let hdr", "children", or the name after `fn`
   std::string mName;
   u32 mEntry{ 0 };                 // index into Program::mCode
   u32 mParamCount{ 0 };            // the first mParamCount locals are the parameters. Local 0 is `this`

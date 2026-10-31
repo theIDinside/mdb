@@ -14,7 +14,7 @@ A view is a set of items for the types its pattern matches:
 | `let x = …` | at most once per displayed value, the first time it's used |
 | `fn name(…) …` | when called |
 | `summary …` | every time the value is displayed |
-| `children …` | when the value is expanded, one page at a time |
+| `children …` | when the value is expanded |
 
 ## Expressions
 
@@ -53,12 +53,11 @@ program.
 | `children default`, or no `children` | the type's own members |
 | `children none` | none: the value can't be expanded |
 | `children array(ptr, count)` | `count` elements next to each other in memory |
-| `children (size: n, limit: N) { … }` | whatever the block yields. Both options are optional |
-| `children (size: n) walk(root)` | whatever the void function `walk` yields |
+| `children { … }` | whatever the block yields |
+| `children walk(root)` | whatever the void function `walk` yields |
 
-- **`size`** is evaluated without running the block. It gives the UI the element count, so the UI can page.
-- **`limit`** ends the children after N elements, with an error child. It guards against corrupt, looping lists.
-- **Paging:** mdb remembers where a block was every 100 children, so later pages don't start over.
+- **Count:** the UI isn't told how many children a block has. mdb returns at most 1,000 per request.
+- **Resuming:** mdb remembers where a block was every 100 children, so later requests don't start over.
 - **`yield` takes two kinds of value:**
   - an object in memory (`*entry`, `node->mValue`), which is displayed with its own view and can be expanded;
   - a computed number (`(bool)(word >> bit & 1)`). It has no address, and its type must exist in the program's debug
@@ -72,7 +71,7 @@ fn count(Node *n) -> u64 { … }   // value function: returns a number or pointe
 fn walk(Node *n) { … }           // void function: can yield, is called as a statement
 ```
 
-- **Value functions** can be called from any expression: `summary`, `let`, `size`, conditions, other functions.
+- **Value functions** can be called from any expression: `summary`, `let`, conditions, other functions.
 - **Void functions** can be called from a `children` block or another void function, or used as the `children` item.
 - Functions can be written in any order, can be recursive, and can call each other. They see the view's members,
   `using`s and `let`s.
@@ -85,7 +84,7 @@ fn walk(Node *n) { … }           // void function: can yield, is called as a s
 | What | Limit |
 |---|---|
 | a request for children | 1,000,000 steps |
-| each summary part, `let` and `size` | 100,000 steps |
+| each summary part and `let` | 100,000 steps |
 | call depth | 1024 |
 
 When a limit is hit, or the program's memory can't be read, the value shows `<view error: file:line:col: …>`, or the

@@ -288,11 +288,7 @@ struct ChildrenSpec
     Block,
   } mKind{ Kind::Default };
   ExprId mExpr{ kNoExpr };
-  ExprId mSize{ kNoExpr };
-  std::optional<u64> mLimit;
   StmtId mBody{ kNoStmt };
-  // The block came from `children (options) name(args)`
-  bool mIsCallForm{ false };
   SourceLoc mLoc;
 };
 

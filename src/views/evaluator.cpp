@@ -866,23 +866,6 @@ Evaluator::ThisArgument() const noexcept
   return ThisPointer(mView, mRoots);
 }
 
-std::expected<i64, EvalError>
-Evaluator::Size(u64 budget) noexcept
-{
-  if (mView.mSizeFunction == kNoFunction) {
-    return std::unexpected(ErrorAt({}, "view has no size function"));
-  }
-  auto thisPointer = ThisArgument();
-  if (!thisPointer) {
-    return std::unexpected(std::move(thisPointer.error()));
-  }
-  auto value = Call(mView.mSizeFunction, std::span{ &*thisPointer, 1 }, budget);
-  if (!value) {
-    return std::unexpected(std::move(value.error()));
-  }
-  return static_cast<i64>(value->mBits);
-}
-
 std::expected<std::string, EvalError>
 Evaluator::Summary(u64 budget) noexcept
 {

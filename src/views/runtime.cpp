@@ -170,17 +170,6 @@ ViewSerializer::SerializeVariable(const sym::Value &value, std::pmr::memory_reso
       }
       break;
     case ChildrenSpec::Kind::Block:
-      if (view->mSizeFunction != kNoFunction) {
-        if (auto size = evaluator.Size(); size) {
-          u64 count = static_cast<u64>(std::max<i64>(*size, 0));
-          if (view->mChildrenLimit) {
-            count = std::min(count, *view->mChildrenLimit);
-          }
-          indexedVariables = count;
-          expandable = count > 0;
-        }
-      }
-      break;
     case ChildrenSpec::Kind::Default:
       break;
     }
@@ -314,16 +303,7 @@ RunBlock(GlobalCursorCache::Cursor &cursor,
   std::optional<Ref<sym::Value>> errorChild;
 
   while (collected.size() < count && !state.mDone) {
-    if (view.mChildrenLimit && index >= view.mChildrenLimit) {
-      errorChild =
-        MakeErrorChild(context, value, std::format("limit of {} elements reached", *view.mChildrenLimit));
-      break;
-    }
-
-    u64 maxYields = 100 - (index % 100);
-    if (view.mChildrenLimit) {
-      maxYields = std::min(maxYields, view.mChildrenLimit.value() - index);
-    }
+    const u64 maxYields = 100 - (index % 100);
     const auto onYield = [&](const YieldedElement &element) {
       if (index >= start && collected.size() < count) {
         collected.emplace_back(index, element);

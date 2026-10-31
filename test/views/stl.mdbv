@@ -16,19 +16,25 @@ view std::vector<bool,.*> {
   let first = _M_impl._M_start._M_offset;
   let size = (_M_impl._M_finish._M_p - words) * 64 + _M_impl._M_finish._M_offset - first;
   summary "size={size}"
-  children (size: size) {
+  children {
     for (u64 i = first; i < first + size; ++i)
       yield (bool)((words[i / 64] >> (i % 64)) & 1);
   }
+}
+
+view std::pair<.*> {
+  summary "pair <K, V>"
 }
 
 view std::unordered_map<.*> {
   using Table = typeof(_M_h)
   using Value = template_arg(Table, 1)          // std::pair<const K, T>, with its layout from DWARF
   summary "size={_M_h._M_element_count}"
-  children (size: _M_h._M_element_count) {
+  children {
     for (auto node = _M_h._M_before_begin._M_nxt; node; node = node->_M_nxt) {
       auto entry = (Value*)(node + 1);
+      // yield entry->first;
+      // yield entry->second;
       yield [entry->first] entry->second;
     }
   }
