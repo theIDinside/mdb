@@ -3,6 +3,7 @@
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 struct Point
@@ -46,6 +47,12 @@ main()
   bools[3] = true;
   bools[64] = true;
   bools[69] = true;
+
+  std::unordered_map<std::string_view, int> values;
+  values.reserve(30);
+  values["one"] = 1234;
+  values["foobarbaz"] = 1337;
+  values["debugger time is getting awesome"] = 9123895;
 
   // Short strings live in the inline buffer, long ones on the heap.
   std::string emptyString;
