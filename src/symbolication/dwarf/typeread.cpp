@@ -524,7 +524,8 @@ TypeSymbolicationContext::ProcessTemplateParameter(DieReference die, bool isValu
     typeId->AsUnsignedValue());
   sym::Type *type = mObjectRef.GetTypeStorage()->GetOrCreateNewType(containingCompUnitDieReference->AsIndexed());
 
-  auto &templateArg = mTemplateArguments.emplace_back(name->AsStringView(), type);
+  // Clang leaves out the name of some template parameters, e.g. the `char` of `std::allocator<char>`.
+  auto &templateArg = mTemplateArguments.emplace_back(name ? name->AsStringView() : std::string_view{}, type);
 
   if (isValue) {
     const auto value = die.ReadAttribute(Attribute::DW_AT_const_value);
