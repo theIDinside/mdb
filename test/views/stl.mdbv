@@ -28,3 +28,15 @@ view std::array<.*> {
   summary "size of array={template_arg(1)}"
   children array((T*)_M_elems, template_arg(1))
 }
+// std::string, std::wstring, std::u16string, ...: _M_p points at the characters, either the inline buffer (short
+// strings) or a heap allocation. text() picks the encoding from the character type.
+view std::basic_string<.*> {
+  summary text(_M_dataplus._M_p, _M_string_length)
+  children none
+}
+
+// std::string_view and friends: a pointer and a length, not NUL-terminated.
+view std::basic_string_view<.*> {
+  summary text(_M_str, _M_len)
+  children none
+}

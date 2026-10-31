@@ -58,6 +58,7 @@ async function childrenOf(debugAdapter, variable, range = {}) {
 }
 
 async function expectValue(debugAdapter, locals, name, expected, { expandable } = {}) {
+  console.log(`lookup ${name} in ${prettyJson(locals)}`)
   const variable = locals[name]
   await debugAdapter.assert(variable != undefined, `Found local '${name}'`, `Locals: ${prettyJson(locals)}`)
   await debugAdapter.assert(
@@ -608,7 +609,138 @@ async function functionErrors(debugAdapter) {
   }
 }
 
+/**
+ * libstdc++'s std::vector<std::array<Point, 4>> test
+ * @param { DebugAdapterClient } debugAdapter
+ */
+async function vectorOfArrayTest(debugAdapter, locals) {
+  const arraysOfPoints = await expectValue(debugAdapter, locals, 'arraysOfPoints', 'size=3 capacity=3', {
+    expandable: true,
+  })
+  await debugAdapter.assert(
+    arraysOfPoints.indexedVariables == 3,
+    'arraysOfPoints has 3 indexed children',
+    prettyJson(arraysOfPoints)
+  )
+
+  const elements = await childrenOf(debugAdapter, arraysOfPoints, { start: 0, count: 3 })
+  await debugAdapter.assert(elements.length == 3, 'Arrays of points has 3 arrays', prettyJson(elements))
+
+  let multiplier = 1
+  for (const array of elements) {
+    const points = await childrenOf(debugAdapter, array)
+    await debugAdapter.assert(points.length == 4, 'Array contains 4 points', prettyJson(points))
+    let value = 1
+    for (const p of points) {
+      const members = await childrenOf(debugAdapter, p)
+      const expX = value * multiplier
+      const expY = (value + 1) * multiplier
+      await debugAdapter.assert(members.length == 2, 'Point has 2 members', prettyJson(members))
+      await debugAdapter.assert(members[0].value == expX, `Point.x=${expX}`, prettyJson(members))
+      await debugAdapter.assert(members[1].value == expY, `Point.y=${expY}`, prettyJson(members))
+      value += 2
+    }
+    multiplier = multiplier * 10
+  }
+
+  console.log(prettyJson(elements))
+}
+
+/**
+ * libstdc++'s std::vector, and the packed std::vector<bool>. See test/views/stl.mdbv.
+ * @param { DebugAdapterClient } debugAdapter
+ */
+async function stdVector(debugAdapter) {
+  const { scopes } = await launchToGetFramesAndScopes(debugAdapter, 'test/stl.cpp', ['STL_BP'], 'main', 'stl')
+  await loadViews(debugAdapter, 'test/views/stl.mdbv')
+  const locals = await localsOf(debugAdapter, scopes)
+
+  await expectValue(debugAdapter, locals, 'empty', 'size=0 capacity=0', { expandable: false })
+  const ints = await expectValue(debugAdapter, locals, 'ints', 'size=1000 capacity=1024', { expandable: true })
+  await debugAdapter.assert(ints.indexedVariables == 1000, 'ints has 1000 indexed children', prettyJson(ints))
+  const page = await childrenOf(debugAdapter, ints, { start: 990, count: 20 })
+  await debugAdapter.assert(page.length == 10, 'The last page stops at the size, not the capacity', prettyJson(page))
+  for (let i = 0; i < page.length; ++i) {
+    await debugAdapter.assert(
+      page[i].name == `[${990 + i}]` && page[i].value == `${(990 + i) * 2}`,
+      `Element ${990 + i}`,
+      prettyJson(page[i])
+    )
+  }
+
+  const points = await expectValue(debugAdapter, locals, 'points', 'size=2 capacity=2', { expandable: true })
+  const pointElements = await childrenOf(debugAdapter, points)
+  await debugAdapter.assert(pointElements.length == 2, 'Two points', prettyJson(pointElements))
+  const second = Object.fromEntries((await childrenOf(debugAdapter, pointElements[1])).map((v) => [v.name, v]))
+  await expectValue(debugAdapter, second, 'x', '3')
+  await expectValue(debugAdapter, second, 'y', '4')
+
+  // The elements are vectors too, and are displayed by the same view.
+  const nested = await expectValue(debugAdapter, locals, 'nested', 'size=3 capacity=3', { expandable: true })
+  const inner = await childrenOf(debugAdapter, nested)
+  const innerValues = ['size=1 capacity=1', 'size=2 capacity=2', 'size=0 capacity=0']
+  await debugAdapter.assert(
+    inner.length == 3 && inner.every((v, i) => v.value == innerValues[i]),
+    'Inner vectors are displayed by their own view',
+    prettyJson(inner)
+  )
+  const innerElements = await childrenOf(debugAdapter, inner[1])
+  await debugAdapter.assert(
+    innerElements.length == 2 && innerElements[0].value == '2' && innerElements[1].value == '3',
+    'Elements of an inner vector',
+    prettyJson(innerElements)
+  )
+
+  await vectorOfArrayTest(debugAdapter, locals)
+
+  // vector<bool> has a view of its own; its elements are bits, so they are computed and have no address.
+  const bools = await expectValue(debugAdapter, locals, 'bools', 'size=70', { expandable: true })
+  await debugAdapter.assert(bools.indexedVariables == 70, 'bools has 70 indexed children', prettyJson(bools))
+  const bits = await childrenOf(debugAdapter, bools)
+
+  await debugAdapter.assert(bits.length == 70, 'Got all 70 bits', prettyJson(bits))
+  for (let i = 0; i < bits.length; ++i) {
+    await debugAdapter.assert(
+      bits[i].name == `[${i}]` &&
+        bits[i].value == ([0, 3, 64, 69].includes(i) ? 'true' : 'false') &&
+        !Object.prototype.hasOwnProperty.call(bits[i], 'memoryReference'),
+      `Bit ${i}`,
+      prettyJson(bits[i])
+    )
+  }
+}
+
+/**
+ * libstdc++'s std::basic_string and std::basic_string_view. See test/views/stl.mdbv.
+ * @param { DebugAdapterClient } debugAdapter
+ */
+async function stdString(debugAdapter) {
+  const { scopes } = await launchToGetFramesAndScopes(debugAdapter, 'test/stl.cpp', ['STL_BP'], 'main', 'stl')
+  await loadViews(debugAdapter, 'test/views/stl.mdbv')
+  const locals = await localsOf(debugAdapter, scopes)
+
+  await expectValue(debugAdapter, locals, 'emptyString', '""', { expandable: false })
+  await expectValue(debugAdapter, locals, 'shortString', '"short"', { expandable: false })
+  await expectValue(debugAdapter, locals, 'longString', '"a string that is too long for the inline buffer"')
+  await expectValue(debugAdapter, locals, 'utf16String', '"日本語"')
+  await expectValue(debugAdapter, locals, 'constString', '"const"', { expandable: false })
+
+  // The elements of a vector of strings are displayed by the string view.
+  const strings = await expectValue(debugAdapter, locals, 'strings', 'size=2 capacity=2', { expandable: true })
+  const elements = await childrenOf(debugAdapter, strings)
+  await debugAdapter.assert(
+    elements.length == 2 && elements[0].value == '"one"' && elements[1].value == '"two"',
+    'Strings in a vector',
+    prettyJson(elements)
+  )
+
+  await expectValue(debugAdapter, locals, 'hello', '"string"', { expandable: false })
+  await expectValue(debugAdapter, locals, 'emptyView', '""', { expandable: false })
+}
+
 const tests = {
+  stdVector: () => stdVector,
+  stdString: () => stdString,
   hashTableChildren: () => hashTableChildren,
   keyedChildren: () => keyedChildren,
   computedChildren: () => computedChildren,
