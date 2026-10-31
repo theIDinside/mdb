@@ -31,13 +31,19 @@ CodeGen::EmitExpr(NodeId id) noexcept
 {
   const BoundNode &node = mView.Node(id);
   const auto emit = [&](Op op, u32 a = 0, std::optional<u64> imm = std::nullopt, TypeId type = kNoType) {
+    u64 immediate = imm.value_or(node.mImm);
+    u32 bitOffset = node.mBitOffset;
+    if (op == Op::Member && node.mBitSize > 0) {
+      immediate += node.mBitOffset / 8;
+      bitOffset %= 8;
+    }
     return Emit(Instruction{ .mOp = op,
       .mWidth = node.mWidth,
       .mBitSize = node.mBitSize,
-      .mBitOffset = node.mBitOffset,
+      .mBitOffset = bitOffset,
       .mType = type == kNoType ? node.mType : type,
       .mA = a,
-      .mImm = imm.value_or(node.mImm),
+      .mImm = immediate,
       .mFloat = node.mFloat,
       .mLoc = node.mLoc });
   };

@@ -131,7 +131,7 @@ CallNode(Evaluator &eval, Builder &builder, NodeId node, u64 thisAddress = 0)
 {
   CodeGen codegen{ builder.mView };
   const u32 function = codegen.EmitExprFunction("test", node);
-  const EvalValue thisPointer{ .mType = builder.mView.mThisType, .mBits = thisAddress };
+  const EvalValue thisPointer = EvalValue::Scalar(builder.mView.mThisType, thisAddress);
   return eval.Call(function, std::span{ &thisPointer, 1 }, kDefaultBudget);
 }
 
@@ -306,7 +306,7 @@ TEST(ViewsEval, MembersOfTheRootComeFromItsBytes)
   Evaluator eval{ b.mView, memory, std::span{ &rootInfo, 1 } };
   auto value = CallNode(eval, b, length, 0x5000);
   ASSERT_TRUE(value.has_value()) << value.error().mMessage;
-  EXPECT_EQ(value->mBits, 7);
+  EXPECT_EQ(value->Bits(), 7);
   EXPECT_EQ(memory.mReads, 0);
 }
 
@@ -343,15 +343,15 @@ TEST(ViewsEval, DerefAndPointerArithmetic)
 
   auto len = CallNode(eval, b, length, 0x5000);
   ASSERT_TRUE(len.has_value()) << len.error().mMessage;
-  EXPECT_EQ(len->mBits, 3);
+  EXPECT_EQ(len->Bits(), 3);
 
   auto address = CallNode(eval, b, elements, 0x5000);
   ASSERT_TRUE(address.has_value());
-  EXPECT_EQ(address->mBits, 0x1008);
+  EXPECT_EQ(address->Bits(), 0x1008);
 
   auto value = CallNode(eval, b, thirdValue, 0x5000);
   ASSERT_TRUE(value.has_value()) << value.error().mMessage;
-  EXPECT_EQ(static_cast<i64>(value->mBits), 30);
+  EXPECT_EQ(static_cast<i64>(value->Bits()), 30);
 
   // pointer difference in elements
   const NodeId diff =
@@ -359,7 +359,7 @@ TEST(ViewsEval, DerefAndPointerArithmetic)
   Evaluator eval2{ b.mView, memory, std::span{ &rootInfo, 1 } };
   auto difference = CallNode(eval2, b, diff, 0x5000);
   ASSERT_TRUE(difference.has_value());
-  EXPECT_EQ(static_cast<i64>(difference->mBits), 2);
+  EXPECT_EQ(static_cast<i64>(difference->Bits()), 2);
 }
 
 TEST(ViewsEval, NullDerefAndUnreadableMemoryAreErrors)
@@ -406,8 +406,61 @@ TEST(ViewsEval, Bitfields)
   const std::vector<u8> root{ 0x00, 0b11110000, 0x00, 0x00 };
   const Root rootInfo{ .mType = b.mView.mRootType, .mAddress = 0x5000, .mBytes = root };
   Evaluator eval{ b.mView, memory, std::span{ &rootInfo, 1 } };
-  EXPECT_EQ(CallNode(eval, b, unsignedField, 0x5000)->mBits, 30);
-  EXPECT_EQ(static_cast<i64>(CallNode(eval, b, signedField, 0x5000)->mBits), -2);
+  EXPECT_EQ(CallNode(eval, b, unsignedField, 0x5000)->Bits(), 30);
+  EXPECT_EQ(static_cast<i64>(CallNode(eval, b, signedField, 0x5000)->Bits()), -2);
+}
+
+TEST(ViewsEval, BitfieldOffsetIsNormalized)
+{
+  Builder b;
+  const NodeId field = b.Node({ .mOp = BoundOp::Load,
+    .mType = b.mU32,
+    .mA = b.Node({ .mOp = BoundOp::Member, .mType = b.mU32, .mA = b.This(), .mBitOffset = 37, .mBitSize = 5 }) });
+
+  std::vector<u8> root(9, 0);
+  constexpr u32 value = 0b10110;
+  for (u32 bit = 0; bit < 5; ++bit) {
+    if ((value & (1U << bit)) != 0) {
+      root[(37 + bit) / 8] |= static_cast<u8>(1U << ((37 + bit) % 8));
+    }
+  }
+  const Root rootInfo{ .mType = b.mView.mRootType, .mAddress = 0x5000, .mBytes = root };
+  FakeMemory memory;
+  Evaluator eval{ b.mView, memory, std::span{ &rootInfo, 1 } };
+
+  auto result = CallNode(eval, b, field, 0x5000);
+  ASSERT_TRUE(result.has_value()) << result.error().mMessage;
+  EXPECT_EQ(result->Bits(), value);
+}
+
+TEST(ViewsEval, SixtyFourBitFieldAtOffsetNeedsNineByteRead)
+{
+  Builder b;
+  const auto makeField = [&](TypeId type) {
+    return b.Node({ .mOp = BoundOp::Load,
+      .mType = type,
+      .mA = b.Node({ .mOp = BoundOp::Member, .mType = type, .mA = b.This(), .mBitOffset = 3, .mBitSize = 64 }) });
+  };
+  const NodeId unsignedField = makeField(b.mU64);
+  const NodeId signedField = makeField(b.mI64);
+
+  constexpr u64 value = 0x8000'0000'0000'0001ULL;
+  std::vector<u8> root(9, 0);
+  for (u32 bit = 0; bit < 64; ++bit) {
+    if ((value & (1ULL << bit)) != 0) {
+      root[(3 + bit) / 8] |= static_cast<u8>(1U << ((3 + bit) % 8));
+    }
+  }
+  const Root rootInfo{ .mType = b.mView.mRootType, .mAddress = 0x5000, .mBytes = root };
+  FakeMemory memory;
+  Evaluator eval{ b.mView, memory, std::span{ &rootInfo, 1 } };
+
+  auto unsignedResult = CallNode(eval, b, unsignedField, 0x5000);
+  ASSERT_TRUE(unsignedResult.has_value()) << unsignedResult.error().mMessage;
+  EXPECT_EQ(unsignedResult->Bits(), value);
+  auto signedResult = CallNode(eval, b, signedField, 0x5000);
+  ASSERT_TRUE(signedResult.has_value()) << signedResult.error().mMessage;
+  EXPECT_EQ(static_cast<i64>(signedResult->Bits()), -0x7FFF'FFFF'FFFF'FFFFLL);
 }
 
 TEST(ViewsEval, ArithmeticAndComparisons)
@@ -421,22 +474,22 @@ TEST(ViewsEval, ArithmeticAndComparisons)
     Evaluator e{ b.mView, memory, std::span{ &rootInfo, 1 } };
     return CallNode(e, b, node);
   };
-  EXPECT_EQ(static_cast<i64>(eval64(BoundOp::Sub, b.mI64, 3, 5)->mBits), -2);
-  EXPECT_EQ(static_cast<i64>(eval64(BoundOp::Div, b.mI64, static_cast<u64>(-9), 2)->mBits), -4);
-  EXPECT_EQ(eval64(BoundOp::Shl, b.mU64, 1, 40)->mBits, 1ULL << 40);
+  EXPECT_EQ(static_cast<i64>(eval64(BoundOp::Sub, b.mI64, 3, 5)->Bits()), -2);
+  EXPECT_EQ(static_cast<i64>(eval64(BoundOp::Div, b.mI64, static_cast<u64>(-9), 2)->Bits()), -4);
+  EXPECT_EQ(eval64(BoundOp::Shl, b.mU64, 1, 40)->Bits(), 1ULL << 40);
   EXPECT_FALSE(eval64(BoundOp::Div, b.mI64, 1, 0).has_value());
   // signed vs unsigned comparisons
   const NodeId lessSigned = b.Node(
     { .mOp = BoundOp::Less, .mType = b.mBool, .mA = b.Int(b.mI64, static_cast<u64>(-1)), .mB = b.Int(b.mI64, 1) });
   Evaluator e{ b.mView, memory, std::span{ &rootInfo, 1 } };
-  EXPECT_EQ(CallNode(e, b, lessSigned)->mBits, 1);
-  EXPECT_EQ(eval64(BoundOp::Less, b.mU64, static_cast<u64>(-1), 1)->mBits, 0);
+  EXPECT_EQ(CallNode(e, b, lessSigned)->Bits(), 1);
+  EXPECT_EQ(eval64(BoundOp::Less, b.mU64, static_cast<u64>(-1), 1)->Bits(), 0);
 
   // Narrowing conversion truncates and sign extends
   const TypeId i8 = b.Type({ .mKind = TypeKind::SignedInt, .mSize = 1, .mIsSigned = true, .mName = "i8" });
   const NodeId narrowed = b.Node({ .mOp = BoundOp::Convert, .mType = i8, .mA = b.Int(b.mI64, 0x1FF) });
   Evaluator e2{ b.mView, memory, std::span{ &rootInfo, 1 } };
-  EXPECT_EQ(static_cast<i64>(CallNode(e2, b, narrowed)->mBits), -1);
+  EXPECT_EQ(static_cast<i64>(CallNode(e2, b, narrowed)->Bits()), -1);
 }
 
 TEST(ViewsEval, LetsAreEvaluatedOnce)
@@ -459,7 +512,7 @@ TEST(ViewsEval, LetsAreEvaluatedOnce)
   Evaluator eval{ b.mView, memory, std::span{ &rootInfo, 1 } };
   auto result = CallNode(eval, b, sum, 0x5000);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->mBits, 42);
+  EXPECT_EQ(result->Bits(), 42);
   EXPECT_EQ(memory.mReads, 1);
 }
 
@@ -483,8 +536,8 @@ TEST(ViewsEval, TextWithLength)
   Evaluator eval{ b.mView, memory, std::span{ &rootInfo, 1 } };
   auto value = CallNode(eval, b, text, 0x5000);
   ASSERT_TRUE(value.has_value()) << value.error().mMessage;
-  EXPECT_EQ(value->mText, "H\xC3\xA9\xF0\x9F\x98\x80");
-  EXPECT_FALSE(value->mTruncated);
+  EXPECT_EQ(eval.TextOf(*value), "H\xC3\xA9\xF0\x9F\x98\x80");
+  EXPECT_FALSE(value->Truncated());
   EXPECT_EQ(*eval.Format(*value, FormatSpec::Default), "\"H\xC3\xA9\xF0\x9F\x98\x80\"");
 
   auto truncated = CallNode(eval, b, limited, 0x5000);
@@ -518,7 +571,7 @@ TEST(ViewsEval, NulTerminatedTextStopsAtUnmappedMemory)
   Evaluator eval{ b.mView, memory, std::span{ &rootInfo, 1 } };
   auto value = CallNode(eval, b, text, 0x5000);
   ASSERT_TRUE(value.has_value()) << value.error().mMessage;
-  EXPECT_EQ(value->mText, "hello");
+  EXPECT_EQ(eval.TextOf(*value), "hello");
 
   // An unterminated string running into unmapped memory shows what could be read
   std::vector<u8> unterminated(16, 'x');
@@ -528,8 +581,36 @@ TEST(ViewsEval, NulTerminatedTextStopsAtUnmappedMemory)
   Evaluator eval2{ b.mView, memory, std::span{ &rootInfo2, 1 } };
   auto partial = CallNode(eval2, b, text, 0x5000);
   ASSERT_TRUE(partial.has_value()) << partial.error().mMessage;
-  EXPECT_EQ(partial->mText, std::string(16, 'x'));
-  EXPECT_TRUE(partial->mTruncated);
+  EXPECT_EQ(eval2.TextOf(*partial), std::string(16, 'x'));
+  EXPECT_TRUE(partial->Truncated());
+}
+
+TEST(ViewsEval, TextHandlesCoverConstantsAndDecodedText)
+{
+  Builder b;
+  const NodeId constant = b.Node({ .mOp = BoundOp::TextConst, .mType = b.mText, .mText = "literal" });
+  const TypeId char16Ptr = b.PointerTo(b.mChar16);
+  const NodeId data = b.LoadMember(char16Ptr, 0);
+  const NodeId length = b.LoadMember(b.mU32, 8);
+  const NodeId decoded =
+    b.Node({ .mOp = BoundOp::Text, .mType = b.mText, .mA = data, .mB = length, .mImm = 16, .mWidth = 2 });
+
+  CodeGen codegen{ b.mView };
+  b.mView.mSummaryKind = SummarySpec::Kind::Template;
+  b.mView.mSummaryParts.push_back({ .mLiteral = "constant=" });
+  b.mView.mSummaryParts.back().mFunction = codegen.EmitExprFunction("constant", constant);
+  b.mView.mSummaryParts.push_back({ .mLiteral = " decoded=" });
+  b.mView.mSummaryParts.back().mFunction = codegen.EmitExprFunction("decoded", decoded);
+
+  FakeMemory memory;
+  memory.Map(0x3000, Bytes(u16{ 'o' }, u16{ 'k' }));
+  const auto root = Bytes(u64{ 0x3000 }, u32{ 2 }, u32{ 0 });
+  const Root rootInfo{ .mType = b.mView.mRootType, .mAddress = 0x5000, .mBytes = root };
+  Evaluator eval{ b.mView, memory, std::span{ &rootInfo, 1 } };
+
+  auto summary = eval.Summary();
+  ASSERT_TRUE(summary.has_value()) << summary.error().mMessage;
+  EXPECT_EQ(*summary, "constant=\"literal\" decoded=\"ok\"");
 }
 
 TEST(ViewsEval, ArrayChildrenAndSummaries)
@@ -581,9 +662,9 @@ TEST(ViewsEval, FormatsCharacters)
   FakeMemory memory;
   const Root rootInfo{ .mType = b.mView.mRootType, .mAddress = 0, .mBytes = {} };
   Evaluator eval{ b.mView, memory, std::span{ &rootInfo, 1 } };
-  EvalValue value{ .mType = b.mChar16, .mBits = 0x65E5 };
+  EvalValue value = EvalValue::Scalar(b.mChar16, 0x65E5);
   EXPECT_EQ(*eval.Format(value, FormatSpec::Default), "26085 '\xE6\x97\xA5'");
-  value.mBits = '\n';
+  value = EvalValue::Scalar(b.mChar16, '\n');
   EXPECT_EQ(*eval.Format(value, FormatSpec::Default), "10 '\\n'");
   EXPECT_EQ(*eval.Format(value, FormatSpec::Hex), "0xa");
 }
@@ -607,14 +688,14 @@ TEST(ViewsEval, RootsWithAndWithoutAddresses)
     .mA = b.Node({ .mOp = BoundOp::Member, .mType = b.mU32, .mA = firstRoot }) });
   auto first = CallNode(eval, b, firstValue, 0x5000);
   ASSERT_TRUE(first.has_value()) << first.error().mMessage;
-  EXPECT_EQ(first->mBits, 17);
+  EXPECT_EQ(first->Bits(), 17);
 
   const NodeId secondRoot = b.Node({ .mOp = BoundOp::Root, .mType = secondRootType, .mImm = 1 });
   const NodeId secondMember = b.Node({ .mOp = BoundOp::Member, .mType = b.mU32, .mA = secondRoot });
   const NodeId secondValue = b.Node({ .mOp = BoundOp::Load, .mType = b.mU32, .mA = secondMember });
   auto second = CallNode(eval, b, secondValue, 0x5000);
   ASSERT_TRUE(second.has_value()) << second.error().mMessage;
-  EXPECT_EQ(second->mBits, 29);
+  EXPECT_EQ(second->Bits(), 29);
 
   const TypeId pointerType = b.PointerTo(b.mU32);
   const NodeId addressOf = b.Node({ .mOp = BoundOp::AddressOf, .mType = pointerType, .mA = secondMember });
@@ -634,7 +715,7 @@ TEST(ViewsEval, ViewedObjectAtAddressZeroIsReadFromItsBytes)
   Evaluator eval{ b.mView, memory, std::span{ &rootInfo, 1 } };
   auto value = CallNode(eval, b, length, 0);
   ASSERT_TRUE(value.has_value()) << value.error().mMessage;
-  EXPECT_EQ(value->mBits, 7);
+  EXPECT_EQ(value->Bits(), 7);
   EXPECT_EQ(memory.mReads, 0);
 }
 
@@ -717,7 +798,7 @@ TEST(ViewsEval, YieldPausesAndCopiesProgramState)
   FakeMemory memory;
   memory.Map(0x1000, Bytes(i32{ 10 }, i32{ 20 }, i32{ 30 }, i32{ 40 }, i32{ 50 }, i32{ 60 }));
   Evaluator eval{ b.mView, memory, std::span<const Root>{} };
-  const EvalValue thisPointer{ .mType = b.mView.mThisType };
+  const EvalValue thisPointer = EvalValue::Scalar(b.mView.mThisType, 0);
   ProgramState state = eval.Start(function, std::span{ &thisPointer, 1 });
   std::vector<YieldedElement> yielded;
   const auto collect = [&](const YieldedElement &element) { yielded.push_back(element); };
@@ -764,7 +845,7 @@ TEST(ViewsEval, ComputedYieldPausesAndCopiesProgramState)
 
   FakeMemory memory;
   Evaluator eval{ b.mView, memory, std::span<const Root>{} };
-  const EvalValue thisPointer{ .mType = b.mView.mThisType };
+  const EvalValue thisPointer = EvalValue::Scalar(b.mView.mThisType, 0);
   ProgramState state = eval.Start(function, std::span{ &thisPointer, 1 });
   std::vector<YieldedElement> yielded;
   const auto collect = [&](const YieldedElement &element) { yielded.push_back(element); };
@@ -772,7 +853,7 @@ TEST(ViewsEval, ComputedYieldPausesAndCopiesProgramState)
   auto first = eval.Run(state, RunLimits{ .mMaxYields = 1, .mBudget = 1000 }, collect);
   ASSERT_TRUE(first.has_value()) << first.error().mMessage;
   ASSERT_EQ(yielded.size(), 1);
-  EXPECT_EQ(yielded[0].mValue.mBits, 11);
+  EXPECT_EQ(yielded[0].mValue.Bits(), 11);
   EXPECT_FALSE(yielded[0].mAddress.has_value());
   EXPECT_TRUE(state.mOperands.empty());
 
@@ -781,8 +862,8 @@ TEST(ViewsEval, ComputedYieldPausesAndCopiesProgramState)
   auto resumed = eval.Run(state, RunLimits{ .mMaxYields = 2, .mBudget = 1000 }, collect);
   ASSERT_TRUE(resumed.has_value()) << resumed.error().mMessage;
   ASSERT_EQ(yielded.size(), 2);
-  EXPECT_EQ(yielded[0].mValue.mBits, 22);
-  EXPECT_EQ(yielded[1].mValue.mBits, 33);
+  EXPECT_EQ(yielded[0].mValue.Bits(), 22);
+  EXPECT_EQ(yielded[1].mValue.Bits(), 33);
   EXPECT_FALSE(yielded[0].mAddress.has_value());
   EXPECT_FALSE(yielded[1].mAddress.has_value());
   EXPECT_TRUE(state.mOperands.empty());
@@ -791,8 +872,8 @@ TEST(ViewsEval, ComputedYieldPausesAndCopiesProgramState)
   auto copied = eval.Run(pausedCopy, RunLimits{ .mMaxYields = 2, .mBudget = 1000 }, collect);
   ASSERT_TRUE(copied.has_value()) << copied.error().mMessage;
   ASSERT_EQ(yielded.size(), 2);
-  EXPECT_EQ(yielded[0].mValue.mBits, 22);
-  EXPECT_EQ(yielded[1].mValue.mBits, 33);
+  EXPECT_EQ(yielded[0].mValue.Bits(), 22);
+  EXPECT_EQ(yielded[1].mValue.Bits(), 33);
   EXPECT_TRUE(pausedCopy.mOperands.empty());
 }
 
@@ -804,7 +885,7 @@ TEST(ViewsEval, CallRejectsYield)
   b.mView.mProgram.mCode.push_back(Instruction{ .mOp = Op::Yield });
   FakeMemory memory;
   Evaluator eval{ b.mView, memory, std::span<const Root>{} };
-  const EvalValue thisPointer{ .mType = b.mView.mThisType };
+  const EvalValue thisPointer = EvalValue::Scalar(b.mView.mThisType, 0);
   auto result = eval.Call(0, std::span{ &thisPointer, 1 }, 1000);
   ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error().mMessage, "internal error: yield outside a children block");
@@ -885,11 +966,11 @@ TEST(ViewsEval, RecursiveCallsWalkAndCount)
     memory.Map(address, Bytes(left, u64{ 0 }, static_cast<i32>(i + 1), u32{ 0 }));
   }
   Evaluator eval{ b.mView, memory, std::span<const Root>{} };
-  const EvalValue startArgs[]{ EvalValue{ .mType = b.mView.mThisType },
-    EvalValue{ .mType = nodePointer, .mBits = base + 6 * 24 } };
+  const EvalValue startArgs[]{ EvalValue::Scalar(b.mView.mThisType, 0),
+    EvalValue::Scalar(nodePointer, base + 6 * 24) };
   ProgramState state = eval.Start(walk, startArgs);
   std::vector<u64> keys;
-  const auto collect = [&](const YieldedElement &element) { keys.push_back(element.mValue.mBits); };
+  const auto collect = [&](const YieldedElement &element) { keys.push_back(element.mValue.Bits()); };
   auto firstPage = eval.Run(state, RunLimits{ .mMaxYields = 2, .mBudget = 10000 }, collect);
   ASSERT_TRUE(firstPage.has_value()) << firstPage.error().mMessage;
   EXPECT_EQ(firstPage->mStop, RunStop::Paused);
@@ -915,7 +996,7 @@ TEST(ViewsEval, RecursiveCallsWalkAndCount)
   const EvalValue countArgs[]{ startArgs[0], startArgs[1] };
   auto total = eval.Call(count, countArgs, 10000);
   ASSERT_TRUE(total.has_value()) << total.error().mMessage;
-  EXPECT_EQ(total->mBits, 7);
+  EXPECT_EQ(total->Bits(), 7);
 }
 
 TEST(ViewsEval, RecursiveCallDepthIsLimited)
@@ -942,8 +1023,7 @@ TEST(ViewsEval, RecursiveCallDepthIsLimited)
   FakeMemory memory;
   memory.Map(address, Bytes(address, address, i32{ 1 }, u32{ 0 }));
   Evaluator eval{ b.mView, memory, std::span<const Root>{} };
-  const EvalValue args[]{ EvalValue{ .mType = b.mView.mThisType },
-    EvalValue{ .mType = nodePointer, .mBits = address } };
+  const EvalValue args[]{ EvalValue::Scalar(b.mView.mThisType, 0), EvalValue::Scalar(nodePointer, address) };
   ProgramState state = eval.Start(walk, args);
   const auto noYield = [](const YieldedElement &) {};
   auto result = eval.Run(state, RunLimits{ .mBudget = 100000 }, noYield);
@@ -961,7 +1041,7 @@ TEST(ViewsEval, FailInstructionUsesProgramConstant)
   b.mView.mProgram.mCode.push_back(Instruction{ .mOp = Op::Fail, .mA = 0, .mLoc = { 3, 5 } });
   FakeMemory memory;
   Evaluator eval{ b.mView, memory, std::span<const Root>{} };
-  const EvalValue thisPointer{ .mType = b.mView.mThisType };
+  const EvalValue thisPointer = EvalValue::Scalar(b.mView.mThisType, 0);
   auto result = eval.Call(0, std::span{ &thisPointer, 1 }, 1000);
   ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error().mMessage, "function failed");
@@ -1028,11 +1108,10 @@ TEST(ViewsEval, ReferenceParameterAccumulatesRecursively)
   memory.Map(left, Bytes(u64{ 0 }, u64{ 0 }, u64{ 7 }));
   memory.Map(right, Bytes(u64{ 0 }, u64{ 0 }, u64{ 11 }));
   Evaluator eval{ b.mView, memory, std::span<const Root>{} };
-  const EvalValue args[]{ EvalValue{ .mType = b.mView.mThisType },
-    EvalValue{ .mType = nodePointer, .mBits = root } };
+  const EvalValue args[]{ EvalValue::Scalar(b.mView.mThisType, 0), EvalValue::Scalar(nodePointer, root) };
   auto result = eval.Call(total, args, 10000);
   ASSERT_TRUE(result.has_value()) << result.error().mMessage;
-  EXPECT_EQ(result->mBits, 23);
+  EXPECT_EQ(result->Bits(), 23);
 }
 
 TEST(ViewsEval, ReferenceParameterSurvivesYieldAndStateCopy)
@@ -1064,18 +1143,18 @@ TEST(ViewsEval, ReferenceParameterSurvivesYieldAndStateCopy)
 
   FakeMemory memory;
   Evaluator eval{ b.mView, memory, std::span<const Root>{} };
-  const EvalValue thisPointer{ .mType = b.mView.mThisType };
+  const EvalValue thisPointer = EvalValue::Scalar(b.mView.mThisType, 0);
   ProgramState state = eval.Start(children, std::span{ &thisPointer, 1 });
   std::vector<u64> values;
-  const auto collect = [&](const YieldedElement &element) { values.push_back(element.mValue.mBits); };
+  const auto collect = [&](const YieldedElement &element) { values.push_back(element.mValue.Bits()); };
   auto first = eval.Run(state, RunLimits{ .mMaxYields = 1, .mBudget = 1000 }, collect);
   ASSERT_TRUE(first.has_value()) << first.error().mMessage;
   EXPECT_EQ(first->mStop, RunStop::Paused);
   ASSERT_EQ(values, (std::vector<u64>{ 11 }));
   ASSERT_EQ(state.mLocals.size(), 4);
-  EXPECT_TRUE(state.mLocals[3].mIsLocalRef);
-  EXPECT_EQ(state.mLocals[3].mRefStack, 0);
-  EXPECT_EQ(state.mLocals[3].mRefSlot, totalSlot);
+  EXPECT_TRUE(state.mLocals[3].IsLocalRef());
+  EXPECT_EQ(state.mLocals[3].RefStack(), 0);
+  EXPECT_EQ(state.mLocals[3].RefSlot(), totalSlot);
   EXPECT_TRUE(state.mOperands.empty());
 
   ProgramState pausedCopy = state;
@@ -1107,5 +1186,5 @@ TEST(ViewsEval, ShortCircuitAndDoesNotEvaluateFalseBranch)
   Evaluator eval{ b.mView, memory, std::span<const Root>{} };
   auto value = CallNode(eval, b, node);
   ASSERT_TRUE(value.has_value()) << value.error().mMessage;
-  EXPECT_EQ(value->mBits, 0);
+  EXPECT_EQ(value->Bits(), 0);
 }

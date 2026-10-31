@@ -6,6 +6,7 @@
 
 // std
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cstring>
 #include <format>
@@ -48,15 +49,31 @@ Evaluator::ErrorAt(SourceLoc loc, std::string message) noexcept
 }
 
 EvalValue
+Evaluator::MakeText(TypeId type, std::string text, bool truncated) noexcept
+{
+  mOwnedTexts.push_back(std::move(text));
+  const u32 handle = static_cast<u32>(mTexts.size());
+  mTexts.push_back(mOwnedTexts.back());
+  return EvalValue::Text(type, handle, truncated);
+}
+
+EvalValue
+Evaluator::MakeTextConstant(TypeId type, std::string_view constant) noexcept
+{
+  const u32 handle = static_cast<u32>(mTexts.size());
+  mTexts.push_back(constant);
+  return EvalValue::Text(type, handle, false);
+}
+
+EvalValue
 Evaluator::MakeInteger(TypeId type, u64 bits) const noexcept
 {
   const BoundType &t = mView.Type(type);
-  EvalValue value{ .mType = type };
-  value.mBits = t.mIsSigned ? SignExtend(bits, t.mSize * 8) : Truncate(bits, t.mSize * 8);
+  u64 normalized = t.mIsSigned ? SignExtend(bits, t.mSize * 8) : Truncate(bits, t.mSize * 8);
   if (t.mKind == TypeKind::Bool) {
-    value.mBits = bits != 0 ? 1 : 0;
+    normalized = bits != 0 ? 1 : 0;
   }
-  return value;
+  return EvalValue::Scalar(type, normalized);
 }
 
 bool
@@ -81,41 +98,46 @@ Evaluator::ReadBytes(u64 address, std::span<u8> out) noexcept
 Evaluator::Result
 Evaluator::Load(const EvalValue &lvalue, SourceLoc loc) noexcept
 {
-  const BoundType &type = mView.Type(lvalue.mType);
+  const BoundType &type = mView.Type(lvalue.Type());
   if (!type.IsScalar()) {
     return std::unexpected(ErrorAt(loc, std::format("can not read a value of type '{}'", type.mName)));
   }
 
   const auto read = [&](std::span<u8> out, bool bitfield) {
-    if (lvalue.mRoot == kNoRoot) {
-      return ReadBytes(lvalue.mAddress, out);
+    if (lvalue.Root() == kNoRoot) {
+      return ReadBytes(lvalue.Address(), out);
     }
-    if (lvalue.mRoot >= mRoots.size()) {
+    if (lvalue.Root() >= mRoots.size()) {
       return false;
     }
-    const auto bytes = mRoots[lvalue.mRoot].mBytes;
-    if (lvalue.mAddress <= bytes.size() && out.size() <= bytes.size() - lvalue.mAddress) {
-      std::memcpy(out.data(), bytes.data() + lvalue.mAddress, out.size());
+    const auto bytes = mRoots[lvalue.Root()].mBytes;
+    if (lvalue.Address() <= bytes.size() && out.size() <= bytes.size() - lvalue.Address()) {
+      std::memcpy(out.data(), bytes.data() + lvalue.Address(), out.size());
       return true;
     }
     (void)bitfield;
     return false;
   };
 
-  if (lvalue.mBitSize > 0) {
-    const u32 bytes = std::min<u32>((lvalue.mBitOffset + lvalue.mBitSize + 7) / 8, 8);
-    u64 raw = 0;
-    if (!read(std::span{ reinterpret_cast<u8 *>(&raw), bytes }, true)) {
-      const std::string message = lvalue.mRoot == kNoRoot
-                                    ? std::format("can not read memory at 0x{:x}", lvalue.mAddress)
-                                    : std::format("can not read memory at offset {}", lvalue.mAddress);
+  if (lvalue.BitSize() > 0) {
+    const u32 byteCount = (lvalue.BitOffset() + lvalue.BitSize() + 7) / 8;
+    std::array<u8, 9> raw{};
+    if (!read(std::span{ raw }.first(byteCount), true)) {
+      const std::string message = lvalue.Root() == kNoRoot
+                                    ? std::format("can not read memory at 0x{:x}", lvalue.Address())
+                                    : std::format("can not read memory at offset {}", lvalue.Address());
       return std::unexpected(ErrorAt(loc, message));
     }
-    u64 bits = raw >> lvalue.mBitOffset;
-    bits = Truncate(bits, lvalue.mBitSize);
-    EvalValue result{ .mType = lvalue.mType };
-    result.mBits = type.mIsSigned ? SignExtend(bits, lvalue.mBitSize) : bits;
-    return result;
+    u64 low = 0;
+    constexpr u32 kLowByteCount = 8;
+    std::memcpy(&low, raw.data(), std::min(byteCount, kLowByteCount));
+    u64 bits = low >> lvalue.BitOffset();
+    if (byteCount > kLowByteCount) {
+      bits |= static_cast<u64>(raw[kLowByteCount]) << (64 - lvalue.BitOffset());
+    }
+    bits = Truncate(bits, lvalue.BitSize());
+    const u64 normalized = type.mIsSigned ? SignExtend(bits, lvalue.BitSize()) : bits;
+    return EvalValue::Scalar(lvalue.Type(), normalized);
   }
 
   if (type.mSize == 0 || type.mSize > 8) {
@@ -124,63 +146,61 @@ Evaluator::Load(const EvalValue &lvalue, SourceLoc loc) noexcept
 
   u64 raw = 0;
   if (!read(std::span{ reinterpret_cast<u8 *>(&raw), type.mSize }, false)) {
-    const std::string message = lvalue.mRoot == kNoRoot
-                                  ? std::format("can not read {} bytes at 0x{:x}", type.mSize, lvalue.mAddress)
-                                  : std::format("can not read {} bytes at offset {}", type.mSize, lvalue.mAddress);
+    const std::string message =
+      lvalue.Root() == kNoRoot ? std::format("can not read {} bytes at 0x{:x}", type.mSize, lvalue.Address())
+                               : std::format("can not read {} bytes at offset {}", type.mSize, lvalue.Address());
     return std::unexpected(ErrorAt(loc, message));
   }
 
   if (type.mKind == TypeKind::Float) {
-    EvalValue result{ .mType = lvalue.mType };
+    double number = 0.0;
     if (type.mSize == 4) {
       float f;
       std::memcpy(&f, &raw, 4);
-      result.mFloat = f;
+      number = f;
     } else if (type.mSize == 8) {
-      std::memcpy(&result.mFloat, &raw, 8);
+      std::memcpy(&number, &raw, 8);
     } else {
       return std::unexpected(ErrorAt(loc, std::format("unsupported floating point size {}", type.mSize)));
     }
-    return result;
+    return EvalValue::Float(lvalue.Type(), number);
   }
-  return MakeInteger(lvalue.mType, raw);
+  return MakeInteger(lvalue.Type(), raw);
 }
 
 Evaluator::Result
 Evaluator::Convert(const EvalValue &value, TypeId to, SourceLoc loc) noexcept
 {
-  const BoundType &from = mView.Type(value.mType);
+  const BoundType &from = mView.Type(value.Type());
   const BoundType &target = mView.Type(to);
   if (target.mKind == TypeKind::Float) {
-    EvalValue result{ .mType = to };
+    double number = 0.0;
     if (from.mKind == TypeKind::Float) {
-      result.mFloat = value.mFloat;
+      number = value.AsFloat();
     } else if (from.mIsSigned) {
-      result.mFloat = static_cast<double>(static_cast<i64>(value.mBits));
+      number = static_cast<double>(static_cast<i64>(value.Bits()));
     } else {
-      result.mFloat = static_cast<double>(value.mBits);
+      number = static_cast<double>(value.Bits());
     }
     if (target.mSize == 4) {
-      result.mFloat = static_cast<float>(result.mFloat);
+      number = static_cast<float>(number);
     }
-    return result;
+    return EvalValue::Float(to, number);
   }
 
   if (target.IsInteger() || target.mKind == TypeKind::Pointer) {
     if (from.mKind == TypeKind::Float) {
       if (target.mKind == TypeKind::Bool) {
-        return MakeInteger(to, value.mFloat != 0.0 ? 1 : 0);
+        return MakeInteger(to, value.AsFloat() != 0.0 ? 1 : 0);
       }
       const u64 bits =
-        target.mIsSigned ? static_cast<u64>(static_cast<i64>(value.mFloat)) : static_cast<u64>(value.mFloat);
+        target.mIsSigned ? static_cast<u64>(static_cast<i64>(value.AsFloat())) : static_cast<u64>(value.AsFloat());
       return MakeInteger(to, bits);
     }
     if (target.mKind == TypeKind::Pointer) {
-      EvalValue result{ .mType = to };
-      result.mBits = value.mBits;
-      return result;
+      return EvalValue::Scalar(to, value.Bits());
     }
-    return MakeInteger(to, value.mBits);
+    return MakeInteger(to, value.Bits());
   }
 
   return std::unexpected(
@@ -190,18 +210,18 @@ Evaluator::Convert(const EvalValue &value, TypeId to, SourceLoc loc) noexcept
 Evaluator::Result
 Evaluator::EvalBinary(Op op, const EvalValue &lhs, const EvalValue &rhs, TypeId resultType, SourceLoc loc) noexcept
 {
-  const BoundType &operandType = mView.Type(lhs.mType);
+  const BoundType &operandType = mView.Type(lhs.Type());
   const bool isFloat = operandType.mKind == TypeKind::Float;
   const bool isSigned = operandType.mIsSigned;
-  const u64 a = lhs.mBits;
-  const u64 b = rhs.mBits;
-  const double fa = lhs.mFloat;
-  const double fb = rhs.mFloat;
+  const u64 a = lhs.Bits();
+  const u64 b = rhs.Bits();
+  const double fa = lhs.AsFloat();
+  const double fb = rhs.AsFloat();
 
   const auto boolean = [&](bool value) { return MakeInteger(resultType, value ? 1 : 0); };
   const auto arithmetic = [&](u64 bits, double f) {
     if (isFloat) {
-      return EvalValue{ .mType = resultType, .mFloat = f };
+      return EvalValue::Float(resultType, f);
     }
     return MakeInteger(resultType, bits);
   };
@@ -262,20 +282,21 @@ Evaluator::Result
 Evaluator::EvalText(
   const Instruction &instruction, const EvalValue &pointer, const std::optional<EvalValue> &length) noexcept
 {
-  const u64 address = pointer.mBits;
+  const u64 address = pointer.Bits();
   const u64 limit = instruction.mImm;
   const u8 width = instruction.mWidth;
-  EvalValue result{ .mType = instruction.mType };
+  std::string text;
+  bool truncated = false;
 
   if (length) {
-    const i64 unitsRequested = static_cast<i64>(length->mBits);
+    const i64 unitsRequested = static_cast<i64>(length->Bits());
     if (unitsRequested < 0) {
       return std::unexpected(ErrorAt(instruction.mLoc, std::format("negative text length {}", unitsRequested)));
     }
     const u64 units = std::min<u64>(static_cast<u64>(unitsRequested), limit);
-    result.mTruncated = units < static_cast<u64>(unitsRequested);
+    truncated = units < static_cast<u64>(unitsRequested);
     if (units == 0) {
-      return result;
+      return MakeText(instruction.mType, {}, truncated);
     }
     if (address == 0) {
       return std::unexpected(ErrorAt(instruction.mLoc, "text pointer is null"));
@@ -285,8 +306,8 @@ Evaluator::EvalText(
       return std::unexpected(
         ErrorAt(instruction.mLoc, std::format("can not read {} bytes at 0x{:x}", bytes.size(), address)));
     }
-    DecodeText(bytes, width, false, result.mText);
-    return result;
+    DecodeText(bytes, width, false, text);
+    return MakeText(instruction.mType, std::move(text), truncated);
   }
 
   if (address == 0) {
@@ -308,7 +329,7 @@ Evaluator::EvalText(
       if (bytes.empty()) {
         return std::unexpected(ErrorAt(instruction.mLoc, std::format("can not read memory at 0x{:x}", cursor)));
       }
-      result.mTruncated = true;
+      truncated = true;
       break;
     }
     bool terminated = false;
@@ -331,11 +352,11 @@ Evaluator::EvalText(
     }
     cursor += chunk.size();
     if (decodedUnits >= limit) {
-      result.mTruncated = true;
+      truncated = true;
     }
   }
-  DecodeText(bytes, width, false, result.mText);
-  return result;
+  DecodeText(bytes, width, false, text);
+  return MakeText(instruction.mType, std::move(text), truncated);
 }
 
 ProgramState
@@ -346,7 +367,7 @@ Evaluator::Start(u32 function, std::span<const EvalValue> args) noexcept
   state.mFrames.push_back(Frame{ .mView = &mView, .mFunction = function, .mPc = fn.mEntry, .mLocalBase = 0 });
   state.mLocals.assign(args.begin(), args.end());
   for (size_t i = state.mLocals.size(); i < fn.mLocalTypes.size(); ++i) {
-    state.mLocals.push_back(EvalValue{ .mType = fn.mLocalTypes[i] });
+    state.mLocals.push_back(EvalValue::Scalar(fn.mLocalTypes[i], 0));
   }
   return state;
 }
@@ -404,28 +425,26 @@ Evaluator::RunWithBudget(ProgramState &state,
       state.mOperands.push_back(MakeInteger(instruction.mType, instruction.mImm));
       break;
     case Op::PushFloat:
-      state.mOperands.push_back(EvalValue{ .mType = instruction.mType, .mFloat = instruction.mFloat });
+      state.mOperands.push_back(EvalValue::Float(instruction.mType, instruction.mFloat));
       break;
     case Op::PushText:
       state.mOperands.push_back(
-        EvalValue{ .mType = instruction.mType, .mText = frame.mView->mProgram.mConstants[instruction.mA] });
+        MakeTextConstant(instruction.mType, frame.mView->mProgram.mConstants[instruction.mA]));
       break;
     case Op::PushRoot: {
       if (instruction.mA >= mRoots.size()) {
         return fail("internal error: root index out of range");
       }
       const Root &root = mRoots[instruction.mA];
-      EvalValue value{ .mType = root.mType, .mIsLValue = true };
       if (root.mAddress) {
-        value.mAddress = *root.mAddress;
+        state.mOperands.push_back(EvalValue::LValue(root.mType, *root.mAddress));
       } else {
-        value.mRoot = instruction.mA;
+        state.mOperands.push_back(EvalValue::RootLValue(root.mType, instruction.mA, 0));
       }
-      state.mOperands.push_back(value);
       break;
     }
     case Op::LoadLet: {
-      const u64 thisAddress = state.mLocals[frame.mLocalBase].mBits;
+      const u64 thisAddress = state.mLocals[frame.mLocalBase].Bits();
       const LetKey key{ frame.mView, instruction.mA, thisAddress };
       if (const auto found = mLetValues.find(key); found != mLetValues.end()) {
         state.mOperands.push_back(found->second);
@@ -451,7 +470,7 @@ Evaluator::RunWithBudget(ProgramState &state,
       break;
     case Op::StoreLocal: {
       EvalValue value = pop();
-      if (value.mIsLocalRef) {
+      if (value.IsLocalRef()) {
         return fail("internal error: storing a reference");
       }
       state.mLocals[frame.mLocalBase + instruction.mA] = std::move(value);
@@ -462,8 +481,7 @@ Evaluator::RunWithBudget(ProgramState &state,
       if (slot >= state.mLocals.size()) {
         return fail("internal error: local reference slot out of range");
       }
-      state.mOperands.push_back(
-        EvalValue{ .mType = state.mLocals[slot].mType, .mIsLocalRef = true, .mRefStack = 0, .mRefSlot = slot });
+      state.mOperands.push_back(EvalValue::LocalRef(state.mLocals[slot].Type(), slot));
       break;
     }
     case Op::LoadRef: {
@@ -472,10 +490,10 @@ Evaluator::RunWithBudget(ProgramState &state,
         return fail("internal error: reference parameter slot out of range");
       }
       const EvalValue &reference = state.mLocals[refSlot];
-      if (!reference.mIsLocalRef || reference.mRefStack != 0 || reference.mRefSlot >= state.mLocals.size()) {
+      if (!reference.IsLocalRef() || reference.RefStack() != 0 || reference.RefSlot() >= state.mLocals.size()) {
         return fail("internal error: invalid local reference");
       }
-      state.mOperands.push_back(state.mLocals[reference.mRefSlot]);
+      state.mOperands.push_back(state.mLocals[reference.RefSlot()]);
       break;
     }
     case Op::StoreRef: {
@@ -484,43 +502,43 @@ Evaluator::RunWithBudget(ProgramState &state,
         return fail("internal error: reference parameter slot out of range");
       }
       const EvalValue &reference = state.mLocals[refSlot];
-      if (!reference.mIsLocalRef || reference.mRefStack != 0 || reference.mRefSlot >= state.mLocals.size()) {
+      if (!reference.IsLocalRef() || reference.RefStack() != 0 || reference.RefSlot() >= state.mLocals.size()) {
         return fail("internal error: invalid local reference");
       }
       EvalValue value = pop();
-      if (value.mIsLocalRef) {
+      if (value.IsLocalRef()) {
         return fail("internal error: storing a reference");
       }
-      state.mLocals[reference.mRefSlot] = std::move(value);
+      state.mLocals[reference.RefSlot()] = std::move(value);
       break;
     }
     case Op::Member: {
       EvalValue base = pop();
-      EvalValue value{ .mType = instruction.mType,
-        .mIsLValue = true,
-        .mAddress = base.mAddress + instruction.mImm,
-        .mRoot = base.mRoot,
-        .mBitOffset = instruction.mBitOffset,
-        .mBitSize = instruction.mBitSize };
+      EvalValue value =
+        base.Root() == kNoRoot
+          ? EvalValue::LValue(instruction.mType, base.Address() + instruction.mImm)
+          : EvalValue::RootLValue(instruction.mType, base.Root(), base.Address() + instruction.mImm);
+      if (instruction.mBitSize > 0) {
+        value = EvalValue::Bitfield(value, instruction.mBitOffset, instruction.mBitSize);
+      }
       state.mOperands.push_back(value);
       break;
     }
     case Op::Deref: {
       const EvalValue pointer = pop();
-      if (pointer.mBits == 0 && instruction.mA == 0) {
+      if (pointer.Bits() == 0 && instruction.mA == 0) {
         return fail("null pointer dereference");
       }
-      state.mOperands.push_back(
-        EvalValue{ .mType = instruction.mType, .mIsLValue = true, .mAddress = pointer.mBits });
+      state.mOperands.push_back(EvalValue::LValue(instruction.mType, pointer.Bits()));
       break;
     }
     case Op::AddressOf:
     case Op::Decay: {
       const EvalValue lvalue = pop();
-      if (lvalue.mRoot != kNoRoot) {
+      if (lvalue.Root() != kNoRoot) {
         return fail("the value has no address (it is in a register)");
       }
-      state.mOperands.push_back(EvalValue{ .mType = instruction.mType, .mBits = lvalue.mAddress });
+      state.mOperands.push_back(EvalValue::Scalar(instruction.mType, lvalue.Address()));
       break;
     }
     case Op::Load: {
@@ -535,21 +553,21 @@ Evaluator::RunWithBudget(ProgramState &state,
     case Op::Negate: {
       const EvalValue operand = pop();
       if (mView.Type(instruction.mType).mKind == TypeKind::Float) {
-        state.mOperands.push_back(EvalValue{ .mType = instruction.mType, .mFloat = -operand.mFloat });
+        state.mOperands.push_back(EvalValue::Float(instruction.mType, -operand.AsFloat()));
       } else {
-        state.mOperands.push_back(MakeInteger(instruction.mType, 0 - operand.mBits));
+        state.mOperands.push_back(MakeInteger(instruction.mType, 0 - operand.Bits()));
       }
       break;
     }
     case Op::LogicalNot: {
       const EvalValue operand = pop();
-      const bool isFloat = mView.Type(operand.mType).mKind == TypeKind::Float;
+      const bool isFloat = mView.Type(operand.Type()).mKind == TypeKind::Float;
       state.mOperands.push_back(
-        MakeInteger(instruction.mType, (isFloat ? operand.mFloat == 0.0 : operand.mBits == 0) ? 1 : 0));
+        MakeInteger(instruction.mType, (isFloat ? operand.AsFloat() == 0.0 : operand.Bits() == 0) ? 1 : 0));
       break;
     }
     case Op::BitNot:
-      state.mOperands.push_back(MakeInteger(instruction.mType, ~pop().mBits));
+      state.mOperands.push_back(MakeInteger(instruction.mType, ~pop().Bits()));
       break;
     case Op::Add:
     case Op::Sub:
@@ -580,15 +598,15 @@ Evaluator::RunWithBudget(ProgramState &state,
     case Op::PointerSub: {
       const EvalValue offset = pop();
       const EvalValue pointer = pop();
-      const u64 scaled = static_cast<u64>(static_cast<i64>(offset.mBits)) * instruction.mImm;
-      const u64 address = instruction.mOp == Op::PointerAdd ? pointer.mBits + scaled : pointer.mBits - scaled;
-      state.mOperands.push_back(EvalValue{ .mType = instruction.mType, .mBits = address });
+      const u64 scaled = static_cast<u64>(static_cast<i64>(offset.Bits())) * instruction.mImm;
+      const u64 address = instruction.mOp == Op::PointerAdd ? pointer.Bits() + scaled : pointer.Bits() - scaled;
+      state.mOperands.push_back(EvalValue::Scalar(instruction.mType, address));
       break;
     }
     case Op::PointerDiff: {
       const EvalValue rhs = pop();
       const EvalValue lhs = pop();
-      const i64 bytes = static_cast<i64>(lhs.mBits - rhs.mBits);
+      const i64 bytes = static_cast<i64>(lhs.Bits() - rhs.Bits());
       state.mOperands.push_back(MakeInteger(
         instruction.mType, static_cast<u64>(bytes / static_cast<i64>(std::max<u64>(instruction.mImm, 1)))));
       break;
@@ -618,17 +636,17 @@ Evaluator::RunWithBudget(ProgramState &state,
     case Op::ArrayProvider: {
       const EvalValue count = pop();
       const EvalValue pointer = pop();
-      const i64 signedCount = static_cast<i64>(count.mBits);
+      const i64 signedCount = static_cast<i64>(count.Bits());
       if (signedCount < 0) {
         return fail(std::format("negative element count {}", signedCount));
       }
-      EvalValue value{ .mType = instruction.mType, .mBits = pointer.mBits };
-      value.mCount = std::min<u64>(static_cast<u64>(signedCount), instruction.mImm);
-      value.mTruncated = value.mCount < static_cast<u64>(signedCount);
-      if (value.mCount > 0 && value.mBits == 0) {
-        return fail(std::format("array of {} elements at null pointer", value.mCount));
+      const u64 elementCount = std::min<u64>(static_cast<u64>(signedCount), instruction.mImm);
+      const bool truncated = elementCount < static_cast<u64>(signedCount);
+      if (elementCount > 0 && pointer.Bits() == 0) {
+        return fail(std::format("array of {} elements at null pointer", elementCount));
       }
-      state.mOperands.push_back(std::move(value));
+      state.mOperands.push_back(
+        EvalValue::ArrayProvider(instruction.mType, pointer.Bits(), elementCount, truncated));
       break;
     }
     case Op::Pop:
@@ -639,7 +657,7 @@ Evaluator::RunWithBudget(ProgramState &state,
       break;
     case Op::JumpIfFalse: {
       const EvalValue condition = pop();
-      if (condition.mBits == 0) {
+      if (condition.Bits() == 0) {
         frame.mPc = static_cast<u32>(instruction.mImm);
       }
       break;
@@ -648,7 +666,7 @@ Evaluator::RunWithBudget(ProgramState &state,
       std::optional<EvalValue> value;
       if (instruction.mA == 1) {
         value = pop();
-        if (value->mIsLocalRef) {
+        if (value->IsLocalRef()) {
           return fail("internal error: returning a reference");
         }
       }
@@ -687,7 +705,7 @@ Evaluator::RunWithBudget(ProgramState &state,
       }
       state.mLocals.insert(state.mLocals.end(), args.begin(), args.end());
       for (size_t i = paramCount; i < localTypes.size(); ++i) {
-        state.mLocals.push_back(EvalValue{ .mType = localTypes[i] });
+        state.mLocals.push_back(EvalValue::Scalar(localTypes[i], 0));
       }
       state.mFrames.push_back(
         Frame{ .mView = view, .mFunction = function, .mPc = entry, .mLocalBase = localBase });
@@ -700,15 +718,15 @@ Evaluator::RunWithBudget(ProgramState &state,
         return fail("internal error: yield outside a children block");
       }
       const EvalValue value = pop();
-      if (value.mIsLocalRef) {
+      if (value.IsLocalRef()) {
         return fail("internal error: yielding a reference");
       }
       std::optional<u64> address;
       if (instruction.mImm != 1) {
-        if (!value.mIsLValue || value.mRoot != kNoRoot) {
+        if (!value.IsLValue() || value.Root() != kNoRoot) {
           return fail("the value has no address (it is in a register)");
         }
-        address = value.mAddress;
+        address = value.Address();
       }
       std::optional<std::string> key;
       if (instruction.mA == 1) {
@@ -720,7 +738,7 @@ Evaluator::RunWithBudget(ProgramState &state,
         key = std::move(*formatted);
       }
       onYield(
-        YieldedElement{ .mType = value.mType, .mAddress = address, .mValue = value, .mKey = std::move(key) });
+        YieldedElement{ .mType = value.Type(), .mAddress = address, .mValue = value, .mKey = std::move(key) });
       ++yields;
       if (yields >= limits.mMaxYields) {
         return RunResult{ .mStop = RunStop::Paused, .mSteps = mStepsUsed - stepsAtStart };
@@ -781,9 +799,9 @@ FormatInteger(std::string &out, u64 bits, bool isSigned, u32 size, FormatSpec fo
 std::expected<std::string, EvalError>
 Evaluator::Format(const EvalValue &input, FormatSpec format) noexcept
 {
-  const BoundType &type = mView.Type(input.mType);
+  const BoundType &type = mView.Type(input.Type());
   std::string out;
-  if (input.mIsLValue) {
+  if (input.IsLValue()) {
     if (type.mKind == TypeKind::Record || type.mKind == TypeKind::Array) {
       out.append("{");
       out.append(type.mName);
@@ -802,19 +820,19 @@ Evaluator::Format(const EvalValue &input, FormatSpec format) noexcept
     return std::string{ "void" };
   case TypeKind::Bool:
     if (format == FormatSpec::Default) {
-      return std::string{ input.mBits != 0 ? "true" : "false" };
+      return std::string{ input.Bits() != 0 ? "true" : "false" };
     }
-    FormatInteger(out, input.mBits, false, 1, format);
+    FormatInteger(out, input.Bits(), false, 1, format);
     return out;
   case TypeKind::SignedInt:
   case TypeKind::UnsignedInt:
   case TypeKind::Enum: {
     const bool asChar = format == FormatSpec::Character || (type.mIsChar && format == FormatSpec::Default);
     if (asChar) {
-      const u32 cp = static_cast<u32>(Truncate(input.mBits, type.mSize * 8));
+      const u32 cp = static_cast<u32>(Truncate(input.Bits(), type.mSize * 8));
       std::string encoded;
       AppendUtf8(cp, encoded);
-      FormatInteger(out, input.mBits, type.mIsSigned, type.mSize, FormatSpec::Default);
+      FormatInteger(out, input.Bits(), type.mIsSigned, type.mSize, FormatSpec::Default);
       out.append(" '");
       if (cp < 0x20 || cp == 0x7F) {
         std::string quoted;
@@ -828,20 +846,20 @@ Evaluator::Format(const EvalValue &input, FormatSpec format) noexcept
       out.push_back('\'');
       return out;
     }
-    FormatInteger(out, input.mBits, type.mIsSigned, type.mSize, format);
+    FormatInteger(out, input.Bits(), type.mIsSigned, type.mSize, format);
     return out;
   }
   case TypeKind::Float:
-    std::format_to(std::back_inserter(out), "{}", input.mFloat);
+    std::format_to(std::back_inserter(out), "{}", input.AsFloat());
     return out;
   case TypeKind::Pointer:
-    std::format_to(std::back_inserter(out), "0x{:x}", input.mBits);
+    std::format_to(std::back_inserter(out), "0x{:x}", input.Bits());
     return out;
   case TypeKind::Text:
-    AppendQuoted(input.mText, input.mTruncated, out);
+    AppendQuoted(TextOf(input), input.Truncated(), out);
     return out;
   case TypeKind::ArrayProvider:
-    std::format_to(std::back_inserter(out), "[{}{}]", input.mCount, input.mTruncated ? "+" : "");
+    std::format_to(std::back_inserter(out), "[{}{}]", input.Count(), input.Truncated() ? "+" : "");
     return out;
   case TypeKind::Record:
   case TypeKind::Array:
@@ -851,13 +869,22 @@ Evaluator::Format(const EvalValue &input, FormatSpec format) noexcept
   return out;
 }
 
+std::string_view
+Evaluator::TextOf(const EvalValue &value) const noexcept
+{
+  assert(value.Kind() == ValueKind::Text);
+  const u32 handle = value.TextHandle();
+  assert(handle < mTexts.size());
+  return mTexts[handle];
+}
+
 static std::expected<EvalValue, EvalError>
 ThisPointer(const BoundView &view, const std::vector<Root> &roots) noexcept
 {
   if (roots.empty() || !roots[0].mAddress) {
     return std::unexpected(EvalError{ .mMessage = "view root has no address", .mLoc = {} });
   }
-  return EvalValue{ .mType = view.mThisType, .mBits = *roots[0].mAddress };
+  return EvalValue::Scalar(view.mThisType, *roots[0].mAddress);
 }
 
 std::expected<EvalValue, EvalError>
@@ -912,7 +939,7 @@ Evaluator::Children(u64 budget) noexcept
     return std::unexpected(std::move(value.error()));
   }
   return ArrayChildren{
-    .mBase = value->mBits, .mCount = value->mCount, .mElement = mView.Type(value->mType).mElement
+    .mBase = value->Bits(), .mCount = value->Count(), .mElement = mView.Type(value->Type()).mElement
   };
 }
 

@@ -20,6 +20,7 @@
 
 // std
 #include <algorithm>
+#include <cassert>
 #include <cstring>
 #include <format>
 #include <vector>
@@ -127,6 +128,17 @@ FormatError(const BoundView &view, const EvalError &error)
     "<view error: {}:{}:{}: {}>", view.mDef->mFile->mPath, error.mLoc.mLine, error.mLoc.mColumn, error.mMessage);
 }
 
+void
+AssertCheckpointSafe(const ProgramState &state) noexcept
+{
+  for (const EvalValue &value : state.mLocals) {
+    assert(value.Kind() != ValueKind::Text);
+  }
+  for (const EvalValue &value : state.mOperands) {
+    assert(value.Kind() != ValueKind::Text);
+  }
+}
+
 } // namespace
 
 std::optional<std::pmr::string>
@@ -232,15 +244,15 @@ MakeYieldedChild(const VariableContext &context,
     memory = std::make_shared<sym::LazyMemoryContentsObject>(supervisor, start, offset(start, size));
   } else {
     auto buffer = ByteBuffer::Create(size);
-    u64 bits = element.mValue.mBits;
+    u64 bits = element.mValue.Bits();
     if (view.Type(element.mType).mKind == TypeKind::Float) {
       if (size == sizeof(float)) {
-        const auto value = static_cast<float>(element.mValue.mFloat);
+        const auto value = static_cast<float>(element.mValue.AsFloat());
         u32 floatBits = 0;
         std::memcpy(&floatBits, &value, sizeof(float));
         bits = floatBits;
       } else {
-        const double value = element.mValue.mFloat;
+        const double value = element.mValue.AsFloat();
         std::memcpy(&bits, &value, sizeof(double));
       }
     }
@@ -282,8 +294,10 @@ RunBlock(GlobalCursorCache::Cursor &cursor,
       result.emplace_back(MakeErrorChild(context, value, FormatError(view, thisPointer.error())));
       return true;
     }
-    cursor.mCheckpoints.push_back(GlobalCursorCache::Checkpoint{
-      .mYieldIndex = 0, .mState = evaluator.Start(view.mChildrenFunction, std::span{ &*thisPointer, 1 }) });
+    ProgramState initialState = evaluator.Start(view.mChildrenFunction, std::span{ &*thisPointer, 1 });
+    AssertCheckpointSafe(initialState);
+    cursor.mCheckpoints.push_back(
+      GlobalCursorCache::Checkpoint{ .mYieldIndex = 0, .mState = std::move(initialState) });
   }
 
   const GlobalCursorCache::Checkpoint *checkpoint = nullptr;
@@ -321,6 +335,7 @@ RunBlock(GlobalCursorCache::Cursor &cursor,
       break;
     }
     if (run->mStop == RunStop::Paused && index % 100 == 0 && index > cursor.mCheckpoints.back().mYieldIndex) {
+      AssertCheckpointSafe(state);
       cursor.mCheckpoints.push_back(GlobalCursorCache::Checkpoint{ .mYieldIndex = index, .mState = state });
     }
   }
