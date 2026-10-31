@@ -1540,9 +1540,13 @@ NativeLaunch::CreateRequest(UICommandArg arg,
   std::pmr::vector<std::pmr::string> programArguments{ arg.allocator->GetAllocator() };
   if (args.Contains("args")) {
     for (const auto &v : args.AsSpan("args")) {
-      std::pmr::string arg;
-      std::format_to(std::back_inserter(arg), "{}", v);
-      programArguments.push_back(std::move(arg));
+      if (v.IsString()) {
+        programArguments.emplace_back(v.UncheckedGetStringView());
+      } else {
+        std::pmr::string arg;
+        std::format_to(std::back_inserter(arg), "{}", v);
+        programArguments.push_back(std::move(arg));
+      }
     }
   }
 
