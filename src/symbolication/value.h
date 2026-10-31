@@ -29,7 +29,7 @@ class TaskInfo;
 namespace mdb::sym {
 
 struct Field;
-struct Symbol;
+class Symbol;
 class Type;
 class DebugAdapterSerializer;
 class Frame;

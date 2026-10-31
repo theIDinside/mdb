@@ -71,12 +71,13 @@ panic(std::string_view err_msg, const char *functionName, const char *file, size
      would produce similar output to the following: */
 
   strings = backtrace_symbols(buffer, nptrs);
-  if (strings == NULL) {
+  const auto pointersCount = static_cast<size_t>(nptrs);
+  if (strings == nullptr) {
     perror("backtrace_symbols");
     goto ifbacktrace_failed;
   }
 
-  for (size_t j = strip_levels; j < nptrs; j++) {
+  for (size_t j = strip_levels; j < pointersCount; j++) {
     auto demangle_len = 0UL;
     int stat = 0;
     std::string_view view{ strings[j] };

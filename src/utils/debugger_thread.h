@@ -6,6 +6,10 @@
 namespace mdb {
 class DebuggerThread
 {
+public:
+  using SpawnFunction = std::function<void(std::stop_token &)>;
+
+private:
   static int
   GetNextDebuggerThreadNumber()
   {
@@ -14,8 +18,7 @@ class DebuggerThread
   }
 
   std::string mThreadName;
-  explicit DebuggerThread(
-    std::string &&name, std::function<void(std::string_view, std::stop_token &)> &&task) noexcept;
+  explicit DebuggerThread(std::string &&name, SpawnFunction &&task) noexcept;
 
 public:
   static void BlockSigchildMustSucceed() noexcept;
@@ -23,10 +26,9 @@ public:
 
   ~DebuggerThread() noexcept;
   /// Create a debugger thread
+  static std::unique_ptr<DebuggerThread> SpawnDebuggerThread(SpawnFunction &&task) noexcept;
   static std::unique_ptr<DebuggerThread> SpawnDebuggerThread(
-    std::function<void(std::string_view, std::stop_token &)> task) noexcept;
-  static std::unique_ptr<DebuggerThread> SpawnDebuggerThread(
-    std::string threadName, std::function<void(std::string_view, std::stop_token &)> task) noexcept;
+    std::string threadName, SpawnFunction &&task) noexcept;
 
   /// Start the thread.
   void Start() noexcept;
@@ -43,8 +45,8 @@ public:
   static void AssertSigChildIsBlocked() noexcept;
 
 private:
-  std::function<void(std::string_view threadName, std::stop_token &tok)> mWork; // The task to run in the thread
-  std::jthread mThread;                                                         // The underlying std::thread
+  SpawnFunction mWork;  // The task to run in the thread
+  std::jthread mThread; // The underlying std::thread
   bool mStarted;
 };
 } // namespace mdb

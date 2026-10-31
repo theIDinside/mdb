@@ -4,6 +4,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_BUILD_TYPE Debug)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# Test subjects are never built with warnings (and therefore never fail on -Werror)
+add_compile_options(-w)
 
 message(MDB ROOT IS: ${MDB_ROOT})
 include(${MDB_ROOT}/cmake/AddTest.cmake)

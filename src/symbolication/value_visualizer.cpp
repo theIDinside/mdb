@@ -453,14 +453,6 @@ CStringSerializer::SerializeVariable(const Value &value, std::pmr::memory_resour
     return std::nullopt;
   }
 
-  auto type = value.GetType();
-  const auto baseEncoding = type->GetBaseType();
-  const u32 elemSize = type->size_of;
-
-  const bool isUtf16 =
-    elemSize == 2 && baseEncoding.has_value() &&
-    (baseEncoding.value() == BaseTypeEncoding::DW_ATE_UCS || baseEncoding.value() == BaseTypeEncoding::DW_ATE_UTF);
-
   std::pmr::string result{ allocator };
 
   std::optional<u32> null_terminator = {};
