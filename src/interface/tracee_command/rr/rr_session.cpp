@@ -720,7 +720,6 @@ Session::DoBreakpointsUpdate(const SymbolFile &newSymbolFile) noexcept
         sourceCodeFile->ReadInSourceCodeLineTable(entries);
         for (const auto &e : entries | std::views::filter(predicate)) {
           const auto pc = AddrPtr{ e.pc + newSymbolFile.mBaseAddress };
-          bool sameSourceLocDiffPc = false;
           if (!setAddresses.contains(pc)) {
             setAddresses.insert(pc);
             auto user = mUserBreakpoints.CreateBreakpointLocationUser<Breakpoint>(*this,
@@ -895,6 +894,7 @@ Session::DoResumeTask([[maybe_unused]] TaskInfo &t, RunType runType) noexcept
 bool
 Session::DoResumeTarget(RunType runType, bool forceResume) noexcept
 {
+  (void)forceResume;
   mdbrr::ResumeReplay resumeReplay{
     .resume_type = mdbrr::ResumeType::RR_RESUME, .direction = mdbrr::ReplayDirection::RR_DIR_FORWARD, .steps = 1
   };

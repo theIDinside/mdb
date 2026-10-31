@@ -63,7 +63,7 @@ Value::ValueIsBitField() const noexcept
     return false;
   }
 
-  return !(uField->mBitFieldSize == 0 && uField->mFieldOffset == 0);
+  return !(uField->mBitFieldSize == 0U && uField->mFieldOffset == 0U);
 }
 
 std::optional<BitField>
@@ -81,8 +81,8 @@ Value::Value(VarContext context,
   u32 memContentsOffset,
   std::shared_ptr<MemoryContentsObject> &&valueObject,
   DebugAdapterSerializer *serializer) noexcept
-    : mName(name), mMemoryContentsOffsets(memContentsOffset), mValueObject(std::move(valueObject)),
-      mVisualizer(serializer), mContext(std::move(context)), mCanonicalType(kind.Type())
+    : mName(name), mMemoryContentsOffsets(memContentsOffset), mCanonicalType(kind.Type()),
+      mValueObject(std::move(valueObject)), mVisualizer(serializer), mContext(std::move(context))
 {
   SetKind(&kind);
 }
@@ -94,8 +94,8 @@ Value::Value(VarContext context,
   std::shared_ptr<MemoryContentsObject> valueObject,
   DebugAdapterSerializer *serializer) noexcept
     : mName(memberName), mMemoryContentsOffsets(containingStructureOffset + kind.mObjectBaseOffset),
-      mValueObject(std::move(valueObject)), mVisualizer(serializer), mContext(std::move(context)),
-      mCanonicalType(CanonicalType::From(kind.mType))
+      mCanonicalType(CanonicalType::From(kind.mType)), mValueObject(std::move(valueObject)),
+      mVisualizer(serializer), mContext(std::move(context))
 {
   SetKind(&kind);
 }
@@ -105,8 +105,8 @@ Value::Value(VarContext context,
   u32 memContentsOffset,
   std::shared_ptr<MemoryContentsObject> valueObject,
   DebugAdapterSerializer *serializer) noexcept
-    : mName("value"), mMemoryContentsOffsets(memContentsOffset), mValueObject(std::move(valueObject)),
-      mVisualizer(serializer), mContext(std::move(context)), mCanonicalType(CanonicalType::From(type))
+    : mName("value"), mMemoryContentsOffsets(memContentsOffset), mCanonicalType(CanonicalType::From(type)),
+      mValueObject(std::move(valueObject)), mVisualizer(serializer), mContext(std::move(context))
 {
   SetKind(&type);
 }
@@ -117,8 +117,8 @@ Value::Value(VarContext context,
   u32 memContentsOffset,
   std::shared_ptr<MemoryContentsObject> valueObject,
   DebugAdapterSerializer *serializer) noexcept
-    : mName(std::move(name)), mMemoryContentsOffsets(memContentsOffset), mValueObject(std::move(valueObject)),
-      mVisualizer(serializer), mContext(std::move(context)), mCanonicalType(CanonicalType::From(type))
+    : mName(std::move(name)), mMemoryContentsOffsets(memContentsOffset), mCanonicalType(CanonicalType::From(type)),
+      mValueObject(std::move(valueObject)), mVisualizer(serializer), mContext(std::move(context))
 {
   SetKind(&type);
 }
@@ -128,8 +128,9 @@ Value::Value(VarContext context,
   SyntheticType type,
   u32 memContentsOffset,
   std::shared_ptr<MemoryContentsObject> valueObject) noexcept
-    : mName(std::move(name)), mMemoryContentsOffsets(memContentsOffset), mValueObject(std::move(valueObject)),
-      mContext(std::move(context)), mCanonicalType(CanonicalType::From(NonNull(*type.mLayoutType)))
+    : mName(std::move(name)), mMemoryContentsOffsets(memContentsOffset),
+      mCanonicalType(CanonicalType::From(NonNull(*type.mLayoutType))), mValueObject(std::move(valueObject)),
+      mContext(std::move(context))
 {
   SetKind(type);
 }
@@ -888,6 +889,7 @@ SynthesizedMemoryContentsObject::SynthesizedMemoryContentsObject(
 bool
 SynthesizedMemoryContentsObject::Refresh(tc::SupervisorState &supervisor) noexcept
 {
+  (void)supervisor;
   return true;
 }
 

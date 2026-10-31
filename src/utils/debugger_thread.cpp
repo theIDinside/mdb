@@ -8,8 +8,7 @@
 #include <sys/prctl.h>
 
 namespace mdb {
-DebuggerThread::DebuggerThread(
-  std::string &&name, std::function<void(std::string_view, std::stop_token &)> &&task) noexcept
+DebuggerThread::DebuggerThread(std::string &&name, SpawnFunction &&task) noexcept
     : mThreadName(std::move(name)), mWork(std::move(task)), mStarted(false)
 {
 }
@@ -38,7 +37,7 @@ DebuggerThread::BlockSigchildMustSucceed() noexcept
 
 /* static */
 std::unique_ptr<DebuggerThread>
-DebuggerThread::SpawnDebuggerThread(std::function<void(std::string_view, std::stop_token &)> task) noexcept
+DebuggerThread::SpawnDebuggerThread(SpawnFunction &&task) noexcept
 {
   auto thread = std::unique_ptr<DebuggerThread>(
     new DebuggerThread{ std::format("mdb-{}", GetNextDebuggerThreadNumber()), std::move(task) });
@@ -48,8 +47,7 @@ DebuggerThread::SpawnDebuggerThread(std::function<void(std::string_view, std::st
 
 /* static */
 std::unique_ptr<DebuggerThread>
-DebuggerThread::SpawnDebuggerThread(
-  std::string name, std::function<void(std::string_view, std::stop_token &)> task) noexcept
+DebuggerThread::SpawnDebuggerThread(std::string name, SpawnFunction &&task) noexcept
 {
   auto thread = std::unique_ptr<DebuggerThread>(new DebuggerThread{ std::move(name), std::move(task) });
   thread->Start();
@@ -67,9 +65,9 @@ DebuggerThread::Start() noexcept
     // Be doubly-certain that we have not meddled with SIGCHLD. This is of utmost importance to make signalfd
     // work.
     AssertSigChildIsBlocked();
-    auto cStringName = mThreadName.c_str();
+    const char *cStringName = mThreadName.c_str();
     VERIFY(prctl(PR_SET_NAME, cStringName) != -1, "Failed to set DebuggerThread name.");
-    mWork(mThreadName, token);
+    mWork(token);
   });
 }
 

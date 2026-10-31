@@ -613,33 +613,6 @@ Session::Create(Tid taskLeader, ui::dap::DebugAdapterManager *dap) noexcept
   return Tracer::AddSupervisor(UniquePtr<Session>(new Session{ taskLeader, dap }));
 }
 
-static inline Pid
-NativeInitCloneEvent(TaskInfo &cloningTask, const user_regs_struct &regs, Session &control) noexcept
-{
-  DBGLOG(core,
-    "Processing CLONE({}) for {}",
-    regs.orig_rax == SYS_clone ? "SYS_clone" : "SYS_clone3",
-    cloningTask.mTid);
-
-  // TODO: Make use of this once bugs and issues are resolve enough for this to be interesting.
-  const auto orig_rax = regs.orig_rax;
-  if (orig_rax == SYS_clone) {
-    const TPtr<void> pointerToStackPointerArg = sys_arg_n<2>(regs);
-    const TPtr<int> pointerToChildTidArg = sys_arg_n<4>(regs);
-    // const u64 tls = sys_arg_n<5>(regs);
-    auto childPid = control.ReadType(pointerToChildTidArg);
-    MDB_ASSERT(!control.HasTask(childPid), "Tracee controller already has task {} !", childPid);
-    return childPid;
-  }
-  if (orig_rax == SYS_clone3) {
-    const TraceePointer<clone_args> ptr = sys_arg<mdb::SysRegister::RDI>(regs);
-    const auto res = control.ReadType(ptr);
-    const auto childPid = control.ReadType(TPtr<pid_t>{ res.parent_tid });
-    return childPid;
-  }
-  PANIC("Unknown clone syscall!");
-}
-
 void
 Session::HandleEvent(TaskInfo &task, StopStatus stopStatus) noexcept
 {

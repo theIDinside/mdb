@@ -125,17 +125,16 @@ ProfilingLogger::ConfigureProfiling(const Path &path) noexcept
   sInstance->mClosed = false;
   sInstance->mEvents.Reserve(512 * 512);
   sInstance->mBufferedForSerialize.Reserve(512 * 512);
-  sInstance->mSerializerThread =
-    DebuggerThread::SpawnDebuggerThread("Profiler", [&](std::string_view, std::stop_token &token) {
-      while (!token.stop_requested()) {
-        {
-          std::unique_lock lock(sInstance->mEventsMutex);
-          sInstance->mNotifySerializerThread.wait(lock);
-        }
-        sInstance->SerializeBuffered();
+  sInstance->mSerializerThread = DebuggerThread::SpawnDebuggerThread("Profiler", [&](std::stop_token &token) {
+    while (!token.stop_requested()) {
+      {
+        std::unique_lock lock(sInstance->mEventsMutex);
+        sInstance->mNotifySerializerThread.wait(lock);
       }
-      sInstance->FlushAndClose();
-    });
+      sInstance->SerializeBuffered();
+    }
+    sInstance->FlushAndClose();
+  });
 }
 
 void

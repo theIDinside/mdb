@@ -375,7 +375,7 @@ u32
 Field::SizeBytes()
 {
   // If it's not a bit field, return this field's type's "natural" size
-  if (mFieldOffset == 0 && mBitFieldSize == 0) {
+  if (mFieldOffset == u32{ 0 } && mBitFieldSize == u32{ 0 }) {
     return mType->SizeBytes();
   }
   // Return bitfield as a size in bytes
@@ -396,7 +396,7 @@ Type::Type(ObjectFile *definingObjectFile,
   bool isTypedef) noexcept
     : mName(target->mName), mCompUnitDieReference(debugInfoEntryReference),
       mModifier{ ToTypeModifierWillPanic(debugInfoEntryReference.GetDie()->mTag) }, mIsTypedef(isTypedef),
-      size_of(sizeOf), mTypeChain(target), mDwarfTag(debugInfoEntryTag), mDefiningObjectFile(definingObjectFile)
+      size_of(sizeOf), mTypeChain(target), mDefiningObjectFile(definingObjectFile), mDwarfTag(debugInfoEntryTag)
 {
 }
 
@@ -407,7 +407,7 @@ Type::Type(ObjectFile *definingObjectFile,
   std::string_view name) noexcept
     : mName(name), mCompUnitDieReference(debugInfoEntryReference),
       mModifier{ ToTypeModifierWillPanic(debugInfoEntryReference.GetDie()->mTag) }, mIsTypedef(false),
-      size_of(sizeOf), mTypeChain(nullptr), mDwarfTag(debugInfoEntryTag), mDefiningObjectFile(definingObjectFile)
+      size_of(sizeOf), mTypeChain(nullptr), mDefiningObjectFile(definingObjectFile), mDwarfTag(debugInfoEntryTag)
 {
 }
 
@@ -419,8 +419,8 @@ Type::Type(std::string_view name, size_t size) noexcept
 
 Type::Type(Type &&o) noexcept
     : mName(o.mName), mCompUnitDieReference(o.mCompUnitDieReference), mModifier(o.mModifier), size_of(o.size_of),
-      mIsResolved(o.mIsResolved), mTypeChain(o.mTypeChain), mFields(std::move(o.mFields)), mBaseType(o.mBaseType),
-      mDefiningObjectFile(o.mDefiningObjectFile)
+      mIsResolved(o.mIsResolved), mTypeChain(o.mTypeChain), mDefiningObjectFile(o.mDefiningObjectFile),
+      mFields(std::move(o.mFields)), mBaseType(o.mBaseType)
 {
 }
 

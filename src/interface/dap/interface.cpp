@@ -373,16 +373,16 @@ DebugAdapterManager::FlushEvents() noexcept
   auto scope = mEventsAllocator->ScopeAllocation();
 
   std::pmr::vector<UIResultPtr> tmp{ scope.GetAllocator() };
-  constexpr ssize_t maxToFlush = 64;
+  constexpr size_t maxToFlush = 64;
   tmp.reserve(maxToFlush);
-  const auto count = std::min<ssize_t>(static_cast<ssize_t>(mDelayedEvents.size()), maxToFlush);
+  const auto count = std::min(mDelayedEvents.size(), maxToFlush);
   {
     std::lock_guard lock(m);
-    std::copy(mDelayedEvents.begin(), mDelayedEvents.begin() + count, std::back_inserter(tmp));
+    std::copy(mDelayedEvents.begin(), mDelayedEvents.begin() + ssize_t(count), std::back_inserter(tmp));
     if (count == mDelayedEvents.size()) {
       mDelayedEvents.clear();
     } else {
-      mDelayedEvents.erase(mDelayedEvents.begin(), mDelayedEvents.begin() + count);
+      mDelayedEvents.erase(mDelayedEvents.begin(), mDelayedEvents.begin() + ssize_t(count));
     }
   }
 
@@ -716,7 +716,7 @@ DebugAdapterManager::WriteSerializedProtocolMessage(std::string_view output) con
 #endif
 
   const auto result = ::writev(mWriteFd, iov.data(), 2);
-  VERIFY(result == (header.Length() + static_cast<ssize_t>(output.size())),
+  VERIFY(result == ssize_t(header.Length() + static_cast<ssize_t>(output.size())),
     "Required flush-write but wrote partial content: {} out of {}",
     result,
     header.Length() + output.size());

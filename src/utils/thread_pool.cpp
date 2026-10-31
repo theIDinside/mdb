@@ -51,8 +51,8 @@ ThreadPool::Init(u32 pool_size) noexcept
 {
   mThreadPool.reserve(pool_size);
   for (auto i = 0U; i < pool_size; ++i) {
-    mThreadPool.emplace_back(DebuggerThread::SpawnDebuggerThread(std::format("PoolWorker-{}", i),
-      [&](std::string_view name, std::stop_token &token) { WorkerLoop(name, token); }));
+    mThreadPool.emplace_back(
+      DebuggerThread::SpawnDebuggerThread([&](std::stop_token &token) { WorkerLoop(token); }));
   }
 }
 
@@ -83,7 +83,7 @@ ThreadPool::TakeFront()
 }
 
 void
-ThreadPool::WorkerLoop(std::string_view threadName, std::stop_token &stop_token) noexcept
+ThreadPool::WorkerLoop(std::stop_token &stop_token) noexcept
 {
   while (!stop_token.stop_requested()) {
     std::shared_ptr<TaskBase> job = nullptr;

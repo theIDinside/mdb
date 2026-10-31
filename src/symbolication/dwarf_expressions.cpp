@@ -59,7 +59,7 @@ ExprByteCodeInterpreter::ExprByteCodeInterpreter(int frameLevel,
   std::span<const u8> byteStream,
   ObjectFile *objectFile) noexcept
     : mFrameLevel(frameLevel), mStack(), mSupervisor(tc), mTask(t), mByteStream(byteStream),
-      mReader(nullptr, byteStream.data(), byteStream.size()), mObjectFile(objectFile)
+      mObjectFile(objectFile), mReader(nullptr, byteStream.data(), byteStream.size())
 {
 }
 
@@ -70,7 +70,7 @@ ExprByteCodeInterpreter::ExprByteCodeInterpreter(int frameLevel,
   std::span<const u8> frameBaseCode,
   ObjectFile *objectFile) noexcept
     : mFrameLevel(frameLevel), mStack(), mSupervisor(tc), mTask(t), mByteStream(byteStream),
-      mFrameBaseProgram(frameBaseCode), mReader(this->mByteStream), mObjectFile(objectFile)
+      mFrameBaseProgram(frameBaseCode), mObjectFile(objectFile), mReader(this->mByteStream)
 {
 }
 
@@ -497,7 +497,7 @@ op_piece(ExprByteCodeInterpreter &i) noexcept
 }
 
 void
-op_nop(ExprByteCodeInterpreter &i) noexcept
+op_nop(ExprByteCodeInterpreter &) noexcept
 {
 }
 
@@ -561,6 +561,7 @@ op_implicit_value(ExprByteCodeInterpreter &i) noexcept
 void
 op_stack_value(ExprByteCodeInterpreter &i) noexcept
 {
+  (void)i;
   // DW_OP_stack_value indicates that the value at the top of the stack is the actual value,
   // not a memory address. This is a semantic marker - no stack manipulation needed.
 }
@@ -666,6 +667,7 @@ op_gnu_push_tls_address(ExprByteCodeInterpreter &i) noexcept
 void
 op_gnu_uninit(ExprByteCodeInterpreter &i) noexcept
 {
+  (void)i;
   // Marks the preceding value as uninitialized. This is a semantic marker.
 }
 

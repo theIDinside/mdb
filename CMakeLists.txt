@@ -281,6 +281,15 @@ set(MIDAS_DEBUG_FLAGS "-g3 -O0 -fpermissive")
 set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto -Wno-exceptions")
 set(MIDAS_TEST_FLAGS "${MIDAS_DEBUG_FLAGS}")
 
+set(MDB_NO_ERROR_WARNINGS
+  missing-designated-field-initializers
+)
+
+list(TRANSFORM MDB_NO_ERROR_WARNINGS PREPEND "-Wno-error=")
+list(JOIN MDB_NO_ERROR_WARNINGS " " MDB_NO_ERROR_FLAGS)
+set(MIDAS_RELEASE_FLAGS "${MIDAS_RELEASE_FLAGS} ${MDB_NO_ERROR_FLAGS}")
+message("Setting release flags to: ${MIDAS_RELEASE_FLAGS}")
+
 if(USE_DWARF5)
   set(MIDAS_DEBUG_FLAGS "${MIDAS_DEBUG_FLAGS} -gdwarf-5 -fdebug-types-section")
   message("Configuring compiler to emit DWARF version 5 debug symbols")
@@ -310,9 +319,9 @@ message("Test & building test subjects has been configured to ${BUILD_MDB_TESTS}
 if(BUILD_MDB_TESTS)
   message("Testing enabled...")
   add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/dependencies/googletest)
-  # Suppress warnings from googletest headers
-  target_compile_options(gtest PRIVATE -Wno-character-conversion)
-  target_compile_options(gtest_main PRIVATE -Wno-character-conversion)
+  # Test code is never built with warnings (and therefore never fails on -Werror)
+  target_compile_options(gtest PRIVATE -w)
+  target_compile_options(gtest_main PRIVATE -w)
   add_subdirectory(test)
   enable_testing()
   # Unit Testing (using googletest)
@@ -437,17 +446,16 @@ if(MDB_PROFILE_LOGGER)
   target_compile_definitions(mdb PRIVATE MDB_PROFILE_LOGGER)
 endif()
 
-target_link_options(mdb PRIVATE "-fuse-ld=lld")
-
 # Check if the compiler name contains gcc or clang
 if (${CMAKE_CXX_COMPILER_ID} MATCHES "GNU")
-  set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto -Wno-error=dangling-reference")
+  set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -Wno-error=dangling-reference")
   target_compile_definitions(mdb PRIVATE COMPILERUSED_GCC)
 elseif ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-  set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror -flto")
+  set(MIDAS_RELEASE_FLAGS "-O3 -Wall -Wextra -Werror")
 else ()
   error("Unknown compiler")
 endif ()
+
 
 set(CMAKE_CXX_CLANG_TIDY
   clang-tidy;

@@ -115,9 +115,9 @@ public:
 
 class SymbolLocation
 {
-  friend struct Symbol;
+  friend class Symbol;
 
-  LocKind mKind;
+  LocKind mKind = LocKind::DwarfExpression;
   // Offset into section where the location list can be read from
   u32 mLocListOffset;
   std::span<const u8> mDwarfExpression;
@@ -132,10 +132,7 @@ public:
   {
   }
 
-  explicit SymbolLocation(u32 locListOffset) noexcept
-      : mKind(LocKind::UnreadLocationList), mLocListOffset(locListOffset)
-  {
-  }
+  explicit SymbolLocation(u32 locListOffset) noexcept : mLocListOffset(locListOffset) {}
 
   void
   SetLocationList(LocationList *locList) noexcept
