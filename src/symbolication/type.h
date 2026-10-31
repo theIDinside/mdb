@@ -397,7 +397,8 @@ public:
   {
     Type *t = this;
     while (t) {
-      if (t->mIsDeclaration) {
+      // Typedefs can sit under qualifiers too: `const std::string` is const -> typedef -> class.
+      if (t->mIsDeclaration || t->mIsTypedef) {
         t = t->mTypeChain;
         continue;
       }
