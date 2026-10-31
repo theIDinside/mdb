@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "typeread.h"
+#include "common.h"
 
 // mdb
 #include <symbolication/block.h>
@@ -283,9 +284,10 @@ void
 TypeSymbolicationContext::ProcessInheritanceDie(DieReference die) noexcept
 {
   const auto location = die.ReadAttribute(Attribute::DW_AT_data_member_location);
-  const auto type_id = die.ReadAttribute(Attribute::DW_AT_type);
+  const auto typeId = die.ReadAttribute(Attribute::DW_AT_type);
+  MDB_ASSERT(typeId.has_value(), "Expected typeId to have value, die={:x}", die.SectionOffset());
 
-  auto containingCompUnitDieReference = mObjectRef.GetDebugInfoEntryReference(type_id->AsUnsignedValue());
+  auto containingCompUnitDieReference = mObjectRef.GetDebugInfoEntryReference(typeId->AsUnsignedValue());
   sym::Type *type = mObjectRef.GetTypeStorage()->GetOrCreateNewType(containingCompUnitDieReference->AsIndexed());
   TypeSymbolicationContext ctx = TypeSymbolicationContext::ContinueWith(*this, type);
   ctx.ResolveType();
