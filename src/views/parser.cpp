@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "parser.h"
+#include "views/ast.h"
 
 // mdb
 #include <views/lexer.h>
@@ -533,6 +534,11 @@ Parser::IsDeclared(const ViewDefinition &view, std::string_view name) const noex
          std::ranges::any_of(view.mFunctions, [name](const FunctionDef &fn) { return fn.mName == name; });
 }
 
+#define EXPECT_OK(Token, Context)                                                                                 \
+  if (Failed() || !Expect(Token, Context)) {                                                                      \
+    return false;                                                                                                 \
+  }
+
 bool
 Parser::ParseUsing(ViewDefinition &view) noexcept
 {
@@ -546,9 +552,7 @@ Parser::ParseUsing(ViewDefinition &view) noexcept
     Error(name, std::format("'{}' is already defined", name.mText));
     return false;
   }
-  if (!Expect(TokenKind::Equal, "after the using name")) {
-    return false;
-  }
+  EXPECT_OK(TokenKind::Equal, "after the using name");
 
   UsingBinding binding{ .mName = name.mText, .mLoc = name.mLoc };
   if (Peek().IsIdentifier("typeof") && Peek(1).Is(TokenKind::LParen)) {
@@ -556,21 +560,37 @@ Parser::ParseUsing(ViewDefinition &view) noexcept
     Advance();
     binding.mKind = UsingBinding::Kind::TypeOf;
     binding.mExpr = ParseExpression();
-    if (Failed() || !Expect(TokenKind::RParen, "to close typeof(")) {
-      return false;
-    }
+    EXPECT_OK(TokenKind::RParen, "type close typeof(");
   } else if (Peek().IsIdentifier("template_arg") && Peek(1).Is(TokenKind::LParen)) {
     Advance();
     Advance();
-    if (!Peek().Is(TokenKind::Integer)) {
-      Error(Peek(), "template_arg() takes the index of a template argument, e.g. template_arg(0)");
+
+    if (Peek().Is(TokenKind::Integer)) {
+      binding.mKind = UsingBinding::Kind::TemplateArgument;
+    } else if (Peek().Is(TokenKind::Identifier)) {
+      binding.mKind = UsingBinding::Kind::TemplateArgumentOf;
+      const Token &templateOf = Advance();
+      binding.mOf = templateOf.mText;
+
+      if (!IsDeclared(view, templateOf.mText)) {
+        Error(templateOf,
+          std::format("{} is not defined. Define the type before using it in template_arg", templateOf.mText));
+        return false;
+      }
+
+      EXPECT_OK(TokenKind::Comma, "argument list to template_arg-of-type variant");
+      if (!Peek().Is(TokenKind::Integer)) {
+        Error(Peek(), "template_arg(Type, N) takes the index of a template argument after the type");
+        return false;
+      }
+    } else {
+      Error(Peek(),
+        "template_arg() takes the index of a template argument, e.g. template_arg(0), or a type name and the "
+        "index of a template argument e.g. template_arg(Foo, 0)");
       return false;
     }
-    binding.mKind = UsingBinding::Kind::TemplateArgument;
     binding.mIndex = static_cast<u32>(Advance().mInteger);
-    if (!Expect(TokenKind::RParen, "to close template_arg(")) {
-      return false;
-    }
+    EXPECT_OK(TokenKind::RParen, "to close template_arg(")
   } else {
     TypeExpr type;
     if (!ParseType(type)) {

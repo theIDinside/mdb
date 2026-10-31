@@ -22,6 +22,18 @@ view std::vector<bool,.*> {
   }
 }
 
+view std::unordered_map<.*> {
+  using Table = typeof(_M_h)
+  using Value = template_arg(Table, 1)          // std::pair<const K, T>, with its layout from DWARF
+  summary "size={_M_h._M_element_count}"
+  children (size: _M_h._M_element_count) {
+    for (auto node = _M_h._M_before_begin._M_nxt; node; node = node->_M_nxt) {
+      auto entry = (Value*)(node + 1);
+      yield [entry->first] entry->second;
+    }
+  }
+}
+
 // std::array view
 view std::array<.*> {
   using T = template_arg(0)
