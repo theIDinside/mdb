@@ -1775,9 +1775,10 @@ struct Attach final : public UICommand
   Attach(UICommandArg arg,
     std::string_view configToken,
     AttachArgs args,
+    bool stopAtEntryAfterExec,
     std::function<void(tc::SupervisorState &)> &&configRequest) noexcept
       : UICommand{ std::move(arg) }, attachArgs{ args }, mConfigToken(configToken),
-        mConfigRequest(std::move(configRequest))
+        mStopAtEntryAfterExec(stopAtEntryAfterExec), mConfigRequest(std::move(configRequest))
   {
   }
 
@@ -1786,7 +1787,7 @@ struct Attach final : public UICommand
   void
   Execute() noexcept final
   {
-    auto *supervisor = Tracer::SessionAttach(attachArgs, mDebugAdapterManager);
+    auto *supervisor = Tracer::SessionAttach(attachArgs, mDebugAdapterManager, mStopAtEntryAfterExec);
     if (!supervisor) {
       return WriteResponse(
         ErrorResponse{ Request, this, std::make_optional("Could not attach to process."), std::nullopt });
@@ -1804,6 +1805,7 @@ struct Attach final : public UICommand
 
   AttachArgs attachArgs;
   std::string_view mConfigToken;
+  bool mStopAtEntryAfterExec;
   std::function<void(tc::SupervisorState &)> mConfigRequest;
   DEFINE_NAME("attach");
   RequiredArguments({ kSessionType });
@@ -1811,6 +1813,7 @@ struct Attach final : public UICommand
   DefineArgTypes({ "port", FieldType::Int },
     { "host", FieldType::String },
     { "pid", FieldType::Int },
+    { "stopAtEntryAfterExec", FieldType::Boolean },
     {
       kSessionType,
       FieldType::Enumeration,
@@ -1828,6 +1831,9 @@ struct Attach final : public UICommand
         invalid.emplace_back(ArgumentError::RequiredNumberType(), required);
       }
     }
+    if (args.Contains("stopAtEntryAfterExec") && !args.Get("stopAtEntryAfterExec")->IsBoolean()) {
+      invalid.emplace_back(ArgumentError::RequiredBooleanType(), "stopAtEntryAfterExec");
+    }
     return invalid;
   }
 
@@ -1844,8 +1850,13 @@ struct Attach final : public UICommand
 
     Pid processId = static_cast<Pid>(*args.Get("processId")->GetNumber());
     MDB_ASSERT(processId > 0, "Expect a process id > 0 (technically 1 too, since it's systemd)");
-    return RefPtr<Attach>::MakeShared(
-      std::move(arg), *configTokenValue, PtraceAttachArgs{ processId }, [](tc::SupervisorState &process) {
+    const bool stopAtEntryAfterExec =
+      args.Contains("stopAtEntryAfterExec") ? *args.Get("stopAtEntryAfterExec")->UncheckedGetBoolean() : false;
+    return RefPtr<Attach>::MakeShared(std::move(arg),
+      *configTokenValue,
+      PtraceAttachArgs{ processId },
+      stopAtEntryAfterExec,
+      [](tc::SupervisorState &process) {
         auto &supervisor = static_cast<tc::ptrace::Session &>(process);
         supervisor.ProcessDeferredEvents();
         supervisor.ProcessQueuedUnhandled(supervisor.TaskLeaderTid());

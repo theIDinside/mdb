@@ -206,11 +206,15 @@ protected:
   // applications on Linux)
   ParsedAuxiliaryVector mParsedAuxiliaryVector;
   LinkerLoaderDebug mLinkerDebugData;
+  bool mStopAtEntryAfterExec{ true };
 
 public:
   const SupervisorType mSupervisorType;
 
-  SupervisorState(SupervisorType type, Tid taskLeader, ui::dap::DebugAdapterManager *client) noexcept;
+  SupervisorState(SupervisorType type,
+    Tid taskLeader,
+    ui::dap::DebugAdapterManager *client,
+    bool stopAtEntryAfterExec = true) noexcept;
   virtual ~SupervisorState() noexcept = default;
 
   sym::Unwinder *GetNullUnwinder() const noexcept;
@@ -244,6 +248,8 @@ public:
   void EmitBreakpointEvent(
     std::string_view reason, const UserBreakpoint &bp, std::optional<std::string> message) noexcept;
   void EmitAllStopped() noexcept;
+
+  void SetStopAfterExec(bool value) noexcept;
 
   u32 ThreadsCount() const noexcept;
 

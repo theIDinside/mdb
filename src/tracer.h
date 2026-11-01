@@ -194,7 +194,8 @@ public:
   // processes. In the future, when we've written a new Callstack UI, we can remove all this nonsense, because
   // then, one session can be responsible for multiple processes. Until then, we're stuck with this 1979 version of
   // a protocol.
-  static tc::SupervisorState *SessionAttach(const AttachArgs &args, ui::dap::DebugAdapterManager *dap) noexcept;
+  static tc::SupervisorState *SessionAttach(
+    const AttachArgs &args, ui::dap::DebugAdapterManager *dap, bool stopAtEntryAfterExec = false) noexcept;
 
   static void CacheObjectFile(std::shared_ptr<ObjectFile> objectFile) noexcept;
   static std::shared_ptr<ObjectFile> LookupSymbolFile(std::string_view pathStr) noexcept;

@@ -419,8 +419,8 @@ Session::SetProgramCounterTo(TaskInfo &task, AddrPtr addr) noexcept
   cache.mUser.rip = addr;
 }
 
-Session::Session(Tid taskLeader, ui::dap::DebugAdapterManager *dap) noexcept
-    : SupervisorState(SupervisorType::Native, taskLeader, dap)
+Session::Session(Tid taskLeader, ui::dap::DebugAdapterManager *dap, bool stopAtEntryAfterExec) noexcept
+    : SupervisorState(SupervisorType::Native, taskLeader, dap, stopAtEntryAfterExec)
 {
 }
 
@@ -605,16 +605,16 @@ Session::ForkExec(ui::dap::DebugAdapterManager *debugAdapterClient,
 
 /* static */
 Session *
-Session::Create(Tid taskLeader, ui::dap::DebugAdapterManager *dap) noexcept
+Session::Create(Tid taskLeader, ui::dap::DebugAdapterManager *dap, bool stopAtEntryAfterExec) noexcept
 {
   MDB_ASSERT(taskLeader > 0, "Invalid pid as taskleader {}", taskLeader);
-  return Tracer::AddSupervisor(UniquePtr<Session>(new Session{ taskLeader, dap }));
+  return Tracer::AddSupervisor(UniquePtr<Session>(new Session{ taskLeader, dap, stopAtEntryAfterExec }));
 }
 
 Session *
-Session::AttachExisting(Tid taskLeader, ui::dap::DebugAdapterManager *dap) noexcept
+Session::AttachExisting(Tid taskLeader, ui::dap::DebugAdapterManager *dap, bool stopAtEntryAfterExec) noexcept
 {
-  auto *supervisor = Session::Create(taskLeader, dap);
+  auto *supervisor = Session::Create(taskLeader, dap, stopAtEntryAfterExec);
   supervisor->CreateNewTask(taskLeader, "attached");
   supervisor->OpenMemoryFile();
   supervisor->ConfigureBreakpointBehavior(BreakpointBehavior::StopAllThreadsWhenHit);
