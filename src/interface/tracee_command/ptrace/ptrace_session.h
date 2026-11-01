@@ -6,6 +6,7 @@
 #include <interface/tracee_command/supervisor_state.h>
 #include <mdbsys/stop_status.h>
 #include <memory_resource>
+#include <sys/ptrace.h>
 #include <sys/user.h>
 #include <utils/scoped_fd.h>
 
@@ -16,6 +17,9 @@ class DebugAdapterManager;
 }
 
 namespace mdb::tc::ptrace {
+
+inline constexpr unsigned long kPtraceOptions = PTRACE_O_TRACEFORK | PTRACE_O_TRACEEXEC | PTRACE_O_TRACECLONE |
+                                                PTRACE_O_TRACESYSGOOD | PTRACE_O_TRACEVFORK | PTRACE_O_TRACEEXIT;
 
 struct RegisterCache
 {
@@ -58,6 +62,7 @@ public:
     std::optional<BreakpointBehavior> breakpointBehavior) noexcept;
 
   static Session *Create(Tid taskLeader, ui::dap::DebugAdapterManager *dap) noexcept;
+  static Session *AttachExisting(Tid taskLeader, ui::dap::DebugAdapterManager *dap) noexcept;
   static void QueueUnhandledPtraceEvent(PtraceEvent event) noexcept;
   void ProcessQueuedUnhandled(Pid childPid) noexcept;
 

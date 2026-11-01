@@ -118,6 +118,7 @@ class Tracer
 {
 
   static TracerProcess sApplicationState;
+  static bool sKeepAlive;
   static termios sOriginalTty;
   static winsize sTerminalWindowSize;
   static Tracer *sTracerInstance;
@@ -164,6 +165,7 @@ public:
   static Tracer &Get() noexcept;
   static ui::dap::DebugAdapterManager &GetDebugAdapterManager() noexcept;
   static void SetDebugAdapterManager(ui::dap::DebugAdapterManager *dap) noexcept;
+  static void SetKeepAlive(bool keepAlive) noexcept;
 
   void OnDisconnectOrExit(tc::SupervisorState *supervisor) noexcept;
   tc::SupervisorState *GetController(pid_t pid) noexcept;
@@ -192,7 +194,7 @@ public:
   // processes. In the future, when we've written a new Callstack UI, we can remove all this nonsense, because
   // then, one session can be responsible for multiple processes. Until then, we're stuck with this 1979 version of
   // a protocol.
-  tc::SupervisorState *SessionAttach(const AttachArgs &args) noexcept;
+  static tc::SupervisorState *SessionAttach(const AttachArgs &args, ui::dap::DebugAdapterManager *dap) noexcept;
 
   static void CacheObjectFile(std::shared_ptr<ObjectFile> objectFile) noexcept;
   static std::shared_ptr<ObjectFile> LookupSymbolFile(std::string_view pathStr) noexcept;

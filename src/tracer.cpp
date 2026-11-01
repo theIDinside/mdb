@@ -45,7 +45,9 @@
 
 // stdlib
 #include <algorithm>
+#include <cerrno>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <utility>
 
@@ -54,6 +56,7 @@
 #include <fcntl.h>
 #include <sys/personality.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 namespace mdb {
@@ -104,6 +107,12 @@ Tracer::SetDebugAdapterManager(ui::dap::DebugAdapterManager *dap) noexcept
 }
 
 void
+Tracer::SetKeepAlive(bool keepAlive) noexcept
+{
+  sKeepAlive = keepAlive;
+}
+
+void
 Tracer::OnDisconnectOrExit(tc::SupervisorState *supervisor) noexcept
 {
   auto it = FindSupervisor(supervisor);
@@ -113,7 +122,7 @@ Tracer::OnDisconnectOrExit(tc::SupervisorState *supervisor) noexcept
   mDetachedProcesses.push_back(std::move(*it));
   mTracedProcesses.erase(it);
 
-  if (mTracedProcesses.empty()) {
+  if (mTracedProcesses.empty() && !sKeepAlive) {
     EventSystem::Get().PushInternalEvent(TerminateDebugging{});
   }
 }
@@ -133,9 +142,7 @@ tc::SupervisorState *
 Tracer::GetController(pid_t pid) noexcept
 {
   auto it = std::ranges::find_if(mTracedProcesses, [&pid](auto &t) { return t->TaskLeaderTid() == pid; });
-  MDB_ASSERT(it != std::end(mTracedProcesses), "Could not find target {} pid", pid);
-
-  return it->get();
+  return it == std::end(mTracedProcesses) ? nullptr : it->get();
 }
 
 void
@@ -230,7 +237,7 @@ Tracer::HandleInternalEvent(const InternalEvent &evt) noexcept
       mTracedProcesses.erase(it);
     }
 
-    if (mTracedProcesses.empty()) {
+    if (mTracedProcesses.empty() && !sKeepAlive) {
       sApplicationState = TracerProcess::RequestedShutdown;
     }
   } break;
@@ -292,11 +299,33 @@ Tracer::KillUI() noexcept
 }
 
 static tc::SupervisorState *
-PtraceAttach(const PtraceAttachArgs &args) noexcept
+PtraceAttach(const PtraceAttachArgs &args, ui::dap::DebugAdapterManager *dap) noexcept
 {
   auto supervisor = Tracer::Get().GetController(args.pid);
   if (!supervisor) {
-    TODO("Implement attaching to running process that was not previously ptraced.");
+    EventSystem::Get().InitWaitStatusManager();
+    if (::ptrace(PTRACE_SEIZE, args.pid, 0, tc::ptrace::kPtraceOptions) == -1) {
+      DBGLOG(core, "PTRACE_SEIZE {} failed: {}", args.pid, strerror(errno));
+      return nullptr;
+    }
+    if (::ptrace(PTRACE_INTERRUPT, args.pid, 0, 0) == -1) {
+      DBGLOG(core, "PTRACE_INTERRUPT {} failed: {}", args.pid, strerror(errno));
+      (void)::ptrace(PTRACE_DETACH, args.pid, 0, 0);
+      return nullptr;
+    }
+
+    int status = 0;
+    pid_t waited = -1;
+    do {
+      waited = waitpid(args.pid, &status, __WALL);
+    } while (waited == -1 && errno == EINTR);
+    if (waited == -1 || !WIFSTOPPED(status)) {
+      DBGLOG(core, "waitpid for attached process {} returned {} with status {}", args.pid, waited, status);
+      (void)::ptrace(PTRACE_DETACH, args.pid, 0, 0);
+      return nullptr;
+    }
+    DBGLOG(core, "Attached process {} stopped with status {}", args.pid, status);
+    return tc::ptrace::Session::AttachExisting(args.pid, dap);
   }
   // The DAP request was made for a supervisor that was not of the right type.
   if (supervisor->mSupervisorType != tc::SupervisorType::Native) {
@@ -306,13 +335,14 @@ PtraceAttach(const PtraceAttachArgs &args) noexcept
   return supervisor;
 }
 
+/* static */
 tc::SupervisorState *
-Tracer::SessionAttach(const AttachArgs &args) noexcept
+Tracer::SessionAttach(const AttachArgs &args, ui::dap::DebugAdapterManager *dap) noexcept
 {
   using MatchResult = tc::SupervisorState *;
 
   return std::visit(
-    Match{ [&](const PtraceAttachArgs &args) -> MatchResult { return PtraceAttach(args); },
+    Match{ [&](const PtraceAttachArgs &args) -> MatchResult { return PtraceAttach(args, dap); },
       [&](const RRAttachArgs &) -> MatchResult { TODO("Possibly never implement this, after all"); } },
     args);
 }

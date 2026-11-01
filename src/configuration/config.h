@@ -51,6 +51,7 @@ public:
   DebugAdapterInterface mDebugAdapterInterface;
   int mWaitForConnectionTimeout;
   std::vector<Channel> mLogChannels;
+  bool mKeepAlive{ false };
 
   static InitializationConfiguration *ConfigureWithParser(CommandLineRegistry &parser) noexcept;
 };

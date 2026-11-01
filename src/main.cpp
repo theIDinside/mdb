@@ -25,6 +25,7 @@ int Tracer::sLastTraceEventTime = 0;
 termios Tracer::sOriginalTty = {};
 winsize Tracer::sTerminalWindowSize = {};
 TracerProcess Tracer::sApplicationState = TracerProcess::Running;
+bool Tracer::sKeepAlive = false;
 ThreadPool *ThreadPool::sGlobalThreadPool = new ThreadPool{};
 const char *ui::dap::DebugAdapterManager::gSocketPath = nullptr;
 } // namespace mdb

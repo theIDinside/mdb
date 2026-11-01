@@ -481,15 +481,13 @@ ConfigurePtraceSettings(pid_t pid)
 {
   // PTRACE_O_TRACEEXIT stops on exit of a task, but it's not at a point where we can do anything. At which point
   // my question becomes: what's the purpose? I'd rather just be notified that a task has died and that's that.
-  const auto options = PTRACE_O_TRACEFORK | PTRACE_O_TRACEEXEC | PTRACE_O_TRACECLONE | PTRACE_O_TRACESYSGOOD |
-                       PTRACE_O_TRACEVFORK | PTRACE_O_TRACEEXIT;
-  if (-1 == ::ptrace(PTRACE_SETOPTIONS, pid, 0, options)) {
+  if (-1 == ::ptrace(PTRACE_SETOPTIONS, pid, 0, kPtraceOptions)) {
     int stat;
     if (-1 == waitpid(pid, &stat, 0)) {
       perror("failed to set new target & options");
       PANIC("Exiting");
     }
-    if (-1 == ::ptrace(PTRACE_SETOPTIONS, pid, 0, options)) {
+    if (-1 == ::ptrace(PTRACE_SETOPTIONS, pid, 0, kPtraceOptions)) {
       PANIC(std::format("Failed to set PTRACE options for {}: {}", pid, strerror(errno)));
     }
   }
@@ -611,6 +609,17 @@ Session::Create(Tid taskLeader, ui::dap::DebugAdapterManager *dap) noexcept
 {
   MDB_ASSERT(taskLeader > 0, "Invalid pid as taskleader {}", taskLeader);
   return Tracer::AddSupervisor(UniquePtr<Session>(new Session{ taskLeader, dap }));
+}
+
+Session *
+Session::AttachExisting(Tid taskLeader, ui::dap::DebugAdapterManager *dap) noexcept
+{
+  auto *supervisor = Session::Create(taskLeader, dap);
+  supervisor->CreateNewTask(taskLeader, "attached");
+  supervisor->OpenMemoryFile();
+  supervisor->ConfigureBreakpointBehavior(BreakpointBehavior::StopAllThreadsWhenHit);
+  supervisor->QueuePending(StopStatus{ .ws = StopKind::Stopped, .mPid = taskLeader, .uSignal = 0 });
+  return supervisor;
 }
 
 void
