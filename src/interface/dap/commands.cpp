@@ -1775,7 +1775,7 @@ struct Attach final : public UICommand
   Attach(UICommandArg arg,
     std::string_view configToken,
     AttachArgs args,
-    bool stopAtEntryAfterExec,
+    std::optional<bool> stopAtEntryAfterExec,
     std::function<void(tc::SupervisorState &)> &&configRequest) noexcept
       : UICommand{ std::move(arg) }, attachArgs{ args }, mConfigToken(configToken),
         mStopAtEntryAfterExec(stopAtEntryAfterExec), mConfigRequest(std::move(configRequest))
@@ -1805,7 +1805,7 @@ struct Attach final : public UICommand
 
   AttachArgs attachArgs;
   std::string_view mConfigToken;
-  bool mStopAtEntryAfterExec;
+  std::optional<bool> mStopAtEntryAfterExec;
   std::function<void(tc::SupervisorState &)> mConfigRequest;
   DEFINE_NAME("attach");
   RequiredArguments({ kSessionType });
@@ -1850,8 +1850,10 @@ struct Attach final : public UICommand
 
     Pid processId = static_cast<Pid>(*args.Get("processId")->GetNumber());
     MDB_ASSERT(processId > 0, "Expect a process id > 0 (technically 1 too, since it's systemd)");
-    const bool stopAtEntryAfterExec =
-      args.Contains("stopAtEntryAfterExec") ? *args.Get("stopAtEntryAfterExec")->UncheckedGetBoolean() : false;
+    const std::optional<bool> stopAtEntryAfterExec =
+      args.Contains("stopAtEntryAfterExec")
+        ? std::make_optional(*args.Get("stopAtEntryAfterExec")->UncheckedGetBoolean())
+        : std::nullopt;
     return RefPtr<Attach>::MakeShared(std::move(arg),
       *configTokenValue,
       PtraceAttachArgs{ processId },
