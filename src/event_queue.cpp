@@ -263,6 +263,10 @@ EventSystem::PollDescriptorsCount() const noexcept
 void
 EventSystem::InitWaitStatusManager() noexcept
 {
+  if (mWaitStatusManagerInitialized) {
+    return;
+  }
+
   // Block SIGCHLD in this thread to handle it only via signalfd
   sigset_t mask;
   sigemptyset(&mask);
@@ -276,6 +280,7 @@ EventSystem::InitWaitStatusManager() noexcept
   VERIFY(
     mSignalFd != -1, "Must be able to open signal file descriptor. StopStatus system can't function otherwise.");
   mPollDescriptors[mCurrentPolledFdsCount++] = { mSignalFd, POLLIN, 0 };
+  mWaitStatusManagerInitialized = true;
   // Include the signalfd in the polling, essentially "initializing" the wait system as it will now start reporting
   // events
   PushInternalEvent(InitializedWaitSystem{});

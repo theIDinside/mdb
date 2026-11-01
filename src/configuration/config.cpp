@@ -107,6 +107,14 @@ InitializationConfiguration::ConfigureWithParser(CommandLineRegistry &parser) no
     },
     UseStdio{});
 
+  parser.AddOption<ArgIterator &>(
+    "",
+    "--keep-alive",
+    "Keep running when the last debugged process exits, so that more processes can be attached later.",
+    config->mKeepAlive,
+    [](ArgIterator &) noexcept -> ParseResult<bool> { return true; },
+    false);
+
   parser.AddOption<ArgIterator &>("-w",
     "--timeout",
     "Sets the amount of time MDB will wait for an incoming connection to communicate using DAP on a specified "

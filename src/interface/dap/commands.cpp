@@ -1786,7 +1786,11 @@ struct Attach final : public UICommand
   void
   Execute() noexcept final
   {
-    auto *supervisor = Tracer::Get().SessionAttach(attachArgs);
+    auto *supervisor = Tracer::SessionAttach(attachArgs, mDebugAdapterManager);
+    if (!supervisor) {
+      return WriteResponse(
+        ErrorResponse{ Request, this, std::make_optional("Could not attach to process."), std::nullopt });
+    }
 
     SupervisorSessionConfiguration *config = mDebugAdapterManager->GetConfigurationFor(mConfigToken);
 

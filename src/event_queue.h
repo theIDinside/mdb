@@ -432,13 +432,14 @@ class EventSystem
   int mReplayStopEvents[2];
   // ptrace events are polled using signalfd, checking for SIGCHLD signals
   int mSignalFd;
+  bool mWaitStatusManagerInitialized = false;
 
   int mCurrentPolledFdsCount;
   pollfd mPollDescriptors[5];
 
-  std::mutex mCommandsGuard{};
-  std::mutex mTraceEventGuard{};
-  std::mutex mInternalEventGuard{};
+  std::mutex mCommandsGuard;
+  std::mutex mTraceEventGuard;
+  std::mutex mInternalEventGuard;
   ReplayEvent mLastReplayEvent;
   std::vector<TraceEvent *> mTraceEvents;
   std::vector<LeakedRef<ui::UICommand>> mCommands;

@@ -63,6 +63,7 @@ Start(int argc, const char **argv, [[maybe_unused]] const char **envp)
     }
     exit(-1);
   }
+  Tracer::SetKeepAlive(configurationOptions->mKeepAlive);
 
   // Sets main thread id. It's static so subsequent calls from other threads should be fine.
   GetProcessId();
