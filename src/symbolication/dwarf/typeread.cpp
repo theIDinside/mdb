@@ -16,9 +16,6 @@
 
 #include <algorithm>
 
-#define DW_ASSERT(cond, die, message, ...)                                                                        \
-  MDB_ASSERT((cond), "(die offset=0x{:x}) " #message, die.SectionOffset() __VA_OPT__(, ) __VA_ARGS__);
-
 namespace mdb::sym::dw {
 
 FunctionSymbolicationContext::FunctionSymbolicationContext(ObjectFile &obj, sym::Frame &frame) noexcept
