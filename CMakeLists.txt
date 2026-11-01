@@ -372,6 +372,11 @@ add_executable(mdb ${MIDAS_SOURCES})
 set_target_properties(mdb PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 set_property(TARGET mdb PROPERTY CXX_STANDARD 23)
 
+# The harness invokes this executable in place of the process to debug.
+add_executable(mdb_shim src/mdb_shim.cpp)
+set_target_properties(mdb_shim PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+set_property(TARGET mdb_shim PROPERTY CXX_STANDARD 23)
+
 # Add the json library
 add_subdirectory(dependencies/quickjs)
 add_subdirectory(lib/json)
