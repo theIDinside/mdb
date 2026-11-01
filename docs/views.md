@@ -16,9 +16,9 @@ view nsTArray_Impl<.*> in "libxul.so" {
   children array((T*)(hdr + 1), hdr->mLength)
 }
 
-// nsString, nsCString, nsAutoString, ... all derive from nsTStringRepr.
+// nsString, nsCString, nsAutoString, ... all derive from nsTStringRepr. The length is wrapped in a struct.
 view mozilla::detail::nsTStringRepr<.*> {
-  summary text(mData, mLength)
+  summary text(mData, mLength.mLength)
   children none
 }
 ```
@@ -26,6 +26,9 @@ view mozilla::detail::nsTStringRepr<.*> {
 With these loaded, an `AutoTArray<nsCString, 4>` holding two strings is displayed as `length=2`, and expanding
 it shows `[0] "foo"`, `[1] "bar"`: `AutoTArray` gets the view of its base class, and each element is displayed by
 the string view.
+
+[views/gecko.mdbv](../views/gecko.mdbv) has complete views for Gecko's arrays, strings, atoms, `nsID`, hash tables
+and smart pointers.
 
 ## Loading views
 
