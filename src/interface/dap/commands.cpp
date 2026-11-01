@@ -1454,8 +1454,15 @@ struct Launch : public UICommand
 
   // The optional `views` launch argument: view files (.mdbv) to load for this session.
   static std::vector<std::string> ParseViewFiles(const mdbjson::JsonValue &args) noexcept;
-  // Loads `mViewFiles`. Problems are reported to the user in the debug console.
-  void LoadViewFiles(SessionId sessionId) noexcept;
+  // Loads view files. Problems are reported to the user in the debug console.
+  static void LoadViewFiles(
+    DebugAdapterManager *manager, SessionId sessionId, std::span<const std::string> files) noexcept;
+
+  void
+  LoadViewFiles(SessionId sessionId) noexcept
+  {
+    LoadViewFiles(mDebugAdapterManager, sessionId, mViewFiles);
+  }
 
   bool mStopOnEntry;
   std::optional<BreakpointBehavior> mBreakpointBehavior;
@@ -1686,19 +1693,21 @@ Launch::ParseViewFiles(const mdbjson::JsonValue &args) noexcept
   return files;
 }
 
+/* static */
 void
-Launch::LoadViewFiles(SessionId sessionId) noexcept
+Launch::LoadViewFiles(
+  DebugAdapterManager *manager, SessionId sessionId, std::span<const std::string> files) noexcept
 {
   const auto processResult = [&](const fs::path &file, const auto &result) {
     if (result.mError || !result.mDiagnostics.empty()) {
-      mDebugAdapterManager->PostDapEvent(new ui::dap::OutputEvent{
+      manager->PostDapEvent(new ui::dap::OutputEvent{
         sessionId, "console", std::format("[views] {}: {}\n", file.c_str(), result.ToString()) });
     } else {
       DBGLOG(core, "Loaded view file {}", file.c_str());
     }
   };
-  DBGLOG(core, "Load view files: {}", mViewFiles);
-  for (const auto &file : mViewFiles) {
+  DBGLOG(core, "Load view files: {}", files);
+  for (const auto &file : files) {
     if (fs::is_directory(file)) {
       views::ViewRegistry::Get().LoadDirectory(file, processResult);
     } else {
@@ -1795,6 +1804,7 @@ struct Attach final : public UICommand
 
     SupervisorSessionConfiguration *config = mDebugAdapterManager->GetConfigurationFor(mConfigToken);
 
+    Launch::LoadViewFiles(mDebugAdapterManager, supervisor->GetProcessId(), mViewFiles);
     WriteResponse(AttachResponse{ supervisor->GetProcessId(), true, this });
 
     // As the last config request, we start processing deferred ptrace events, effectively "starting" the debug
@@ -1807,6 +1817,8 @@ struct Attach final : public UICommand
   std::string_view mConfigToken;
   std::optional<bool> mStopAtEntryAfterExec;
   std::function<void(tc::SupervisorState &)> mConfigRequest;
+  // The optional `views` argument, as for launch.
+  std::vector<std::string> mViewFiles;
   DEFINE_NAME("attach");
   RequiredArguments({ kSessionType });
 
@@ -1854,7 +1866,7 @@ struct Attach final : public UICommand
       args.Contains("stopAtEntryAfterExec")
         ? std::make_optional(*args.Get("stopAtEntryAfterExec")->UncheckedGetBoolean())
         : std::nullopt;
-    return RefPtr<Attach>::MakeShared(std::move(arg),
+    auto attach = RefPtr<Attach>::MakeShared(std::move(arg),
       *configTokenValue,
       PtraceAttachArgs{ processId },
       stopAtEntryAfterExec,
@@ -1863,6 +1875,8 @@ struct Attach final : public UICommand
         supervisor.ProcessDeferredEvents();
         supervisor.ProcessQueuedUnhandled(supervisor.TaskLeaderTid());
       });
+    attach->mViewFiles = Launch::ParseViewFiles(args);
+    return attach;
   }
 
   static RefPtr<ui::UICommand>
