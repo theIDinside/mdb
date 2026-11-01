@@ -192,12 +192,6 @@ BuildTestSubject(
   SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/stl.cpp
 )
 
-# The shim is part of the attach prototype.
-BuildTestSubject(
-  NAME mdb_shim
-  SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/prototype/attach/mdb_shim.cpp
-)
-
 # The same program, but the compiler leaves template arguments out of type names; views must rebuild them from the
 # template parameters in the debug info.
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
