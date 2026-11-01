@@ -833,6 +833,10 @@ Session::HandleFork(TaskInfo &parentTask, pid_t newChild, bool vFork) noexcept
           new ui::dap::Process{ parent->mTaskLeader, newPid, "forked", true });
         parent->ScheduleResume(*task, tc::RunType::Continue);
       });
+    // Nothing attaches to a vfork child before it execs, so nothing else will process its initial stop if it was
+    // reported before this vfork event. Left unhandled, the child never runs to its exec and the parent waits
+    // forever.
+    newSupervisor->ProcessQueuedUnhandled(newChild);
   }
 }
 
