@@ -44,7 +44,7 @@ class Session final : public SupervisorState
   std::unordered_map<Tid, RegisterCache> mRegisterCache{};
 
 private:
-  Session(Tid taskLeader, ui::dap::DebugAdapterManager *dap) noexcept;
+  Session(Tid taskLeader, ui::dap::DebugAdapterManager *dap, bool stopAtEntryAfterExec = true) noexcept;
 
   void SetProgramCounterTo(TaskInfo &task, AddrPtr) noexcept;
   void OpenMemoryFile() noexcept;
@@ -61,8 +61,10 @@ public:
     std::span<std::pmr::string> prog_args,
     std::optional<BreakpointBehavior> breakpointBehavior) noexcept;
 
-  static Session *Create(Tid taskLeader, ui::dap::DebugAdapterManager *dap) noexcept;
-  static Session *AttachExisting(Tid taskLeader, ui::dap::DebugAdapterManager *dap) noexcept;
+  static Session *Create(
+    Tid taskLeader, ui::dap::DebugAdapterManager *dap, bool stopAtEntryAfterExec = true) noexcept;
+  static Session *AttachExisting(
+    Tid taskLeader, ui::dap::DebugAdapterManager *dap, bool stopAtEntryAfterExec = false) noexcept;
   static void QueueUnhandledPtraceEvent(PtraceEvent event) noexcept;
   void ProcessQueuedUnhandled(Pid childPid) noexcept;
 

@@ -102,10 +102,10 @@ InterpreterPath(const Elf *elf, const ElfSection *interp) noexcept
 }
 
 SupervisorState::SupervisorState(
-  SupervisorType type, Tid taskLeader, ui::dap::DebugAdapterManager *client) noexcept
+  SupervisorType type, Tid taskLeader, ui::dap::DebugAdapterManager *client, bool stopAtEntryAfterExec) noexcept
     : mTaskLeader(taskLeader), mUserBreakpoints(*this), mDebugAdapterClient(client),
       mScheduler{ std::make_unique<TaskScheduler>(this) }, mNullUnwinder{ new sym::Unwinder{ nullptr } },
-      mSupervisorType(type)
+      mSupervisorType(type), mStopAtEntryAfterExec(stopAtEntryAfterExec)
 {
   mNewObjectFilePublisher.Subscribe(SubscriberIdentity::Of(this), [this](const SymbolFile *sf) {
     mDebugAdapterClient->PostDapEvent(new ui::dap::ModuleEvent{ mTaskLeader, "new", *sf });
@@ -122,6 +122,7 @@ void
 SupervisorState::OnForkCopySymbols(const SupervisorState &parent, bool isVFork) noexcept
 {
   mParentPid = parent.mTaskLeader;
+  mStopAtEntryAfterExec = parent.mStopAtEntryAfterExec;
   if (!isVFork) {
     // We don't setup symbol files from the parent in the vfork because we expect it to exec soon and technically
     // "release" those resources.
@@ -476,6 +477,12 @@ SupervisorState::EmitAllStopped() noexcept
   DBGLOG(core, "[all-stopped]: sending registered notifications");
   // all_stopped_observer.send_notifications();
   mAllStopPublisher.Emit();
+}
+
+void
+SupervisorState::SetStopAfterExec(bool value) noexcept
+{
+  mStopAtEntryAfterExec = value;
 }
 
 u32
@@ -1123,7 +1130,7 @@ void
 SupervisorState::HandleExec(TaskInfo &task, const std::string &execFile) noexcept
 {
   // stop at entry & install ld.so breakpoints
-  PostExec(execFile, true, true);
+  PostExec(execFile, mStopAtEntryAfterExec, true);
   mDebugAdapterClient->PostDapEvent(new ui::dap::CustomEvent{
     mTaskLeader, "setProcessName", std::format(R"({{ "name": "{}", "processId": {} }})", execFile, mTaskLeader) });
   mScheduler->Schedule(task, { true, task.mResumeRequest.mType });

@@ -299,7 +299,7 @@ Tracer::KillUI() noexcept
 }
 
 static tc::SupervisorState *
-PtraceAttach(const PtraceAttachArgs &args, ui::dap::DebugAdapterManager *dap) noexcept
+PtraceAttach(const PtraceAttachArgs &args, ui::dap::DebugAdapterManager *dap, bool stopAtEntryAfterExec) noexcept
 {
   auto supervisor = Tracer::Get().GetController(args.pid);
   if (!supervisor) {
@@ -325,7 +325,7 @@ PtraceAttach(const PtraceAttachArgs &args, ui::dap::DebugAdapterManager *dap) no
       return nullptr;
     }
     DBGLOG(core, "Attached process {} stopped with status {}", args.pid, status);
-    return tc::ptrace::Session::AttachExisting(args.pid, dap);
+    return tc::ptrace::Session::AttachExisting(args.pid, dap, stopAtEntryAfterExec);
   }
   // The DAP request was made for a supervisor that was not of the right type.
   if (supervisor->mSupervisorType != tc::SupervisorType::Native) {
@@ -337,12 +337,19 @@ PtraceAttach(const PtraceAttachArgs &args, ui::dap::DebugAdapterManager *dap) no
 
 /* static */
 tc::SupervisorState *
-Tracer::SessionAttach(const AttachArgs &args, ui::dap::DebugAdapterManager *dap) noexcept
+Tracer::SessionAttach(
+  const AttachArgs &args, ui::dap::DebugAdapterManager *dap, bool stopAtEntryAfterExec) noexcept
 {
   using MatchResult = tc::SupervisorState *;
 
   return std::visit(
-    Match{ [&](const PtraceAttachArgs &args) -> MatchResult { return PtraceAttach(args, dap); },
+    Match{ [&](const PtraceAttachArgs &args) -> MatchResult {
+            auto *supervisor = PtraceAttach(args, dap, stopAtEntryAfterExec);
+            if (supervisor) {
+              supervisor->SetStopAfterExec(stopAtEntryAfterExec);
+            }
+            return supervisor;
+          },
       [&](const RRAttachArgs &) -> MatchResult { TODO("Possibly never implement this, after all"); } },
     args);
 }
