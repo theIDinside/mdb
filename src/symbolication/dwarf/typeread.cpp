@@ -16,6 +16,9 @@
 
 #include <algorithm>
 
+#define DW_ASSERT(cond, die, message, ...)                                                                        \
+  MDB_ASSERT((cond), "(die offset=0x{:x}) " #message, die.SectionOffset() __VA_OPT__(, ) __VA_ARGS__);
+
 namespace mdb::sym::dw {
 
 FunctionSymbolicationContext::FunctionSymbolicationContext(ObjectFile &obj, sym::Frame &frame) noexcept
@@ -76,7 +79,7 @@ FunctionSymbolicationContext::ProcessLexicalBlockDie(DieReference die) noexcept
   }
 
   if (hadRanges) {
-    MDB_ASSERT(low == nullptr, "We need to adjust the ranges by LOW PC I think.");
+    DW_ASSERT(low == nullptr, die, "We need to adjust the ranges by LOW PC I think.");
     return;
   }
 
@@ -170,9 +173,11 @@ FunctionSymbolicationContext::ProcessVariableDie(
   }
   std::optional<DieReference> variableTypeDie =
     mObjectRef.GetDebugInfoEntryReference(state.mTypeId->AsUnsignedValue());
-  MDB_ASSERT(variableTypeDie.has_value(),
-    "Failed to get compilation unit die reference from DIE offset: 0x{:x}",
-    state.mTypeId->AsUnsignedValue());
+  DW_ASSERT(variableTypeDie.has_value(),
+    originDie,
+    "Failed to get compilation unit die reference from DIE offset: 0x{:x} (follow-via-DIE: 0x{:x})",
+    state.mTypeId->AsUnsignedValue(),
+    variableDebugInfoEntry.SectionOffset());
 
   NonNullPtr<sym::Type> type = ProcessTypeDie(variableTypeDie.value());
   if (state.mLocation->form == AttributeForm::DW_FORM_sec_offset) {
@@ -213,7 +218,8 @@ FunctionSymbolicationContext::ProcessSymbolInformation() noexcept
     UnitData *cu = indexedDie.GetUnitData();
     auto dieIndex = indexedDie.GetIndex();
     auto compUnitDieReference = cu->GetDieByCacheIndex(dieIndex);
-    MDB_ASSERT(compUnitDieReference.GetDie()->mTag == DwarfTag::DW_TAG_subprogram,
+    DW_ASSERT(compUnitDieReference.GetDie()->mTag == DwarfTag::DW_TAG_subprogram,
+      compUnitDieReference,
       "Origin die for a fn wasn't subprogram! It was: {}",
       to_str(compUnitDieReference.GetDie()->mTag));
 
@@ -455,17 +461,15 @@ TypeSymbolicationContext::ProcessMemberVariable(DieReference die) noexcept
     bitFieldSize = *bitSize;
   }
 
-  MDB_ASSERT(typeId,
-    "Expected to find type attribute for die 0x{:x} ({})",
-    die.GetDie()->mSectionOffset,
-    to_str(die.GetDie()->mTag));
+  DW_ASSERT(typeId, die, "Expected to find type attribute for die {}", to_str(die.GetDie()->mTag));
 
   byteOffset = (*location);
 
   if (!name) {
     // means we're likely some anonymous structure of some kind
     auto containingCompUnitDieReference = mObjectRef.GetDebugInfoEntryReference(typeId->AsUnsignedValue());
-    MDB_ASSERT(containingCompUnitDieReference.has_value(),
+    DW_ASSERT(containingCompUnitDieReference.has_value(),
+      die,
       "Failed to get compilation unit & die reference from DIE offset: 0x{:x}",
       typeId->AsUnsignedValue());
     sym::Type *type = mObjectRef.GetTypeStorage()->GetOrCreateNewType(containingCompUnitDieReference->AsIndexed());
@@ -477,7 +481,8 @@ TypeSymbolicationContext::ProcessMemberVariable(DieReference die) noexcept
       .mName = name });
   } else {
     auto containingCompUnitDieReference = mObjectRef.GetDebugInfoEntryReference(typeId->AsUnsignedValue());
-    MDB_ASSERT(containingCompUnitDieReference.has_value(),
+    DW_ASSERT(containingCompUnitDieReference.has_value(),
+      die,
       "Failed to get compilation unit & die reference from DIE offset: 0x{:x}",
       typeId->AsUnsignedValue());
     sym::Type *type = mObjectRef.GetTypeStorage()->GetOrCreateNewType(containingCompUnitDieReference->AsIndexed());
@@ -520,11 +525,18 @@ TypeSymbolicationContext::ProcessTemplateParameter(DieReference die, bool isValu
   const auto name = die.ReadAttribute(Attribute::DW_AT_name);
   const auto typeId = die.ReadAttribute(Attribute::DW_AT_type);
 
-  auto containingCompUnitDieReference = mObjectRef.GetDebugInfoEntryReference(typeId->AsUnsignedValue());
-  MDB_ASSERT(containingCompUnitDieReference.has_value(),
-    "Failed to get compilation unit & die reference from DIE offset: 0x{:x}",
-    typeId->AsUnsignedValue());
-  sym::Type *type = mObjectRef.GetTypeStorage()->GetOrCreateNewType(containingCompUnitDieReference->AsIndexed());
+  sym::Type *type = nullptr;
+  if (!typeId) {
+    // A template type parameter without a type is `void`, e.g. the `typename Enable = void` of SFINAE helpers.
+    type = mObjectRef.GetTypeStorage()->GetUnitType();
+  } else {
+    auto containingCompUnitDieReference = mObjectRef.GetDebugInfoEntryReference(typeId->AsUnsignedValue());
+    DW_ASSERT(containingCompUnitDieReference.has_value(),
+      die,
+      "Failed to get compilation unit & die reference from DIE offset: 0x{:x}",
+      typeId->AsUnsignedValue());
+    type = mObjectRef.GetTypeStorage()->GetOrCreateNewType(containingCompUnitDieReference->AsIndexed());
+  }
 
   // Clang leaves out the name of some template parameters, e.g. the `char` of `std::allocator<char>`.
   auto &templateArg = mTemplateArguments.emplace_back(name ? name->AsStringView() : std::string_view{}, type);
