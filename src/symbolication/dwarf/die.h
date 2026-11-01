@@ -105,6 +105,12 @@ struct DieMetaData
   // thus, giving the ability to calculate next sibling by saying DebugInfoEntry* sib = (this + next_sibling);
   void SetSiblingId(u32 sib_id) noexcept;
 
+  [[nodiscard]] u64
+  SectionOffset() const
+  {
+    return mSectionOffset;
+  }
+
   static DieMetaData CreateDie(
     u64 sec_offset, const AbbreviationInfo &abbr, u64 parent_id, u64 die_data_offset, u64 next_sibling) noexcept;
 };

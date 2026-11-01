@@ -188,14 +188,16 @@ TypeStorage::CreateTypeFromQualifiedTypeDie(sym::dw::DieReference dieRef)
     size = baseType->Size();
   }
 
+  const Offset sectOffset{ dieRef.SectionOffset() };
   auto *type = new sym::Type{ dieRef.GetUnitData()->GetObjectFile(),
     dieRef.GetDie()->mTag,
     dieRef.AsIndexed(),
     size,
     baseType,
-    dieRef.GetDie()->mTag == DwarfTag::DW_TAG_typedef };
+    dieRef.GetDie()->mTag == DwarfTag::DW_TAG_typedef,
+    sectOffset };
   type->SetArrayBounds(arrayBounds);
-  AddType(dieRef.GetDie()->mSectionOffset, type);
+  AddType(sectOffset, type);
   return type;
 }
 
@@ -212,11 +214,13 @@ TypeStorage::CreateTypeFromDeclarationDie(sym::dw::DieReference dieRef)
     return nullptr;
   }
 
+  const Offset sectOffset{ dieRef.SectionOffset() };
+
   auto *type = new sym::Type{
-    dieRef.GetObjectFile(), dieRef.GetDie()->mTag, dieRef.AsIndexed(), static_cast<u32>(size), *name
+    dieRef.GetObjectFile(), dieRef.GetDie()->mTag, dieRef.AsIndexed(), static_cast<u32>(size), *name, sectOffset
   };
   type->SetIsDeclaration();
-  AddType(dieRef.GetDie()->mSectionOffset, type);
+  AddType(sectOffset, type);
   return type;
 }
 
@@ -234,9 +238,13 @@ TypeStorage::CreateTypeFromTypeSignatureDie(sym::dw::DieReference dieRef, u64 ty
   const auto name = typeUnitDieRef.ReadAttribute(Attribute::DW_AT_name)
                       .transform(AttributeValue::ToStringView)
                       .value_or("<no name>");
-  auto *type =
-    new sym::Type{ dieRef.GetObjectFile(), dieRef.GetDie()->mTag, typeUnitDieRef.AsIndexed(), sz, name };
-  AddType(dieRef.GetDie()->mSectionOffset, type);
+  auto *type = new sym::Type{ dieRef.GetObjectFile(),
+    dieRef.GetDie()->mTag,
+    typeUnitDieRef.AsIndexed(),
+    sz,
+    name,
+    Offset{ dieRef.SectionOffset() } };
+  AddType(dieRef.SectionOffset(), type);
   return type;
 }
 
@@ -250,8 +258,12 @@ TypeStorage::CreateTypeFallback(sym::dw::DieReference dieRef)
                       .value_or("lambda");
   const u32 sz =
     dieRef.ReadAttribute(Attribute::DW_AT_byte_size).transform(AttributeValue::AsUnsigned).value_or(0);
-  auto *type = new sym::Type{ dieRef.GetObjectFile(), dieRef.GetDie()->mTag, dieRef.AsIndexed(), sz, name };
-  AddType(dieRef.GetDie()->mSectionOffset, type);
+
+  const Offset sectOffset{ dieRef.SectionOffset() };
+
+  auto *type =
+    new sym::Type{ dieRef.GetObjectFile(), dieRef.GetDie()->mTag, dieRef.AsIndexed(), sz, name, sectOffset };
+  AddType(sectOffset, type);
   return type;
 }
 
@@ -289,8 +301,8 @@ TypeStorage::CreateNewType(DwarfTag tag,
   std::string_view name) noexcept
 {
   std::lock_guard lock(mWriteMutex);
-  auto pair = mTypeStorage.emplace(
-    typeDieOffset, new sym::Type{ dieReference.GetObjectFile(), tag, dieReference, typeSize, name });
+  auto pair = mTypeStorage.emplace(typeDieOffset,
+    new sym::Type{ dieReference.GetObjectFile(), tag, dieReference, typeSize, name, typeDieOffset });
   if (pair.second) {
     return pair.first->second;
   }
@@ -393,22 +405,26 @@ Type::Type(ObjectFile *definingObjectFile,
   dw::IndexedDieReference debugInfoEntryReference,
   u32 sizeOf,
   Type *target,
-  bool isTypedef) noexcept
+  bool isTypedef,
+  Offset dwarfSectionOffset) noexcept
     : mName(target->mName), mCompUnitDieReference(debugInfoEntryReference),
       mModifier{ ToTypeModifierWillPanic(debugInfoEntryReference.GetDie()->mTag) }, mIsTypedef(isTypedef),
       size_of(sizeOf), mTypeChain(target), mDefiningObjectFile(definingObjectFile), mDwarfTag(debugInfoEntryTag)
 {
+  SetOffset(dwarfSectionOffset);
 }
 
 Type::Type(ObjectFile *definingObjectFile,
   DwarfTag debugInfoEntryTag,
   dw::IndexedDieReference debugInfoEntryReference,
   u32 sizeOf,
-  std::string_view name) noexcept
+  std::string_view name,
+  Offset dwarfSectionOffset) noexcept
     : mName(name), mCompUnitDieReference(debugInfoEntryReference),
       mModifier{ ToTypeModifierWillPanic(debugInfoEntryReference.GetDie()->mTag) }, mIsTypedef(false),
       size_of(sizeOf), mTypeChain(nullptr), mDefiningObjectFile(definingObjectFile), mDwarfTag(debugInfoEntryTag)
 {
+  SetOffset(dwarfSectionOffset);
 }
 
 Type::Type(std::string_view name, size_t size) noexcept
@@ -422,6 +438,7 @@ Type::Type(Type &&o) noexcept
       mIsResolved(o.mIsResolved), mTypeChain(o.mTypeChain), mDefiningObjectFile(o.mDefiningObjectFile),
       mFields(std::move(o.mFields)), mBaseType(o.mBaseType)
 {
+  SetOffset(o.mOffset);
 }
 
 Type *
@@ -629,7 +646,7 @@ CanonicalType::From(NonNullPtr<Type> type)
   type->ResolveType();
 
   Type *canonical = type->ResolveAlias()->SkipJunk();
-  MDB_ASSERT(canonical->IsResolved(), "Canonical type not resolved!");
+  DW_ASSERT(canonical->IsResolved(), (*type.Ptr()), "Canonical type not resolved!");
   return CanonicalType{ type, canonical };
 }
 

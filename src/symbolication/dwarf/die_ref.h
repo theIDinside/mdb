@@ -32,6 +32,9 @@ struct UnitDataEntry
   [[nodiscard]] UnitData *GetUnitData() const noexcept;
 };
 
+// A DieReference is a reference to a DIE that *must* be loaded into memory while using it. As such, DieReferences
+// are *NOT* safe to store. Use IndexedDieReference for that instead, as these can force a re-load of the DIE data
+// structure, where we can pick out DIE references from.
 class DieReference : public UnitDataEntry
 {
   const DieMetaData *mDebugInfoEntry;

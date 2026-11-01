@@ -10,6 +10,9 @@
 #include <span>
 #include <string_view>
 
+#define DW_ASSERT(cond, die, message, ...)                                                                        \
+  MDB_ASSERT((cond), "die offset=0x{:x}" #message, die.SectionOffset() __VA_OPT__(, ) __VA_ARGS__);
+
 namespace mdb {
 template <typename T> concept IsBitsType = std::integral<T> || std::is_enum_v<T> || std::is_scoped_enum_v<T>;
 

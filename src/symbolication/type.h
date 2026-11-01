@@ -6,6 +6,7 @@
 #include <common/formatter.h>
 #include <common/macros.h>
 #include <lib/string_map.h>
+#include <limits>
 #include <symbolication/block.h>
 #include <symbolication/dwarf/die_ref.h>
 #include <symbolication/dwarf_defs.h>
@@ -21,6 +22,8 @@
 #include <utility>
 
 using namespace std::string_view_literals;
+
+struct TypeDebug;
 
 namespace mdb {
 class ObjectFile;
@@ -329,6 +332,7 @@ class Type
   static constexpr auto ModifierNameStrSize = "const"sv.size() + "volatile"sv.size() + " *"sv.size();
   friend sym::dw::TypeSymbolicationContext;
   friend std::formatter<sym::Type>;
+  friend std::formatter<TypeDebug>;
   friend class CanonicalType;
 
 public:
@@ -355,6 +359,19 @@ private:
   u32 mArrayBounds{ 0 };
   EnumeratorValues mEnumValues{};
   DwarfTag mDwarfTag;
+  Offset mOffset{ std::numeric_limits<u64>::max() };
+
+  void
+  SetOffset(Offset offset)
+  {
+    mOffset = offset;
+  }
+
+  [[nodiscard]] u64
+  SectionOffset() const noexcept
+  {
+    return mOffset;
+  }
 
 public:
   // Qualified, i.e. some variant of cvref-types or type defs
@@ -363,14 +380,16 @@ public:
     dw::IndexedDieReference debugInfoEntryReference,
     u32 sizeOf,
     Type *target,
-    bool isTypedef) noexcept;
+    bool isTypedef,
+    Offset dwarfSectionOffset) noexcept;
 
   // "Normal" type constructor
   Type(ObjectFile *definingObjectFile,
     DwarfTag debugInfoEntryTag,
     dw::IndexedDieReference debugInfoEntryReference,
     u32 sizeOf,
-    std::string_view name) noexcept;
+    std::string_view name,
+    Offset dwarfSectionOffset) noexcept;
 
   // "Special" types. Like void, Unit. Types with no size - and most importantly, no DW_AT_type attr in the DIE.
   Type(std::string_view name, size_t size = 0) noexcept;
@@ -413,6 +432,7 @@ public:
         return t;
       }
     }
+    DW_ASSERT(t, (*this), "Type pointer must not be null when skipping junk! name={}", mName);
     return t;
   }
   // Walks the `type_chain` and if _any_ of the types in between this type element and the base target type is a
@@ -694,7 +714,38 @@ struct BlockSymbolIterator
 
 } // namespace sym
 } // namespace mdb
+
 namespace sym = mdb::sym;
+
+struct TypeDebug
+{
+  sym::Type *mType;
+};
+
+template <> struct std::formatter<TypeDebug>
+{
+  BASIC_PARSE
+
+  template <typename FormatContext>
+  auto
+  format(const TypeDebug &typeDebug, FormatContext &ctx) const
+  {
+    auto out = ctx.out();
+
+    sym::Type *t = typeDebug.mType;
+
+    return std::format_to(out,
+      "0x{:p}, name='{}', typedef={}, tag={}, sec offset=0x{:x}, objfile={}, resolved={}",
+      (void *)t,
+      t->mName,
+      t->mIsTypedef,
+      to_str(t->mDwarfTag),
+      t->mOffset,
+      t->mDefiningObjectFile,
+      t->mIsResolved);
+  }
+};
+
 template <> struct std::formatter<sym::Type>
 {
   BASIC_PARSE

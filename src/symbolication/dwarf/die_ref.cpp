@@ -1,9 +1,9 @@
 /** LICENSE TEMPLATE */
 #include "die_ref.h"
-#include "symbolication/dwarf/debug_info_reader.h"
-#include "symbolication/dwarf_attribute_value.h"
-#include <limits>
+
+#include <symbolication/dwarf/debug_info_reader.h>
 #include <symbolication/dwarf/die.h>
+#include <symbolication/dwarf_attribute_value.h>
 #include <symbolication/objfile.h>
 
 namespace mdb::sym::dw {
@@ -11,7 +11,8 @@ namespace mdb::sym::dw {
 std::tuple<u64, const char *>
 PrepareCompileUnitPreDwarf5(UnitData *compilationUnit, const DieMetaData &unitDie)
 {
-  MDB_ASSERT(compilationUnit && std::to_underlying(compilationUnit->GetHeader().Version()) < 5,
+  DW_ASSERT(compilationUnit && std::to_underlying(compilationUnit->GetHeader().Version()) < 5,
+    unitDie,
     "Expected compillation to not be null and version <= 4");
   UnitReader reader{ compilationUnit };
   reader.SeekDie(unitDie);
