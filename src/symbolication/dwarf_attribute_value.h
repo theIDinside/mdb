@@ -2,6 +2,7 @@
 #pragma once
 
 // mdb
+#include <common/formatter.h>
 #include <symbolication/dwarf_defs.h>
 #include <tracee_pointer.h>
 
@@ -184,3 +185,76 @@ private:
 #if defined(COMPILERUSED_GCC)
 #pragma GCC diagnostic pop
 #endif
+
+template <> struct std::formatter<mdb::AttributeValue>
+{
+
+  BASIC_PARSE
+
+  template <typename FormatContext>
+  auto
+  format(const mdb::AttributeValue &value, FormatContext &ctx) const
+  {
+    using enum mdb::AttributeForm;
+    auto out_it = ctx.out();
+    out_it = std::format_to(out_it, "AttributeValue {{ name: {}, value: ", mdb::to_str(value.name));
+    // Which union member is active is determined by the form, see ReadAttributeValue in debug_info_reader.cpp
+    switch (value.form) {
+    case DW_FORM_addr:
+    case DW_FORM_addrx:
+    case DW_FORM_addrx1:
+    case DW_FORM_addrx2:
+    case DW_FORM_addrx3:
+    case DW_FORM_addrx4:
+      out_it = std::format_to(out_it, "0x{:x}", value.AsAddress());
+      break;
+    case DW_FORM_string:
+    case DW_FORM_strp:
+    case DW_FORM_line_strp:
+    case DW_FORM_strx:
+    case DW_FORM_strx1:
+    case DW_FORM_strx2:
+    case DW_FORM_strx3:
+    case DW_FORM_strx4:
+    case DW_FORM_strp_sup: {
+      const char *str = value.AsCString();
+      out_it = std::format_to(out_it, "\"{}\"", str != nullptr ? std::string_view{ str } : std::string_view{});
+    } break;
+    case DW_FORM_block:
+    case DW_FORM_block1:
+    case DW_FORM_block2:
+    case DW_FORM_block4:
+    case DW_FORM_exprloc:
+    case DW_FORM_data16: {
+      const auto block = value.AsDataBlock();
+      out_it = std::format_to(out_it, "block[{}] {{", block.size);
+      for (u64 i = 0; i < block.size; ++i) {
+        out_it = std::format_to(out_it, " {:02x}", block.ptr[i]);
+      }
+      out_it = std::format_to(out_it, " }}");
+    } break;
+    case DW_FORM_sdata:
+    case DW_FORM_implicit_const:
+      out_it = std::format_to(out_it, "0x{:x} (signed)", value.AsSignedValue());
+      break;
+    default:
+      out_it = std::format_to(out_it, "0x{:x}", value.AsUnsignedValue());
+      break;
+    }
+    return std::format_to(out_it, " }}");
+  }
+};
+
+template <> struct std::formatter<std::optional<mdb::AttributeValue>>
+{
+  BASIC_PARSE
+  template <typename FormatContext>
+  auto
+  format(const std::optional<mdb::AttributeValue> &value, FormatContext &ctx) const
+  {
+    if (value) {
+      return std::format_to(ctx.out(), "{}", *value);
+    }
+    return std::format_to(ctx.out(), "<null>");
+  }
+};

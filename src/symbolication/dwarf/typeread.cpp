@@ -161,8 +161,12 @@ FunctionSymbolicationContext::ProcessVariableDie(
     }
     if (!state.mReferedDie) {
       DBGLOG(dwarf,
-        "[ProcessVariableDie]: Ignoring DW_TAG_variable die, incomplete symbol information. die=0x{:x}",
-        originDie.GetDie()->mSectionOffset);
+        "[ProcessVariableDie]: Ignoring DW_TAG_variable die, incomplete symbol information. die=0x{:x}, "
+        "name={}, typeId={}, location={}",
+        originDie.GetDie()->mSectionOffset,
+        state.mName,
+        state.mTypeId,
+        state.mLocation);
       return false;
     }
     variableDebugInfoEntry = state.mReferedDie.value();
