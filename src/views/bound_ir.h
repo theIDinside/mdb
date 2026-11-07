@@ -130,7 +130,7 @@ enum class BoundOp : u8
   PointerDiff,
   // convert rvalue mA to the node's type
   Convert,
-  // Call function mImm with arguments in BoundView::mCallArgs[mA ... mA + mB)
+  // Call function mImm with arguments in CodeObject::mCallArgs[mA ... mA + mB)
   Call,
   // Root mImm, supplied by the caller of the program
   Root,
@@ -166,7 +166,7 @@ struct BoundTemplatePart
   u32 mFunction{ kNoFunction };
 };
 
-struct BoundView
+struct CodeObject
 {
   const ViewDefinition *mDef{ nullptr };
   // The type the view's pattern matched. This can be a base class of the type of the displayed value.

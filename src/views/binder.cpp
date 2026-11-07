@@ -69,7 +69,7 @@ class Binder
 
   const ViewDefinition &mDef;
   const ExprArena &mArena;
-  BoundView &mView;
+  CodeObject &mCodeObject;
   sym::Type *mMatchedType;
   ObjectFile *mObjectFile;
   BindingEnvironment &mEnvironment;
@@ -106,8 +106,8 @@ class Binder
 public:
   std::optional<Diagnostic> mError;
 
-  Binder(const ViewDefinition &def, BoundView &view, sym::Type *matchedType, BindingEnvironment &environment)
-      : mDef(def), mArena(def.mFile->mArena), mView(view), mMatchedType(matchedType),
+  Binder(const ViewDefinition &def, CodeObject &view, sym::Type *matchedType, BindingEnvironment &environment)
+      : mDef(def), mArena(def.mFile->mArena), mCodeObject(view), mMatchedType(matchedType),
         mObjectFile(matchedType->DefiningObjectFile()), mEnvironment(environment), mCodeGen(view)
   {
     mI64 = FromBuiltin(BuiltinI64());
@@ -140,20 +140,20 @@ private:
   TypeId
   AddType(BoundType type) noexcept
   {
-    mView.mTypes.push_back(std::move(type));
-    return static_cast<TypeId>(mView.mTypes.size() - 1);
+    mCodeObject.mTypes.push_back(std::move(type));
+    return static_cast<TypeId>(mCodeObject.mTypes.size() - 1);
   }
 
   [[nodiscard]] const BoundType &
   Type(TypeId id) const noexcept
   {
-    return mView.mTypes[id];
+    return mCodeObject.mTypes[id];
   }
 
   [[nodiscard]] TypeId
   TypeOf(NodeId node) const noexcept
   {
-    return mView.mNodes[node].mType;
+    return mCodeObject.mNodes[node].mType;
   }
 
   [[nodiscard]] const BoundType &
@@ -165,8 +165,8 @@ private:
   NodeId
   AddNode(BoundNode node) noexcept
   {
-    mView.mNodes.push_back(std::move(node));
-    return static_cast<NodeId>(mView.mNodes.size() - 1);
+    mCodeObject.mNodes.push_back(std::move(node));
+    return static_cast<NodeId>(mCodeObject.mNodes.size() - 1);
   }
 
   NodeId
@@ -267,7 +267,7 @@ public:
   BindResult
   ResolveUnknownName(Binder &binder, const Expr &expr) noexcept override
   {
-    const BoundExpr self{ .mNode = binder.AddNode(BoundOp::This, binder.mView.mRootType, expr.mLoc),
+    const BoundExpr self{ .mNode = binder.AddNode(BoundOp::This, binder.mCodeObject.mRootType, expr.mLoc),
       .mIsLValue = true };
     return binder.MemberOf(self, expr.mName, expr.mLoc);
   }
@@ -293,12 +293,12 @@ Binder::FromBuiltin(const BuiltinType &builtin) noexcept
 sym::Type *
 Binder::EnsureDwarfType(TypeId id) noexcept
 {
-  if (mView.mTypes[id].mDwarf == nullptr) {
+  if (mCodeObject.mTypes[id].mDwarf == nullptr) {
     if (auto it = mBuiltinDefinitions.find(id); it != mBuiltinDefinitions.end()) {
-      mView.mTypes[id].mDwarf = LookupDwarfBaseType(it->second);
+      mCodeObject.mTypes[id].mDwarf = LookupDwarfBaseType(it->second);
     }
   }
-  return mView.mTypes[id].mDwarf;
+  return mCodeObject.mTypes[id].mDwarf;
 }
 
 const ScopeEntry *
@@ -373,7 +373,7 @@ Binder::FromDwarf(sym::Type *raw) noexcept
   const TypeId id = AddType(BoundType{ .mDwarf = type, .mName = std::format("{}", *type) });
   mDwarfTypes.emplace(type, id);
 
-  BoundType result{ .mSize = type->Size(), .mDwarf = type, .mName = mView.mTypes[id].mName };
+  BoundType result{ .mSize = type->Size(), .mDwarf = type, .mName = mCodeObject.mTypes[id].mName };
   const auto modifier = *type->mModifier;
   if (modifier == sym::Modifier::Pointer || modifier == sym::Modifier::Reference ||
       modifier == sym::Modifier::RValueReference) {
@@ -430,7 +430,7 @@ Binder::FromDwarf(sym::Type *raw) noexcept
     result.mSize = 0;
   }
 
-  mView.mTypes[id] = std::move(result);
+  mCodeObject.mTypes[id] = std::move(result);
   return id;
 }
 
@@ -544,7 +544,7 @@ Binder::EnsureSignature(u32 function) noexcept
     }
     returnType = *type;
   }
-  auto &boundFunction = mView.mProgram.mFunctions[function];
+  auto &boundFunction = mCodeObject.mProgram.mFunctions[function];
   boundFunction.mParamCount = static_cast<u32>(definition.mParams.size() + 1);
   boundFunction.mReturn = returnType;
   mSignatureState[function] = 2;
@@ -588,7 +588,7 @@ Binder::BindFunctionArguments(const Expr &expr, u32 function) noexcept
         Fail(argument.mLoc, std::format("'{}' is a reference parameter, pass a local", parameter.mName));
         return std::nullopt;
       }
-      const TypeId expectedType = mView.mProgram.mFunctions[function].mLocalTypes[i + 1];
+      const TypeId expectedType = mCodeObject.mProgram.mFunctions[function].mLocalTypes[i + 1];
       if (entry->mType != expectedType) {
         Fail(argument.mLoc,
           std::format("'{}' needs a local of type '{}', got '{}'",
@@ -606,7 +606,7 @@ Binder::BindFunctionArguments(const Expr &expr, u32 function) noexcept
     if (!value) {
       return std::nullopt;
     }
-    const TypeId parameterType = mView.mProgram.mFunctions[function].mLocalTypes[i + 1];
+    const TypeId parameterType = mCodeObject.mProgram.mFunctions[function].mLocalTypes[i + 1];
     bound.push_back(ConvertTo(*value, parameterType, mArena.Get(args[i].mExpr).mLoc));
   }
   return bound;
@@ -615,8 +615,8 @@ Binder::BindFunctionArguments(const Expr &expr, u32 function) noexcept
 NodeId
 Binder::AddCallNode(const Expr &expr, u32 function, std::span<const NodeId> args, TypeId returnType) noexcept
 {
-  const u32 first = static_cast<u32>(mView.mCallArgs.size());
-  mView.mCallArgs.insert(mView.mCallArgs.end(), args.begin(), args.end());
+  const u32 first = static_cast<u32>(mCodeObject.mCallArgs.size());
+  mCodeObject.mCallArgs.insert(mCodeObject.mCallArgs.end(), args.begin(), args.end());
   return AddNode(BoundNode{ .mOp = BoundOp::Call,
     .mType = returnType,
     .mA = first,
@@ -836,7 +836,7 @@ Binder::BindPointerArithmetic(BinaryOp op, NodeId lhs, NodeId rhs, SourceLoc loc
       return FailExpr(loc, std::format("can't subtract pointers of type '{}' and '{}'", lt.mName, rt.mName));
     }
     NodeId node = AddNode(BoundOp::PointerDiff, mI64, loc, lhs, rhs);
-    mView.mNodes[node].mImm = elementSize(lt);
+    mCodeObject.mNodes[node].mImm = elementSize(lt);
     return BoundExpr{ .mNode = node };
   }
 
@@ -856,7 +856,7 @@ Binder::BindPointerArithmetic(BinaryOp op, NodeId lhs, NodeId rhs, SourceLoc loc
   const u64 scale = elementSize(pointerType);
   NodeId node = AddNode(
     op == BinaryOp::Add ? BoundOp::PointerAdd : BoundOp::PointerSub, TypeOf(pointer), loc, pointer, offset);
-  mView.mNodes[node].mImm = scale;
+  mCodeObject.mNodes[node].mImm = scale;
   return BoundExpr{ .mNode = node };
 }
 
@@ -1016,7 +1016,7 @@ Binder::BindUnary(const Expr &expr) noexcept
     if (!operand->mIsLValue) {
       return FailExpr(expr.mLoc, "can only take the address of an lvalue");
     }
-    if (mView.mNodes[operand->mNode].mBitSize > 0) {
+    if (mCodeObject.mNodes[operand->mNode].mBitSize > 0) {
       return FailExpr(expr.mLoc, "can't take the address of a bitfield");
     }
     return BoundExpr{ .mNode = AddNode(
@@ -1143,9 +1143,9 @@ Binder::TemplateArgumentOf(sym::Type *type, u64 index, SourceLoc loc) noexcept
   const auto params = type->TemplateParameters();
   if (index >= params.size()) {
     Fail(loc,
-      params.empty() ? std::format("'{}' has no template arguments", Type(mView.mRootType).mName)
+      params.empty() ? std::format("'{}' has no template arguments", Type(mCodeObject.mRootType).mName)
                      : std::format("'{}' has {} template argument{}; there is no template_arg({})",
-                         Type(mView.mRootType).mName,
+                         Type(mCodeObject.mRootType).mName,
                          params.size(),
                          params.size() == 1 ? "" : "s",
                          index));
@@ -1227,7 +1227,7 @@ Binder::BindCall(const Expr &expr) noexcept
       return FailExpr(expr.mLoc,
         std::format("template argument {} of '{}' is a type; name it with 'using T = template_arg({})'",
           index->mInteger,
-          Type(mView.mRootType).mName,
+          Type(mCodeObject.mRootType).mName,
           index->mInteger));
     }
     const TypeId type = FromDwarf(param->mType);
@@ -1246,14 +1246,14 @@ Binder::BindCall(const Expr &expr) noexcept
     if (!EnsureSignature(function->second)) {
       return std::nullopt;
     }
-    if (mView.mProgram.mFunctions[function->second].mReturn == kNoType) {
+    if (mCodeObject.mProgram.mFunctions[function->second].mReturn == kNoType) {
       return FailExpr(expr.mLoc, std::format("'{}' doesn't return a value, call it as a statement", name));
     }
     auto boundArgs = BindFunctionArguments(expr, function->second);
     if (!boundArgs) {
       return std::nullopt;
     }
-    const TypeId returnType = mView.mProgram.mFunctions[function->second].mReturn;
+    const TypeId returnType = mCodeObject.mProgram.mFunctions[function->second].mReturn;
     return BoundExpr{ .mNode = AddCallNode(expr, function->second, *boundArgs, returnType) };
   }
 
@@ -1314,7 +1314,7 @@ Binder::BindCall(const Expr &expr) noexcept
     const TypeId providerType = AddType(
       BoundType{ .mKind = TypeKind::ArrayProvider, .mElement = element, .mName = std::move(providerName) });
     NodeId node = AddNode(BoundOp::ArrayProvider, providerType, expr.mLoc, *pointer, *count);
-    mView.mNodes[node].mImm = limit.value_or(kDefaultArrayLimit);
+    mCodeObject.mNodes[node].mImm = limit.value_or(kDefaultArrayLimit);
     return BoundExpr{ .mNode = node };
   }
 
@@ -1360,8 +1360,8 @@ Binder::BindCall(const Expr &expr) noexcept
       length = *len;
     }
     NodeId node = AddNode(BoundOp::Text, mTextType, expr.mLoc, *pointer, length);
-    mView.mNodes[node].mWidth = width;
-    mView.mNodes[node].mImm = limit.value_or(kDefaultTextLimit);
+    mCodeObject.mNodes[node].mWidth = width;
+    mCodeObject.mNodes[node].mImm = limit.value_or(kDefaultTextLimit);
     return BoundExpr{ .mNode = node };
   }
 
@@ -1457,9 +1457,9 @@ Binder::LowerCallStatement(ExprId exprId, SourceLoc loc) noexcept
   if (!EnsureSignature(function->second)) {
     return false;
   }
-  const Function &callee = mView.mProgram.mFunctions[function->second];
+  const Function &callee = mCodeObject.mProgram.mFunctions[function->second];
   if (callee.mReturn == kNoType &&
-      (mCurrentFunction == kNoFunction || !mView.mProgram.mFunctions[mCurrentFunction].mCanYield)) {
+      (mCurrentFunction == kNoFunction || !mCodeObject.mProgram.mFunctions[mCurrentFunction].mCanYield)) {
     return Fail(loc,
       std::format(
         "'{}' can yield, it can only be called from a children block or another void function", call.mName));
@@ -1604,10 +1604,10 @@ Binder::LowerStatement(StmtId id) noexcept
   }
   case StmtKind::Return:
     if (stmt.mExpr != kNoExpr) {
-      if (mCurrentFunction == mView.mChildrenFunction) {
+      if (mCurrentFunction == mCodeObject.mChildrenFunction) {
         return Fail(stmt.mLoc, "a children block can't return a value");
       }
-      const Function &function = mView.mProgram.mFunctions[mCurrentFunction];
+      const Function &function = mCodeObject.mProgram.mFunctions[mCurrentFunction];
       if (function.mReturn == kNoType) {
         return Fail(stmt.mLoc, std::format("'{}' doesn't return a value", function.mName));
       }
@@ -1620,14 +1620,14 @@ Binder::LowerStatement(StmtId id) noexcept
       mCodeGen.Emit(Instruction{ .mOp = Op::Return, .mA = 1, .mLoc = stmt.mLoc });
       return true;
     }
-    if (mCurrentFunction != kNoFunction && mView.mProgram.mFunctions[mCurrentFunction].mReturn != kNoType) {
-      return Fail(
-        stmt.mLoc, std::format("'{}' must return a value", mView.mProgram.mFunctions[mCurrentFunction].mName));
+    if (mCurrentFunction != kNoFunction && mCodeObject.mProgram.mFunctions[mCurrentFunction].mReturn != kNoType) {
+      return Fail(stmt.mLoc,
+        std::format("'{}' must return a value", mCodeObject.mProgram.mFunctions[mCurrentFunction].mName));
     }
     mCodeGen.Emit(Instruction{ .mOp = Op::Return, .mA = 0, .mLoc = stmt.mLoc });
     return true;
   case StmtKind::Yield: {
-    if (!mView.mProgram.mFunctions[mCurrentFunction].mCanYield) {
+    if (!mCodeObject.mProgram.mFunctions[mCurrentFunction].mCanYield) {
       return Fail(stmt.mLoc, "yield is only allowed in a children block or a void function");
     }
     auto value = Bind(stmt.mExpr);
@@ -1709,7 +1709,7 @@ Binder::Bind(ExprId id) noexcept
         .mOp = BoundOp::TextConst, .mType = mTextType, .mText = mArena.mStrings[expr.mString], .mLoc = expr.mLoc })
     };
   case ExprKind::This:
-    return BoundExpr{ .mNode = AddNode(BoundOp::This, mView.mRootType, expr.mLoc), .mIsLValue = true };
+    return BoundExpr{ .mNode = AddNode(BoundOp::This, mCodeObject.mRootType, expr.mLoc), .mIsLValue = true };
   case ExprKind::Identifier:
     return BindIdentifier(expr);
   case ExprKind::Member: {
@@ -1770,7 +1770,7 @@ Binder::Bind(ExprId id) noexcept
       return std::nullopt;
     }
     NodeId address = AddNode(BoundOp::PointerAdd, TypeOf(*pointer), expr.mLoc, *pointer, *index);
-    mView.mNodes[address].mImm = elementSize;
+    mCodeObject.mNodes[address].mImm = elementSize;
     const NodeId deref = AddNode(BoundOp::Deref, elementId, expr.mLoc, address);
     return AutoDeref(BoundExpr{ .mNode = deref, .mIsLValue = true }, expr.mLoc);
   }
@@ -1809,9 +1809,9 @@ Binder::Bind(ExprId id) noexcept
 bool
 Binder::BindAll() noexcept
 {
-  mView.mRootType = FromDwarf(mMatchedType);
-  mView.mThisType = PointerTo(mView.mRootType);
-  mView.mRootTypes = { mView.mRootType };
+  mCodeObject.mRootType = FromDwarf(mMatchedType);
+  mCodeObject.mThisType = PointerTo(mCodeObject.mRootType);
+  mCodeObject.mRootTypes = { mCodeObject.mRootType };
 
   mScopes.emplace_back();
   mEnvironment.PopulateGlobalScope(*this, mScopes.back());
@@ -1827,12 +1827,12 @@ Binder::BindAll() noexcept
   for (u32 i = 0; i < mDef.mFunctions.size(); ++i) {
     const FunctionDef &definition = mDef.mFunctions[i];
     mCurrentFunction = mFunctionIndex.find(definition.mName)->second;
-    mView.mProgram.mFunctions[mCurrentFunction].mEntry = mCodeGen.Here();
+    mCodeObject.mProgram.mFunctions[mCurrentFunction].mEntry = mCodeGen.Here();
     mLoops.clear();
     mScopes.emplace_back();
     for (size_t p = 0; p < definition.mParams.size(); ++p) {
       const Parameter &parameter = definition.mParams[p];
-      const TypeId type = mView.mProgram.mFunctions[mCurrentFunction].mLocalTypes[p + 1];
+      const TypeId type = mCodeObject.mProgram.mFunctions[mCurrentFunction].mLocalTypes[p + 1];
       mScopes.back().emplace(parameter.mName,
         ScopeEntry{ .mKind = ScopeEntry::Kind::Local,
           .mIndex = static_cast<u32>(p + 1),
@@ -1845,7 +1845,7 @@ Binder::BindAll() noexcept
     }
     mScopes.pop_back();
     mLoops.clear();
-    if (mView.mProgram.mFunctions[mCurrentFunction].mReturn == kNoType) {
+    if (mCodeObject.mProgram.mFunctions[mCurrentFunction].mReturn == kNoType) {
       mCodeGen.Emit(Instruction{ .mOp = Op::Return, .mA = 0, .mLoc = definition.mLoc });
     } else {
       mCodeGen.EmitFail(
@@ -1855,8 +1855,8 @@ Binder::BindAll() noexcept
   mCurrentFunction = kNoFunction;
 
   const auto &summary = mDef.mSummary;
-  mView.mSummaryKind = summary.mKind;
-  mView.mSummaryFormat = summary.mFormat;
+  mCodeObject.mSummaryKind = summary.mKind;
+  mCodeObject.mSummaryFormat = summary.mFormat;
   if (summary.mKind == SummarySpec::Kind::Expression) {
     auto bound = Bind(summary.mExpr);
     if (!bound) {
@@ -1874,7 +1874,7 @@ Binder::BindAll() noexcept
         }
         partNode = bound->mNode;
       }
-      mView.mSummaryParts.push_back(boundPart);
+      mCodeObject.mSummaryParts.push_back(boundPart);
       mSummaryPartNodes.push_back(partNode);
     }
   }
@@ -1893,13 +1893,13 @@ Binder::BindAll() noexcept
       if (!EnsureSignature(function->second)) {
         return false;
       }
-      if (mView.mProgram.mFunctions[function->second].mReturn != kNoType) {
+      if (mCodeObject.mProgram.mFunctions[function->second].mReturn != kNoType) {
         return Fail(children.mLoc, "children needs a void function");
       }
     }
   }
 
-  mView.mChildrenKind = children.mKind;
+  mCodeObject.mChildrenKind = children.mKind;
   if (children.mKind == ChildrenSpec::Kind::Expression && !expressionCall) {
     auto bound = Bind(children.mExpr);
     if (!bound) {
@@ -1911,7 +1911,7 @@ Binder::BindAll() noexcept
     mChildrenNode = bound->mNode;
   } else if (children.mKind == ChildrenSpec::Kind::Block || expressionCall) {
     mCurrentFunction = mCodeGen.BeginFunction("children", true);
-    mView.mChildrenFunction = mCurrentFunction;
+    mCodeObject.mChildrenFunction = mCurrentFunction;
     mScopes.emplace_back();
     if (expressionCall) {
       if (!LowerCallStatement(expressionCallId, mArena.Get(expressionCallId).mLoc)) {
@@ -1926,7 +1926,7 @@ Binder::BindAll() noexcept
     }
     mScopes.pop_back();
     mCodeGen.Emit(Instruction{ .mOp = Op::Return, .mA = 0, .mLoc = children.mLoc });
-    mView.mChildrenKind = ChildrenSpec::Kind::Block;
+    mCodeObject.mChildrenKind = ChildrenSpec::Kind::Block;
   }
   return true;
 }
@@ -1935,33 +1935,34 @@ void
 Binder::EmitCode() noexcept
 {
   for (size_t i = 0; i < mLetNodes.size(); ++i) {
-    mView.mLetFunctions.push_back(
+    mCodeObject.mLetFunctions.push_back(
       mCodeGen.EmitExprFunction(std::format("let {}", mDef.mLets[i].mName), mLetNodes[i]));
   }
-  if (mView.mSummaryKind == SummarySpec::Kind::Template) {
-    for (size_t i = 0; i < mView.mSummaryParts.size(); ++i) {
-      auto &part = mView.mSummaryParts[i];
+  if (mCodeObject.mSummaryKind == SummarySpec::Kind::Template) {
+    for (size_t i = 0; i < mCodeObject.mSummaryParts.size(); ++i) {
+      auto &part = mCodeObject.mSummaryParts[i];
       if (mSummaryPartNodes[i] != kNoNode) {
         part.mFunction = mCodeGen.EmitExprFunction("summary", mSummaryPartNodes[i]);
       }
     }
-  } else if (mView.mSummaryKind == SummarySpec::Kind::Expression) {
-    mView.mSummaryFunction = mCodeGen.EmitExprFunction("summary", mSummaryNode);
+  } else if (mCodeObject.mSummaryKind == SummarySpec::Kind::Expression) {
+    mCodeObject.mSummaryFunction = mCodeGen.EmitExprFunction("summary", mSummaryNode);
   }
-  if (mView.mChildrenKind == ChildrenSpec::Kind::Expression) {
-    mView.mChildrenFunction = mCodeGen.EmitExprFunction("children", mChildrenNode);
+  if (mCodeObject.mChildrenKind == ChildrenSpec::Kind::Expression) {
+    mCodeObject.mChildrenFunction = mCodeGen.EmitExprFunction("children", mChildrenNode);
   }
   if (mCodeGen.Error()) {
-    mView.mBindError = Diagnostic{ .mFile = mDef.mFile->mPath, .mLoc = mDef.mLoc, .mMessage = *mCodeGen.Error() };
+    mCodeObject.mBindError =
+      Diagnostic{ .mFile = mDef.mFile->mPath, .mLoc = mDef.mLoc, .mMessage = *mCodeGen.Error() };
   }
 }
 
 } // namespace
 
-std::unique_ptr<BoundView>
+std::unique_ptr<CodeObject>
 BindView(const ViewDefinition &view, sym::Type *matchedType, u32 rootOffset) noexcept
 {
-  auto bound = std::make_unique<BoundView>();
+  auto bound = std::make_unique<CodeObject>();
   bound->mDef = &view;
   bound->mMatchedType = matchedType;
   bound->mRootOffset = rootOffset;

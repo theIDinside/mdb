@@ -139,7 +139,7 @@ ViewRegistry::FindDirectMatch(sym::Type *type) noexcept
   return nullptr;
 }
 
-std::unique_ptr<BoundView>
+std::unique_ptr<CodeObject>
 ViewRegistry::FindAndBind(sym::Type *type, u32 depth) noexcept
 {
   if (const ViewDefinition *view = FindDirectMatch(type); view) {
@@ -166,7 +166,7 @@ ViewRegistry::FindAndBind(sym::Type *type, u32 depth) noexcept
   return nullptr;
 }
 
-const BoundView *
+const CodeObject *
 ViewRegistry::Lookup(sym::Type *type) noexcept
 {
   if (IsEmpty() || !IsViewableType(type)) {
@@ -194,7 +194,7 @@ ViewRegistry::Lookup(sym::Type *type) noexcept
       view.mLoc.mLine,
       through);
   }
-  const BoundView *result = bound.get();
+  const CodeObject *result = bound.get();
   mBoundViews.emplace(type, std::move(bound));
   return result;
 }

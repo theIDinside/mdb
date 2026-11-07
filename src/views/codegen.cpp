@@ -10,26 +10,26 @@ namespace mdb::views {
 u32
 CodeGen::Emit(Instruction instruction) noexcept
 {
-  mView.mProgram.mCode.push_back(instruction);
-  return static_cast<u32>(mView.mProgram.mCode.size() - 1);
+  mCodeObject.mProgram.mCode.push_back(instruction);
+  return static_cast<u32>(mCodeObject.mProgram.mCode.size() - 1);
 }
 
 void
 CodeGen::PatchTarget(u32 jump, u32 target) noexcept
 {
-  mView.mProgram.mCode[jump].mImm = target;
+  mCodeObject.mProgram.mCode[jump].mImm = target;
 }
 
 u32
 CodeGen::Here() const noexcept
 {
-  return static_cast<u32>(mView.mProgram.mCode.size());
+  return static_cast<u32>(mCodeObject.mProgram.mCode.size());
 }
 
 void
 CodeGen::EmitExpr(NodeId id) noexcept
 {
-  const BoundNode &node = mView.Node(id);
+  const BoundNode &node = mCodeObject.Node(id);
   const auto emit = [&](Op op, u32 a = 0, std::optional<u64> imm = std::nullopt, TypeId type = kNoType) {
     u64 immediate = imm.value_or(node.mImm);
     u32 bitOffset = node.mBitOffset;
@@ -140,13 +140,13 @@ CodeGen::EmitExpr(NodeId id) noexcept
     emit(Op::PushFloat);
     break;
   case BoundOp::TextConst: {
-    const u32 constant = static_cast<u32>(mView.mProgram.mConstants.size());
-    mView.mProgram.mConstants.push_back(node.mText);
+    const u32 constant = static_cast<u32>(mCodeObject.mProgram.mConstants.size());
+    mCodeObject.mProgram.mConstants.push_back(node.mText);
     emit(Op::PushText, constant);
     break;
   }
   case BoundOp::This:
-    emit(Op::LoadLocal, 0, 0, mView.mThisType);
+    emit(Op::LoadLocal, 0, 0, mCodeObject.mThisType);
     // The viewed object can be at address 0 (a value held in registers); its bytes come from root 0
     emit(Op::Deref, 1);
     break;
@@ -223,11 +223,11 @@ CodeGen::EmitExpr(NodeId id) noexcept
     emit(Op::ArrayProvider);
     break;
   case BoundOp::Call: {
-    emit(Op::LoadLocal, 0, 0, mView.mThisType);
+    emit(Op::LoadLocal, 0, 0, mCodeObject.mThisType);
     const u32 first = static_cast<u32>(node.mA);
     const u32 count = static_cast<u32>(node.mB);
     for (u32 i = 0; i < count; ++i) {
-      EmitExpr(mView.mCallArgs[first + i]);
+      EmitExpr(mCodeObject.mCallArgs[first + i]);
     }
     emit(Op::Call, static_cast<u32>(node.mImm));
     break;
@@ -251,25 +251,26 @@ CodeGen::EmitExpr(NodeId id) noexcept
 u32
 CodeGen::EmitExprFunction(std::string name, NodeId node) noexcept
 {
-  const u32 function = static_cast<u32>(mView.mProgram.mFunctions.size());
-  mView.mProgram.mFunctions.push_back(Function{ .mName = std::move(name),
+  const u32 function = static_cast<u32>(mCodeObject.mProgram.mFunctions.size());
+  mCodeObject.mProgram.mFunctions.push_back(Function{ .mName = std::move(name),
     .mEntry = Here(),
     .mParamCount = 1,
-    .mLocalTypes = { mView.mThisType },
-    .mReturn = mView.Node(node).mType });
+    .mLocalTypes = { mCodeObject.mThisType },
+    .mReturn = mCodeObject.Node(node).mType });
   EmitExpr(node);
-  Emit(Instruction{ .mOp = Op::Return, .mType = mView.Node(node).mType, .mA = 1, .mLoc = mView.Node(node).mLoc });
+  Emit(Instruction{
+    .mOp = Op::Return, .mType = mCodeObject.Node(node).mType, .mA = 1, .mLoc = mCodeObject.Node(node).mLoc });
   return function;
 }
 
 u32
 CodeGen::BeginFunction(std::string name, bool canYield) noexcept
 {
-  const u32 function = static_cast<u32>(mView.mProgram.mFunctions.size());
-  mView.mProgram.mFunctions.push_back(Function{ .mName = std::move(name),
+  const u32 function = static_cast<u32>(mCodeObject.mProgram.mFunctions.size());
+  mCodeObject.mProgram.mFunctions.push_back(Function{ .mName = std::move(name),
     .mEntry = Here(),
     .mParamCount = 1,
-    .mLocalTypes = { mView.mThisType },
+    .mLocalTypes = { mCodeObject.mThisType },
     .mReturn = kNoType,
     .mCanYield = canYield });
   return function;
@@ -278,10 +279,10 @@ CodeGen::BeginFunction(std::string name, bool canYield) noexcept
 u32
 CodeGen::AddFunction(std::string name, bool canYield) noexcept
 {
-  const u32 function = static_cast<u32>(mView.mProgram.mFunctions.size());
-  mView.mProgram.mFunctions.push_back(Function{ .mName = std::move(name),
+  const u32 function = static_cast<u32>(mCodeObject.mProgram.mFunctions.size());
+  mCodeObject.mProgram.mFunctions.push_back(Function{ .mName = std::move(name),
     .mParamCount = 1,
-    .mLocalTypes = { mView.mThisType },
+    .mLocalTypes = { mCodeObject.mThisType },
     .mReturn = kNoType,
     .mCanYield = canYield });
   return function;
@@ -290,7 +291,7 @@ CodeGen::AddFunction(std::string name, bool canYield) noexcept
 u32
 CodeGen::AddLocal(u32 function, TypeId type) noexcept
 {
-  auto &locals = mView.mProgram.mFunctions[function].mLocalTypes;
+  auto &locals = mCodeObject.mProgram.mFunctions[function].mLocalTypes;
   locals.push_back(type);
   return static_cast<u32>(locals.size() - 1);
 }
@@ -298,8 +299,8 @@ CodeGen::AddLocal(u32 function, TypeId type) noexcept
 void
 CodeGen::EmitFail(std::string message, SourceLoc loc) noexcept
 {
-  const u32 constant = static_cast<u32>(mView.mProgram.mConstants.size());
-  mView.mProgram.mConstants.push_back(std::move(message));
+  const u32 constant = static_cast<u32>(mCodeObject.mProgram.mConstants.size());
+  mCodeObject.mProgram.mConstants.push_back(std::move(message));
   Emit(Instruction{ .mOp = Op::Fail, .mA = constant, .mLoc = loc });
 }
 

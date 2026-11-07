@@ -157,7 +157,7 @@ The real reasons for the rule are about meaning and simplicity:
 **Binding is per concrete type.** The view `MdbHashMap<.*>` is bound separately for each type it matches.
 For `MdbHashMap<MdbHashEntry<int,int>>`, `using Entry = template_arg(0)` is `MdbHashEntry<int,int>`, and
 `mTable.mCapacity` is "8 bytes at offset 16". For another instantiation, both can be different. Each produces its
-own `BoundView`, with its own types, offsets and code.
+own `CodeObject`, with its own types, offsets and code.
 
 **A function written inside a view** is bound together with the view, so it gets the same concrete types:
 
@@ -284,7 +284,7 @@ The calls themselves are deferred. Two choices in the implementation keep them p
 
   If functions read root 0 instead, a function of `MdbTree`'s view called from another view would see the other
   view's object as `this`.
-- **A frame knows which view it runs.** `Frame` has `const BoundView *mView`, and `Call` looks up function `mA` in
+- **A frame knows which view it runs.** `Frame` has `const CodeObject *mView`, and `Call` looks up function `mA` in
   that view's `Program`. A later `CallView` instruction can push a frame for another view's function, with the other
   object's address as `this`. The pointer is safe in checkpoints: bound views only change in `Rebuild()`, which also
   forgets all cursors.
@@ -514,7 +514,7 @@ The work was done in four parts, each split into steps that compile and are test
 
 ### Deviations from the original plan
 
-- **Renames.** The plan renamed the `BoundView` fields to function indices before the VM existed. They were renamed
+- **Renames.** The plan renamed the `CodeObject` fields to function indices before the VM existed. They were renamed
   together with the VM, so that every step compiled.
 - **The hidden `this` isn't null-checked,** because a value held in registers has address 0 (decision 12).
 - **Budgets.** Each summary template part gets its own 100,000-step budget, not one budget for the whole summary. A
@@ -617,7 +617,7 @@ throw, with the same message the variables panel would show.
 
 `next()` runs with `mMaxYields = 1`, and turns the element into a `JsVariable` with `MakeYieldedChild` (`runtime.cpp`). It
 throws if:
-- the views were reloaded since the iterator was created. A reload destroys the `BoundView`, so the iterator must not
+- the views were reloaded since the iterator was created. A reload destroys the `CodeObject`, so the iterator must not
   keep a pointer to it: look it up again with `ViewRegistry::Lookup` on each `next()`. Add a generation counter to
   `ViewRegistry`, incremented in `Rebuild()`;
 - the target ran since then. States are only valid while the program is stopped, the same reason the cursors are

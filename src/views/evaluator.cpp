@@ -37,8 +37,8 @@ Truncate(u64 bits, u32 sizeInBits) noexcept
   return bits & ((1ULL << sizeInBits) - 1);
 }
 
-Evaluator::Evaluator(const BoundView &view, MemoryReader &reader, std::span<const Root> roots) noexcept
-    : mView(view), mReader(reader), mRoots(roots.begin(), roots.end())
+Evaluator::Evaluator(const CodeObject &code, MemoryReader &reader, std::span<const Root> roots) noexcept
+    : mCodeObject(code), mReader(reader), mRoots(roots.begin(), roots.end())
 {
 }
 
@@ -68,7 +68,7 @@ Evaluator::MakeTextConstant(TypeId type, std::string_view constant) noexcept
 EvalValue
 Evaluator::MakeInteger(TypeId type, u64 bits) const noexcept
 {
-  const BoundType &t = mView.Type(type);
+  const BoundType &t = mCodeObject.Type(type);
   u64 normalized = t.mIsSigned ? SignExtend(bits, t.mSize * 8) : Truncate(bits, t.mSize * 8);
   if (t.mKind == TypeKind::Bool) {
     normalized = bits != 0 ? 1 : 0;
@@ -98,7 +98,7 @@ Evaluator::ReadBytes(u64 address, std::span<u8> out) noexcept
 Evaluator::Result
 Evaluator::Load(const EvalValue &lvalue, SourceLoc loc) noexcept
 {
-  const BoundType &type = mView.Type(lvalue.Type());
+  const BoundType &type = mCodeObject.Type(lvalue.Type());
   if (!type.IsScalar()) {
     return std::unexpected(ErrorAt(loc, std::format("can not read a value of type '{}'", type.mName)));
   }
@@ -171,8 +171,8 @@ Evaluator::Load(const EvalValue &lvalue, SourceLoc loc) noexcept
 Evaluator::Result
 Evaluator::Convert(const EvalValue &value, TypeId to, SourceLoc loc) noexcept
 {
-  const BoundType &from = mView.Type(value.Type());
-  const BoundType &target = mView.Type(to);
+  const BoundType &from = mCodeObject.Type(value.Type());
+  const BoundType &target = mCodeObject.Type(to);
   if (target.mKind == TypeKind::Float) {
     double number = 0.0;
     if (from.mKind == TypeKind::Float) {
@@ -210,7 +210,7 @@ Evaluator::Convert(const EvalValue &value, TypeId to, SourceLoc loc) noexcept
 Evaluator::Result
 Evaluator::EvalBinary(Op op, const EvalValue &lhs, const EvalValue &rhs, TypeId resultType, SourceLoc loc) noexcept
 {
-  const BoundType &operandType = mView.Type(lhs.Type());
+  const BoundType &operandType = mCodeObject.Type(lhs.Type());
   const bool isFloat = operandType.mKind == TypeKind::Float;
   const bool isSigned = operandType.mIsSigned;
   const u64 a = lhs.Bits();
@@ -363,8 +363,9 @@ ProgramState
 Evaluator::Start(u32 function, std::span<const EvalValue> args) noexcept
 {
   ProgramState state;
-  const Function &fn = mView.mProgram.mFunctions[function];
-  state.mFrames.push_back(Frame{ .mView = &mView, .mFunction = function, .mPc = fn.mEntry, .mLocalBase = 0 });
+  const Function &fn = mCodeObject.mProgram.mFunctions[function];
+  state.mFrames.push_back(
+    Frame{ .mCodeObject = &mCodeObject, .mFunction = function, .mPc = fn.mEntry, .mLocalBase = 0 });
   state.mLocals.assign(args.begin(), args.end());
   for (size_t i = state.mLocals.size(); i < fn.mLocalTypes.size(); ++i) {
     state.mLocals.push_back(EvalValue::Scalar(fn.mLocalTypes[i], 0));
@@ -408,7 +409,7 @@ Evaluator::RunWithBudget(ProgramState &state,
       return RunResult{ .mStop = RunStop::Budget, .mSteps = mStepsUsed - stepsAtStart };
     }
     Frame &frame = state.mFrames.back();
-    const Instruction instruction = frame.mView->mProgram.mCode[frame.mPc++];
+    const Instruction instruction = frame.mCodeObject->mProgram.mCode[frame.mPc++];
     --stepsLeft;
     ++mStepsUsed;
     const auto pop = [&]() {
@@ -429,7 +430,7 @@ Evaluator::RunWithBudget(ProgramState &state,
       break;
     case Op::PushText:
       state.mOperands.push_back(
-        MakeTextConstant(instruction.mType, frame.mView->mProgram.mConstants[instruction.mA]));
+        MakeTextConstant(instruction.mType, frame.mCodeObject->mProgram.mConstants[instruction.mA]));
       break;
     case Op::PushRoot: {
       if (instruction.mA >= mRoots.size()) {
@@ -445,7 +446,7 @@ Evaluator::RunWithBudget(ProgramState &state,
     }
     case Op::LoadLet: {
       const u64 thisAddress = state.mLocals[frame.mLocalBase].Bits();
-      const LetKey key{ frame.mView, instruction.mA, thisAddress };
+      const LetKey key{ frame.mCodeObject, instruction.mA, thisAddress };
       if (const auto found = mLetValues.find(key); found != mLetValues.end()) {
         state.mOperands.push_back(found->second);
         break;
@@ -455,7 +456,8 @@ Evaluator::RunWithBudget(ProgramState &state,
       }
       mLetInProgress.insert(key);
       const EvalValue thisPointer = state.mLocals[frame.mLocalBase];
-      ProgramState letState = Start(frame.mView->mLetFunctions[instruction.mA], std::span{ &thisPointer, 1 });
+      ProgramState letState =
+        Start(frame.mCodeObject->mLetFunctions[instruction.mA], std::span{ &thisPointer, 1 });
       auto value = RunToCompletion(letState, limits, stepsLeft);
       mLetInProgress.erase(key);
       if (!value) {
@@ -552,7 +554,7 @@ Evaluator::RunWithBudget(ProgramState &state,
     }
     case Op::Negate: {
       const EvalValue operand = pop();
-      if (mView.Type(instruction.mType).mKind == TypeKind::Float) {
+      if (mCodeObject.Type(instruction.mType).mKind == TypeKind::Float) {
         state.mOperands.push_back(EvalValue::Float(instruction.mType, -operand.AsFloat()));
       } else {
         state.mOperands.push_back(MakeInteger(instruction.mType, 0 - operand.Bits()));
@@ -561,7 +563,7 @@ Evaluator::RunWithBudget(ProgramState &state,
     }
     case Op::LogicalNot: {
       const EvalValue operand = pop();
-      const bool isFloat = mView.Type(operand.Type()).mKind == TypeKind::Float;
+      const bool isFloat = mCodeObject.Type(operand.Type()).mKind == TypeKind::Float;
       state.mOperands.push_back(
         MakeInteger(instruction.mType, (isFloat ? operand.AsFloat() == 0.0 : operand.Bits() == 0) ? 1 : 0));
       break;
@@ -686,11 +688,11 @@ Evaluator::RunWithBudget(ProgramState &state,
       if (state.mFrames.size() >= limits.mMaxDepth) {
         return fail(std::format("call depth exceeded {}", limits.mMaxDepth));
       }
-      const BoundView *view = frame.mView;
-      if (instruction.mA >= view->mProgram.mFunctions.size()) {
+      const CodeObject *code = frame.mCodeObject;
+      if (instruction.mA >= code->mProgram.mFunctions.size()) {
         return fail("internal error: function index out of range");
       }
-      const Function &callee = view->mProgram.mFunctions[instruction.mA];
+      const Function &callee = code->mProgram.mFunctions[instruction.mA];
       const u32 function = instruction.mA;
       const u32 entry = callee.mEntry;
       const u32 paramCount = callee.mParamCount;
@@ -708,11 +710,11 @@ Evaluator::RunWithBudget(ProgramState &state,
         state.mLocals.push_back(EvalValue::Scalar(localTypes[i], 0));
       }
       state.mFrames.push_back(
-        Frame{ .mView = view, .mFunction = function, .mPc = entry, .mLocalBase = localBase });
+        Frame{ .mCodeObject = code, .mFunction = function, .mPc = entry, .mLocalBase = localBase });
       break;
     }
     case Op::Fail:
-      return fail(frame.mView->mProgram.mConstants[instruction.mA]);
+      return fail(frame.mCodeObject->mProgram.mConstants[instruction.mA]);
     case Op::Yield: {
       if (!allowYield) {
         return fail("internal error: yield outside a children block");
@@ -799,7 +801,7 @@ FormatInteger(std::string &out, u64 bits, bool isSigned, u32 size, FormatSpec fo
 std::expected<std::string, EvalError>
 Evaluator::Format(const EvalValue &input, FormatSpec format) noexcept
 {
-  const BoundType &type = mView.Type(input.Type());
+  const BoundType &type = mCodeObject.Type(input.Type());
   std::string out;
   if (input.IsLValue()) {
     if (type.mKind == TypeKind::Record || type.mKind == TypeKind::Array) {
@@ -879,37 +881,37 @@ Evaluator::TextOf(const EvalValue &value) const noexcept
 }
 
 static std::expected<EvalValue, EvalError>
-ThisPointer(const BoundView &view, const std::vector<Root> &roots) noexcept
+ThisPointer(const CodeObject &code, const std::vector<Root> &roots) noexcept
 {
   if (roots.empty() || !roots[0].mAddress) {
     return std::unexpected(EvalError{ .mMessage = "view root has no address", .mLoc = {} });
   }
-  return EvalValue::Scalar(view.mThisType, *roots[0].mAddress);
+  return EvalValue::Scalar(code.mThisType, *roots[0].mAddress);
 }
 
 std::expected<EvalValue, EvalError>
 Evaluator::ThisArgument() const noexcept
 {
-  return ThisPointer(mView, mRoots);
+  return ThisPointer(mCodeObject, mRoots);
 }
 
 std::expected<std::string, EvalError>
 Evaluator::Summary(u64 budget) noexcept
 {
-  auto thisPointer = ThisPointer(mView, mRoots);
+  auto thisPointer = ThisPointer(mCodeObject, mRoots);
   if (!thisPointer) {
     return std::unexpected(std::move(thisPointer.error()));
   }
-  if (mView.mSummaryKind == SummarySpec::Kind::Expression) {
-    auto value = Call(mView.mSummaryFunction, std::span{ &*thisPointer, 1 }, budget);
+  if (mCodeObject.mSummaryKind == SummarySpec::Kind::Expression) {
+    auto value = Call(mCodeObject.mSummaryFunction, std::span{ &*thisPointer, 1 }, budget);
     if (!value) {
       return std::unexpected(std::move(value.error()));
     }
-    return Format(*value, mView.mSummaryFormat);
+    return Format(*value, mCodeObject.mSummaryFormat);
   }
 
   std::string out;
-  for (const auto &part : mView.mSummaryParts) {
+  for (const auto &part : mCodeObject.mSummaryParts) {
     out.append(part.mLiteral);
     if (part.mFunction == kNoFunction) {
       continue;
@@ -930,16 +932,16 @@ Evaluator::Summary(u64 budget) noexcept
 std::expected<ArrayChildren, EvalError>
 Evaluator::Children(u64 budget) noexcept
 {
-  auto thisPointer = ThisPointer(mView, mRoots);
+  auto thisPointer = ThisPointer(mCodeObject, mRoots);
   if (!thisPointer) {
     return std::unexpected(std::move(thisPointer.error()));
   }
-  auto value = Call(mView.mChildrenFunction, std::span{ &*thisPointer, 1 }, budget);
+  auto value = Call(mCodeObject.mChildrenFunction, std::span{ &*thisPointer, 1 }, budget);
   if (!value) {
     return std::unexpected(std::move(value.error()));
   }
   return ArrayChildren{
-    .mBase = value->Bits(), .mCount = value->Count(), .mElement = mView.Type(value->Type()).mElement
+    .mBase = value->Bits(), .mCount = value->Count(), .mElement = mCodeObject.Type(value->Type()).mElement
   };
 }
 

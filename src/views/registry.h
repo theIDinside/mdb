@@ -52,7 +52,7 @@ class ViewRegistry
   // All views, in load order.
   std::vector<const ViewDefinition *> mViews;
   // nullptr = this type has no view
-  std::unordered_map<sym::Type *, std::unique_ptr<BoundView>> mBoundViews;
+  std::unordered_map<sym::Type *, std::unique_ptr<CodeObject>> mBoundViews;
   std::unique_ptr<ViewSerializer> mSerializer;
   // Bumped whenever the set of views changes and all bound views are thrown away.
   u64 mGeneration{ 0 };
@@ -61,7 +61,7 @@ class ViewRegistry
 
   void Rebuild() noexcept;
   const ViewDefinition *FindDirectMatch(sym::Type *type) noexcept;
-  std::unique_ptr<BoundView> FindAndBind(sym::Type *type, u32 depth) noexcept;
+  std::unique_ptr<CodeObject> FindAndBind(sym::Type *type, u32 depth) noexcept;
 
 public:
   using OnProcessedView = std::function<void(const fs::path &, const LoadResult &)>;
@@ -76,7 +76,8 @@ public:
   std::vector<LoadResult> LoadDirectory(const fs::path &directory, const OnProcessedView &onProcessed) noexcept;
   void Clear() noexcept;
 
-  // Changes every time the loaded views change. Anything derived from a BoundView must not outlive its generation.
+  // Changes every time the loaded views change. Anything derived from a CodeObject must not outlive its
+  // generation.
   [[nodiscard]] u64
   Generation() const noexcept
   {
@@ -90,7 +91,7 @@ public:
   }
 
   // The view for values of `type` (a canonical type), or nullptr.
-  const BoundView *Lookup(sym::Type *type) noexcept;
+  const CodeObject *Lookup(sym::Type *type) noexcept;
 
   // The serializer for `value` if a view applies to it, otherwise nullptr.
   sym::DebugAdapterSerializer *SerializerFor(sym::Value &value) noexcept;

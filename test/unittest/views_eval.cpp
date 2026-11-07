@@ -49,7 +49,7 @@ public:
 // Builds bound views by hand, the way the binder would.
 struct Builder
 {
-  BoundView mView;
+  CodeObject mCodeObject;
   TypeId mI32;
   TypeId mU32;
   TypeId mI64;
@@ -67,15 +67,15 @@ struct Builder
     mBool = Type({ .mKind = TypeKind::Bool, .mSize = 1, .mName = "bool" });
     mChar16 = Type({ .mKind = TypeKind::UnsignedInt, .mSize = 2, .mIsChar = true, .mName = "char16_t" });
     mText = Type({ .mKind = TypeKind::Text, .mName = "text" });
-    mView.mRootType = Type({ .mKind = TypeKind::Record, .mSize = 16, .mName = "Root" });
-    mView.mThisType = PointerTo(mView.mRootType);
+    mCodeObject.mRootType = Type({ .mKind = TypeKind::Record, .mSize = 16, .mName = "Root" });
+    mCodeObject.mThisType = PointerTo(mCodeObject.mRootType);
   }
 
   TypeId
   Type(BoundType type)
   {
-    mView.mTypes.push_back(std::move(type));
-    return static_cast<TypeId>(mView.mTypes.size() - 1);
+    mCodeObject.mTypes.push_back(std::move(type));
+    return static_cast<TypeId>(mCodeObject.mTypes.size() - 1);
   }
 
   TypeId
@@ -87,14 +87,14 @@ struct Builder
   NodeId
   Node(BoundNode node)
   {
-    mView.mNodes.push_back(std::move(node));
-    return static_cast<NodeId>(mView.mNodes.size() - 1);
+    mCodeObject.mNodes.push_back(std::move(node));
+    return static_cast<NodeId>(mCodeObject.mNodes.size() - 1);
   }
 
   NodeId
   This()
   {
-    return Node({ .mOp = BoundOp::This, .mType = mView.mRootType });
+    return Node({ .mOp = BoundOp::This, .mType = mCodeObject.mRootType });
   }
 
   // this->member at `offset`, loaded
@@ -129,9 +129,9 @@ Bytes(T... values)
 std::expected<EvalValue, EvalError>
 CallNode(Evaluator &eval, Builder &builder, NodeId node, u64 thisAddress = 0)
 {
-  CodeGen codegen{ builder.mView };
+  CodeGen codegen{ builder.mCodeObject };
   const u32 function = codegen.EmitExprFunction("test", node);
-  const EvalValue thisPointer = EvalValue::Scalar(builder.mView.mThisType, thisAddress);
+  const EvalValue thisPointer = EvalValue::Scalar(builder.mCodeObject.mThisType, thisAddress);
   return eval.Call(function, std::span{ &thisPointer, 1 }, kDefaultBudget);
 }
 
@@ -141,12 +141,12 @@ TEST(ViewsCodeGen, LoadedMemberOfThis)
 {
   Builder b;
   const NodeId member = b.LoadMember(b.mU32, 8);
-  CodeGen codegen{ b.mView };
+  CodeGen codegen{ b.mCodeObject };
   const u32 function = codegen.EmitExprFunction("summary", member);
-  const auto &fn = b.mView.mProgram.mFunctions[function];
+  const auto &fn = b.mCodeObject.mProgram.mFunctions[function];
   ASSERT_EQ(fn.mParamCount, 1);
-  ASSERT_EQ(fn.mLocalTypes, (std::vector<TypeId>{ b.mView.mThisType }));
-  const auto &code = b.mView.mProgram.mCode;
+  ASSERT_EQ(fn.mLocalTypes, (std::vector<TypeId>{ b.mCodeObject.mThisType }));
+  const auto &code = b.mCodeObject.mProgram.mCode;
   ASSERT_EQ(code.size(), 5);
   EXPECT_EQ(code[0].mOp, Op::LoadLocal);
   EXPECT_EQ(code[0].mA, 0);
@@ -164,28 +164,28 @@ TEST(ViewsCodeGen, CallsAndFailInstructions)
   Builder b;
   const NodeId first = b.Int(b.mI32, 11);
   const NodeId second = b.Int(b.mI32, 22);
-  b.mView.mCallArgs = { first, second };
+  b.mCodeObject.mCallArgs = { first, second };
   const NodeId call = b.Node(BoundNode{ .mOp = BoundOp::Call, .mType = b.mI32, .mA = 0, .mB = 2, .mImm = 7 });
-  CodeGen codegen{ b.mView };
+  CodeGen codegen{ b.mCodeObject };
   const u32 function = codegen.EmitExprFunction("caller", call);
   EXPECT_EQ(function, 0);
-  ASSERT_EQ(b.mView.mProgram.mCode.size(), 5);
-  EXPECT_EQ(b.mView.mProgram.mCode[0].mOp, Op::LoadLocal);
-  EXPECT_EQ(b.mView.mProgram.mCode[0].mA, 0);
-  EXPECT_EQ(b.mView.mProgram.mCode[0].mType, b.mView.mThisType);
-  EXPECT_EQ(b.mView.mProgram.mCode[1].mOp, Op::PushInt);
-  EXPECT_EQ(b.mView.mProgram.mCode[1].mImm, 11);
-  EXPECT_EQ(b.mView.mProgram.mCode[2].mOp, Op::PushInt);
-  EXPECT_EQ(b.mView.mProgram.mCode[2].mImm, 22);
-  EXPECT_EQ(b.mView.mProgram.mCode[3].mOp, Op::Call);
-  EXPECT_EQ(b.mView.mProgram.mCode[3].mA, 7);
-  EXPECT_EQ(b.mView.mProgram.mCode[3].mType, b.mI32);
+  ASSERT_EQ(b.mCodeObject.mProgram.mCode.size(), 5);
+  EXPECT_EQ(b.mCodeObject.mProgram.mCode[0].mOp, Op::LoadLocal);
+  EXPECT_EQ(b.mCodeObject.mProgram.mCode[0].mA, 0);
+  EXPECT_EQ(b.mCodeObject.mProgram.mCode[0].mType, b.mCodeObject.mThisType);
+  EXPECT_EQ(b.mCodeObject.mProgram.mCode[1].mOp, Op::PushInt);
+  EXPECT_EQ(b.mCodeObject.mProgram.mCode[1].mImm, 11);
+  EXPECT_EQ(b.mCodeObject.mProgram.mCode[2].mOp, Op::PushInt);
+  EXPECT_EQ(b.mCodeObject.mProgram.mCode[2].mImm, 22);
+  EXPECT_EQ(b.mCodeObject.mProgram.mCode[3].mOp, Op::Call);
+  EXPECT_EQ(b.mCodeObject.mProgram.mCode[3].mA, 7);
+  EXPECT_EQ(b.mCodeObject.mProgram.mCode[3].mType, b.mI32);
 
   codegen.EmitFail("missing return", SourceLoc{ 4, 9 });
-  ASSERT_EQ(b.mView.mProgram.mConstants.size(), 1);
-  EXPECT_EQ(b.mView.mProgram.mConstants[0], "missing return");
-  EXPECT_EQ(b.mView.mProgram.mCode.back().mOp, Op::Fail);
-  EXPECT_EQ(b.mView.mProgram.mCode.back().mA, 0);
+  ASSERT_EQ(b.mCodeObject.mProgram.mConstants.size(), 1);
+  EXPECT_EQ(b.mCodeObject.mProgram.mConstants[0], "missing return");
+  EXPECT_EQ(b.mCodeObject.mProgram.mCode.back().mOp, Op::Fail);
+  EXPECT_EQ(b.mCodeObject.mProgram.mCode.back().mA, 0);
 }
 
 TEST(ViewsCodeGen, LogicalAndUsesShortCircuitJumps)
@@ -194,9 +194,9 @@ TEST(ViewsCodeGen, LogicalAndUsesShortCircuitJumps)
   const NodeId lhs = b.Int(b.mBool, 1);
   const NodeId rhs = b.Int(b.mBool, 0);
   const NodeId node = b.Node({ .mOp = BoundOp::LogicalAnd, .mType = b.mBool, .mA = lhs, .mB = rhs });
-  CodeGen codegen{ b.mView };
+  CodeGen codegen{ b.mCodeObject };
   codegen.EmitExprFunction("summary", node);
-  const auto &code = b.mView.mProgram.mCode;
+  const auto &code = b.mCodeObject.mProgram.mCode;
   std::vector<u32> jumps;
   for (u32 i = 0; i < code.size(); ++i) {
     if (code[i].mOp == Op::JumpIfFalse) {
@@ -219,9 +219,9 @@ TEST(ViewsCodeGen, LogicalOrAndTernaryUseControlFlow)
   const NodeId a = b.LoadMember(b.mBool, 0);
   const NodeId rhs = b.LoadMember(b.mBool, 1);
   const NodeId either = b.Node({ .mOp = BoundOp::LogicalOr, .mType = b.mBool, .mA = a, .mB = rhs });
-  CodeGen codegen{ b.mView };
+  CodeGen codegen{ b.mCodeObject };
   codegen.EmitExprFunction("or", either);
-  const auto &orCode = b.mView.mProgram.mCode;
+  const auto &orCode = b.mCodeObject.mProgram.mCode;
   std::vector<u32> conditionalJumps;
   std::vector<u32> jumps;
   std::vector<u32> falseConstants;
@@ -254,9 +254,9 @@ TEST(ViewsCodeGen, LogicalOrAndTernaryUseControlFlow)
   const NodeId yes = t.Int(t.mI32, 10);
   const NodeId no = t.Int(t.mI32, 20);
   const NodeId ternary = t.Node({ .mOp = BoundOp::Ternary, .mType = t.mI32, .mA = cond, .mB = yes, .mC = no });
-  CodeGen ternaryGen{ t.mView };
+  CodeGen ternaryGen{ t.mCodeObject };
   ternaryGen.EmitExprFunction("ternary", ternary);
-  const auto &ternaryCode = t.mView.mProgram.mCode;
+  const auto &ternaryCode = t.mCodeObject.mProgram.mCode;
   ASSERT_EQ(ternaryCode[1].mOp, Op::JumpIfFalse);
   EXPECT_EQ(ternaryCode[ternaryCode[1].mImm].mOp, Op::PushInt);
   EXPECT_EQ(ternaryCode[3].mOp, Op::Jump);
@@ -267,16 +267,16 @@ TEST(ViewsCodeGen, LetTextAndBuiltinInstructions)
 {
   Builder b;
   const NodeId letRef = b.Node({ .mOp = BoundOp::LetRef, .mType = b.mI32, .mImm = 3 });
-  CodeGen gen{ b.mView };
+  CodeGen gen{ b.mCodeObject };
   gen.EmitExprFunction("let", letRef);
-  EXPECT_EQ(b.mView.mProgram.mCode[0].mOp, Op::LoadLet);
-  EXPECT_EQ(b.mView.mProgram.mCode[0].mA, 3);
+  EXPECT_EQ(b.mCodeObject.mProgram.mCode[0].mOp, Op::LoadLet);
+  EXPECT_EQ(b.mCodeObject.mProgram.mCode[0].mA, 3);
 
   const NodeId textConst = b.Node({ .mOp = BoundOp::TextConst, .mType = b.mText, .mText = "hello" });
   const u32 textFn = gen.EmitExprFunction("text", textConst);
-  const auto &textPush = b.mView.mProgram.mCode[b.mView.mProgram.mFunctions[textFn].mEntry];
+  const auto &textPush = b.mCodeObject.mProgram.mCode[b.mCodeObject.mProgram.mFunctions[textFn].mEntry];
   ASSERT_EQ(textPush.mOp, Op::PushText);
-  EXPECT_EQ(b.mView.mProgram.mConstants[textPush.mA], "hello");
+  EXPECT_EQ(b.mCodeObject.mProgram.mConstants[textPush.mA], "hello");
 
   const TypeId charPtr = b.PointerTo(b.mChar16);
   const NodeId pointer = b.Int(charPtr, 0x1000);
@@ -284,16 +284,16 @@ TEST(ViewsCodeGen, LetTextAndBuiltinInstructions)
   const NodeId withLength =
     b.Node({ .mOp = BoundOp::Text, .mType = b.mText, .mA = pointer, .mB = length, .mImm = 16, .mWidth = 2 });
   const u32 withLengthFn = gen.EmitExprFunction("with length", withLength);
-  const u32 withLengthEntry = b.mView.mProgram.mFunctions[withLengthFn].mEntry;
-  EXPECT_EQ(b.mView.mProgram.mCode[withLengthEntry + 2].mOp, Op::Text);
-  EXPECT_EQ(b.mView.mProgram.mCode[withLengthEntry + 2].mA, 1);
+  const u32 withLengthEntry = b.mCodeObject.mProgram.mFunctions[withLengthFn].mEntry;
+  EXPECT_EQ(b.mCodeObject.mProgram.mCode[withLengthEntry + 2].mOp, Op::Text);
+  EXPECT_EQ(b.mCodeObject.mProgram.mCode[withLengthEntry + 2].mA, 1);
 
   const NodeId nulText =
     b.Node({ .mOp = BoundOp::Text, .mType = b.mText, .mA = pointer, .mImm = 16, .mWidth = 2 });
   const u32 nulTextFn = gen.EmitExprFunction("nul text", nulText);
-  const u32 nulTextEntry = b.mView.mProgram.mFunctions[nulTextFn].mEntry;
-  EXPECT_EQ(b.mView.mProgram.mCode[nulTextEntry + 1].mOp, Op::Text);
-  EXPECT_EQ(b.mView.mProgram.mCode[nulTextEntry + 1].mA, 0);
+  const u32 nulTextEntry = b.mCodeObject.mProgram.mFunctions[nulTextFn].mEntry;
+  EXPECT_EQ(b.mCodeObject.mProgram.mCode[nulTextEntry + 1].mOp, Op::Text);
+  EXPECT_EQ(b.mCodeObject.mProgram.mCode[nulTextEntry + 1].mA, 0);
 }
 
 TEST(ViewsEval, MembersOfTheRootComeFromItsBytes)
@@ -302,8 +302,8 @@ TEST(ViewsEval, MembersOfTheRootComeFromItsBytes)
   const NodeId length = b.LoadMember(b.mU32, 8);
   FakeMemory memory;
   const auto root = Bytes(u64{ 0x1000 }, u32{ 7 }, u32{ 0 });
-  const Root rootInfo{ .mType = b.mView.mRootType, .mAddress = 0x5000, .mBytes = root };
-  Evaluator eval{ b.mView, memory, std::span{ &rootInfo, 1 } };
+  const Root rootInfo{ .mType = b.mCodeObject.mRootType, .mAddress = 0x5000, .mBytes = root };
+  Evaluator eval{ b.mCodeObject, memory, std::span{ &rootInfo, 1 } };
   auto value = CallNode(eval, b, length, 0x5000);
   ASSERT_TRUE(value.has_value()) << value.error().mMessage;
   EXPECT_EQ(value->Bits(), 7);
@@ -338,8 +338,8 @@ TEST(ViewsEval, DerefAndPointerArithmetic)
   FakeMemory memory;
   memory.Map(0x1000, Bytes(u32{ 3 }, u32{ 8 }, i32{ 10 }, i32{ -20 }, i32{ 30 }));
   const auto root = Bytes(u64{ 0x1000 }, u64{ 0 });
-  const Root rootInfo{ .mType = b.mView.mRootType, .mAddress = 0x5000, .mBytes = root };
-  Evaluator eval{ b.mView, memory, std::span{ &rootInfo, 1 } };
+  const Root rootInfo{ .mType = b.mCodeObject.mRootType, .mAddress = 0x5000, .mBytes = root };
+  Evaluator eval{ b.mCodeObject, memory, std::span{ &rootInfo, 1 } };
 
   auto len = CallNode(eval, b, length, 0x5000);
   ASSERT_TRUE(len.has_value()) << len.error().mMessage;
@@ -356,7 +356,7 @@ TEST(ViewsEval, DerefAndPointerArithmetic)
   // pointer difference in elements
   const NodeId diff =
     b.Node({ .mOp = BoundOp::PointerDiff, .mType = b.mI64, .mA = third, .mB = elements, .mImm = 4 });
-  Evaluator eval2{ b.mView, memory, std::span{ &rootInfo, 1 } };
+  Evaluator eval2{ b.mCodeObject, memory, std::span{ &rootInfo, 1 } };
   auto difference = CallNode(eval2, b, diff, 0x5000);
   ASSERT_TRUE(difference.has_value());
   EXPECT_EQ(static_cast<i64>(difference->Bits()), 2);
@@ -373,16 +373,16 @@ TEST(ViewsEval, NullDerefAndUnreadableMemoryAreErrors)
 
   FakeMemory memory;
   const auto nullRoot = Bytes(u64{ 0 }, u64{ 0 });
-  const Root nullRootInfo{ .mType = b.mView.mRootType, .mAddress = 0x5000, .mBytes = nullRoot };
-  Evaluator nullEval{ b.mView, memory, std::span{ &nullRootInfo, 1 } };
+  const Root nullRootInfo{ .mType = b.mCodeObject.mRootType, .mAddress = 0x5000, .mBytes = nullRoot };
+  Evaluator nullEval{ b.mCodeObject, memory, std::span{ &nullRootInfo, 1 } };
   auto nullResult = CallNode(nullEval, b, value, 0x5000);
   ASSERT_FALSE(nullResult.has_value());
   EXPECT_EQ(nullResult.error().mMessage, "null pointer dereference");
   EXPECT_EQ(nullResult.error().mLoc.mLine, 3);
 
   const auto badRoot = Bytes(u64{ 0xdead0000 }, u64{ 0 });
-  const Root badRootInfo{ .mType = b.mView.mRootType, .mAddress = 0x5000, .mBytes = badRoot };
-  Evaluator badEval{ b.mView, memory, std::span{ &badRootInfo, 1 } };
+  const Root badRootInfo{ .mType = b.mCodeObject.mRootType, .mAddress = 0x5000, .mBytes = badRoot };
+  Evaluator badEval{ b.mCodeObject, memory, std::span{ &badRootInfo, 1 } };
   auto badResult = CallNode(badEval, b, value, 0x5000);
   ASSERT_FALSE(badResult.has_value());
   EXPECT_NE(badResult.error().mMessage.find("0xdead0000"), std::string::npos);
@@ -404,8 +404,8 @@ TEST(ViewsEval, Bitfields)
   FakeMemory memory;
   // 0b11110'000 at offset 1: field value 0b11110 = 30 unsigned, -2 signed
   const std::vector<u8> root{ 0x00, 0b11110000, 0x00, 0x00 };
-  const Root rootInfo{ .mType = b.mView.mRootType, .mAddress = 0x5000, .mBytes = root };
-  Evaluator eval{ b.mView, memory, std::span{ &rootInfo, 1 } };
+  const Root rootInfo{ .mType = b.mCodeObject.mRootType, .mAddress = 0x5000, .mBytes = root };
+  Evaluator eval{ b.mCodeObject, memory, std::span{ &rootInfo, 1 } };
   EXPECT_EQ(CallNode(eval, b, unsignedField, 0x5000)->Bits(), 30);
   EXPECT_EQ(static_cast<i64>(CallNode(eval, b, signedField, 0x5000)->Bits()), -2);
 }
@@ -424,9 +424,9 @@ TEST(ViewsEval, BitfieldOffsetIsNormalized)
       root[(37 + bit) / 8] |= static_cast<u8>(1U << ((37 + bit) % 8));
     }
   }
-  const Root rootInfo{ .mType = b.mView.mRootType, .mAddress = 0x5000, .mBytes = root };
+  const Root rootInfo{ .mType = b.mCodeObject.mRootType, .mAddress = 0x5000, .mBytes = root };
   FakeMemory memory;
-  Evaluator eval{ b.mView, memory, std::span{ &rootInfo, 1 } };
+  Evaluator eval{ b.mCodeObject, memory, std::span{ &rootInfo, 1 } };
 
   auto result = CallNode(eval, b, field, 0x5000);
   ASSERT_TRUE(result.has_value()) << result.error().mMessage;
@@ -451,9 +451,9 @@ TEST(ViewsEval, SixtyFourBitFieldAtOffsetNeedsNineByteRead)
       root[(3 + bit) / 8] |= static_cast<u8>(1U << ((3 + bit) % 8));
     }
   }
-  const Root rootInfo{ .mType = b.mView.mRootType, .mAddress = 0x5000, .mBytes = root };
+  const Root rootInfo{ .mType = b.mCodeObject.mRootType, .mAddress = 0x5000, .mBytes = root };
   FakeMemory memory;
-  Evaluator eval{ b.mView, memory, std::span{ &rootInfo, 1 } };
+  Evaluator eval{ b.mCodeObject, memory, std::span{ &rootInfo, 1 } };
 
   auto unsignedResult = CallNode(eval, b, unsignedField, 0x5000);
   ASSERT_TRUE(unsignedResult.has_value()) << unsignedResult.error().mMessage;
@@ -467,11 +467,11 @@ TEST(ViewsEval, ArithmeticAndComparisons)
 {
   Builder b;
   FakeMemory memory;
-  const Root rootInfo{ .mType = b.mView.mRootType, .mAddress = 0, .mBytes = {} };
-  Evaluator eval{ b.mView, memory, std::span{ &rootInfo, 1 } };
+  const Root rootInfo{ .mType = b.mCodeObject.mRootType, .mAddress = 0, .mBytes = {} };
+  Evaluator eval{ b.mCodeObject, memory, std::span{ &rootInfo, 1 } };
   const auto eval64 = [&](BoundOp op, TypeId type, u64 lhs, u64 rhs) {
     const NodeId node = b.Node({ .mOp = op, .mType = type, .mA = b.Int(type, lhs), .mB = b.Int(type, rhs) });
-    Evaluator e{ b.mView, memory, std::span{ &rootInfo, 1 } };
+    Evaluator e{ b.mCodeObject, memory, std::span{ &rootInfo, 1 } };
     return CallNode(e, b, node);
   };
   EXPECT_EQ(static_cast<i64>(eval64(BoundOp::Sub, b.mI64, 3, 5)->Bits()), -2);
@@ -481,14 +481,14 @@ TEST(ViewsEval, ArithmeticAndComparisons)
   // signed vs unsigned comparisons
   const NodeId lessSigned = b.Node(
     { .mOp = BoundOp::Less, .mType = b.mBool, .mA = b.Int(b.mI64, static_cast<u64>(-1)), .mB = b.Int(b.mI64, 1) });
-  Evaluator e{ b.mView, memory, std::span{ &rootInfo, 1 } };
+  Evaluator e{ b.mCodeObject, memory, std::span{ &rootInfo, 1 } };
   EXPECT_EQ(CallNode(e, b, lessSigned)->Bits(), 1);
   EXPECT_EQ(eval64(BoundOp::Less, b.mU64, static_cast<u64>(-1), 1)->Bits(), 0);
 
   // Narrowing conversion truncates and sign extends
   const TypeId i8 = b.Type({ .mKind = TypeKind::SignedInt, .mSize = 1, .mIsSigned = true, .mName = "i8" });
   const NodeId narrowed = b.Node({ .mOp = BoundOp::Convert, .mType = i8, .mA = b.Int(b.mI64, 0x1FF) });
-  Evaluator e2{ b.mView, memory, std::span{ &rootInfo, 1 } };
+  Evaluator e2{ b.mCodeObject, memory, std::span{ &rootInfo, 1 } };
   EXPECT_EQ(static_cast<i64>(CallNode(e2, b, narrowed)->Bits()), -1);
 }
 
@@ -500,16 +500,16 @@ TEST(ViewsEval, LetsAreEvaluatedOnce)
   const NodeId target = b.Node({ .mOp = BoundOp::Load,
     .mType = b.mI32,
     .mA = b.Node({ .mOp = BoundOp::Deref, .mType = b.mI32, .mA = pointer }) });
-  CodeGen codegen{ b.mView };
-  b.mView.mLetFunctions.push_back(codegen.EmitExprFunction("let 0", target));
+  CodeGen codegen{ b.mCodeObject };
+  b.mCodeObject.mLetFunctions.push_back(codegen.EmitExprFunction("let 0", target));
   const NodeId ref = b.Node({ .mOp = BoundOp::LetRef, .mType = b.mI32, .mImm = 0 });
   const NodeId sum = b.Node({ .mOp = BoundOp::Add, .mType = b.mI32, .mA = ref, .mB = ref });
 
   FakeMemory memory;
   memory.MapValue(0x2000, i32{ 21 });
   const auto root = Bytes(u64{ 0x2000 }, u64{ 0 });
-  const Root rootInfo{ .mType = b.mView.mRootType, .mAddress = 0x5000, .mBytes = root };
-  Evaluator eval{ b.mView, memory, std::span{ &rootInfo, 1 } };
+  const Root rootInfo{ .mType = b.mCodeObject.mRootType, .mAddress = 0x5000, .mBytes = root };
+  Evaluator eval{ b.mCodeObject, memory, std::span{ &rootInfo, 1 } };
   auto result = CallNode(eval, b, sum, 0x5000);
   ASSERT_TRUE(result.has_value());
   EXPECT_EQ(result->Bits(), 42);
@@ -532,8 +532,8 @@ TEST(ViewsEval, TextWithLength)
   // "Hé😀"
   memory.Map(0x3000, Bytes(u16{ 'H' }, u16{ 0xE9 }, u16{ 0xD83D }, u16{ 0xDE00 }));
   const auto root = Bytes(u64{ 0x3000 }, u32{ 4 }, u32{ 0 });
-  const Root rootInfo{ .mType = b.mView.mRootType, .mAddress = 0x5000, .mBytes = root };
-  Evaluator eval{ b.mView, memory, std::span{ &rootInfo, 1 } };
+  const Root rootInfo{ .mType = b.mCodeObject.mRootType, .mAddress = 0x5000, .mBytes = root };
+  Evaluator eval{ b.mCodeObject, memory, std::span{ &rootInfo, 1 } };
   auto value = CallNode(eval, b, text, 0x5000);
   ASSERT_TRUE(value.has_value()) << value.error().mMessage;
   EXPECT_EQ(eval.TextOf(*value), "H\xC3\xA9\xF0\x9F\x98\x80");
@@ -546,8 +546,8 @@ TEST(ViewsEval, TextWithLength)
 
   // Zero length text with a null pointer reads nothing and is empty
   const auto emptyRoot = Bytes(u64{ 0 }, u32{ 0 }, u32{ 0 });
-  const Root emptyRootInfo{ .mType = b.mView.mRootType, .mAddress = 0x5000, .mBytes = emptyRoot };
-  Evaluator emptyEval{ b.mView, memory, std::span{ &emptyRootInfo, 1 } };
+  const Root emptyRootInfo{ .mType = b.mCodeObject.mRootType, .mAddress = 0x5000, .mBytes = emptyRoot };
+  Evaluator emptyEval{ b.mCodeObject, memory, std::span{ &emptyRootInfo, 1 } };
   auto empty = CallNode(emptyEval, b, text, 0x5000);
   ASSERT_TRUE(empty.has_value()) << empty.error().mMessage;
   EXPECT_EQ(*emptyEval.Format(*empty, FormatSpec::Default), "\"\"");
@@ -567,8 +567,8 @@ TEST(ViewsEval, NulTerminatedTextStopsAtUnmappedMemory)
   std::memcpy(page.data(), "hello", 6);
   memory.Map(0x4000 - 16, page);
   const auto root = Bytes(u64{ 0x4000 - 16 }, u64{ 0 });
-  const Root rootInfo{ .mType = b.mView.mRootType, .mAddress = 0x5000, .mBytes = root };
-  Evaluator eval{ b.mView, memory, std::span{ &rootInfo, 1 } };
+  const Root rootInfo{ .mType = b.mCodeObject.mRootType, .mAddress = 0x5000, .mBytes = root };
+  Evaluator eval{ b.mCodeObject, memory, std::span{ &rootInfo, 1 } };
   auto value = CallNode(eval, b, text, 0x5000);
   ASSERT_TRUE(value.has_value()) << value.error().mMessage;
   EXPECT_EQ(eval.TextOf(*value), "hello");
@@ -577,8 +577,8 @@ TEST(ViewsEval, NulTerminatedTextStopsAtUnmappedMemory)
   std::vector<u8> unterminated(16, 'x');
   memory.Map(0x8000 - 16, unterminated);
   const auto root2 = Bytes(u64{ 0x8000 - 16 }, u64{ 0 });
-  const Root rootInfo2{ .mType = b.mView.mRootType, .mAddress = 0x5000, .mBytes = root2 };
-  Evaluator eval2{ b.mView, memory, std::span{ &rootInfo2, 1 } };
+  const Root rootInfo2{ .mType = b.mCodeObject.mRootType, .mAddress = 0x5000, .mBytes = root2 };
+  Evaluator eval2{ b.mCodeObject, memory, std::span{ &rootInfo2, 1 } };
   auto partial = CallNode(eval2, b, text, 0x5000);
   ASSERT_TRUE(partial.has_value()) << partial.error().mMessage;
   EXPECT_EQ(eval2.TextOf(*partial), std::string(16, 'x'));
@@ -595,18 +595,18 @@ TEST(ViewsEval, TextHandlesCoverConstantsAndDecodedText)
   const NodeId decoded =
     b.Node({ .mOp = BoundOp::Text, .mType = b.mText, .mA = data, .mB = length, .mImm = 16, .mWidth = 2 });
 
-  CodeGen codegen{ b.mView };
-  b.mView.mSummaryKind = SummarySpec::Kind::Template;
-  b.mView.mSummaryParts.push_back({ .mLiteral = "constant=" });
-  b.mView.mSummaryParts.back().mFunction = codegen.EmitExprFunction("constant", constant);
-  b.mView.mSummaryParts.push_back({ .mLiteral = " decoded=" });
-  b.mView.mSummaryParts.back().mFunction = codegen.EmitExprFunction("decoded", decoded);
+  CodeGen codegen{ b.mCodeObject };
+  b.mCodeObject.mSummaryKind = SummarySpec::Kind::Template;
+  b.mCodeObject.mSummaryParts.push_back({ .mLiteral = "constant=" });
+  b.mCodeObject.mSummaryParts.back().mFunction = codegen.EmitExprFunction("constant", constant);
+  b.mCodeObject.mSummaryParts.push_back({ .mLiteral = " decoded=" });
+  b.mCodeObject.mSummaryParts.back().mFunction = codegen.EmitExprFunction("decoded", decoded);
 
   FakeMemory memory;
   memory.Map(0x3000, Bytes(u16{ 'o' }, u16{ 'k' }));
   const auto root = Bytes(u64{ 0x3000 }, u32{ 2 }, u32{ 0 });
-  const Root rootInfo{ .mType = b.mView.mRootType, .mAddress = 0x5000, .mBytes = root };
-  Evaluator eval{ b.mView, memory, std::span{ &rootInfo, 1 } };
+  const Root rootInfo{ .mType = b.mCodeObject.mRootType, .mAddress = 0x5000, .mBytes = root };
+  Evaluator eval{ b.mCodeObject, memory, std::span{ &rootInfo, 1 } };
 
   auto summary = eval.Summary();
   ASSERT_TRUE(summary.has_value()) << summary.error().mMessage;
@@ -621,24 +621,24 @@ TEST(ViewsEval, ArrayChildrenAndSummaries)
     b.Type({ .mKind = TypeKind::ArrayProvider, .mElement = b.mI32, .mName = "array of int" });
   const NodeId data = b.LoadMember(intPtr, 0);
   const NodeId count = b.Node({ .mOp = BoundOp::Convert, .mType = b.mI64, .mA = b.LoadMember(b.mU32, 8) });
-  b.mView.mChildrenKind = ChildrenSpec::Kind::Expression;
+  b.mCodeObject.mChildrenKind = ChildrenSpec::Kind::Expression;
   const NodeId childrenNode =
     b.Node({ .mOp = BoundOp::ArrayProvider, .mType = provider, .mA = data, .mB = count, .mImm = 100 });
-  CodeGen codegen{ b.mView };
-  b.mView.mChildrenFunction = codegen.EmitExprFunction("children", childrenNode);
+  CodeGen codegen{ b.mCodeObject };
+  b.mCodeObject.mChildrenFunction = codegen.EmitExprFunction("children", childrenNode);
 
-  b.mView.mSummaryKind = SummarySpec::Kind::Template;
-  b.mView.mSummaryParts.push_back({ .mLiteral = "len=" });
-  b.mView.mSummaryParts.back().mFunction = codegen.EmitExprFunction("summary", count);
-  b.mView.mSummaryParts.push_back({ .mLiteral = " data=" });
-  b.mView.mSummaryParts.back().mFunction = codegen.EmitExprFunction("summary", data);
-  b.mView.mSummaryParts.push_back({ .mLiteral = " hex=", .mFormat = FormatSpec::Hex });
-  b.mView.mSummaryParts.back().mFunction = codegen.EmitExprFunction("summary", count);
+  b.mCodeObject.mSummaryKind = SummarySpec::Kind::Template;
+  b.mCodeObject.mSummaryParts.push_back({ .mLiteral = "len=" });
+  b.mCodeObject.mSummaryParts.back().mFunction = codegen.EmitExprFunction("summary", count);
+  b.mCodeObject.mSummaryParts.push_back({ .mLiteral = " data=" });
+  b.mCodeObject.mSummaryParts.back().mFunction = codegen.EmitExprFunction("summary", data);
+  b.mCodeObject.mSummaryParts.push_back({ .mLiteral = " hex=", .mFormat = FormatSpec::Hex });
+  b.mCodeObject.mSummaryParts.back().mFunction = codegen.EmitExprFunction("summary", count);
 
   FakeMemory memory;
   const auto root = Bytes(u64{ 0x1000 }, u32{ 255 }, u32{ 0 });
-  const Root rootInfo{ .mType = b.mView.mRootType, .mAddress = 0x5000, .mBytes = root };
-  Evaluator eval{ b.mView, memory, std::span{ &rootInfo, 1 } };
+  const Root rootInfo{ .mType = b.mCodeObject.mRootType, .mAddress = 0x5000, .mBytes = root };
+  Evaluator eval{ b.mCodeObject, memory, std::span{ &rootInfo, 1 } };
   auto children = eval.Children();
   ASSERT_TRUE(children.has_value()) << children.error().mMessage;
   EXPECT_EQ(children->mBase, 0x1000);
@@ -651,8 +651,8 @@ TEST(ViewsEval, ArrayChildrenAndSummaries)
 
   // A non-empty array at a null pointer is an error
   const auto nullRoot = Bytes(u64{ 0 }, u32{ 3 }, u32{ 0 });
-  const Root nullRootInfo{ .mType = b.mView.mRootType, .mAddress = 0x5000, .mBytes = nullRoot };
-  Evaluator nullEval{ b.mView, memory, std::span{ &nullRootInfo, 1 } };
+  const Root nullRootInfo{ .mType = b.mCodeObject.mRootType, .mAddress = 0x5000, .mBytes = nullRoot };
+  Evaluator nullEval{ b.mCodeObject, memory, std::span{ &nullRootInfo, 1 } };
   EXPECT_FALSE(nullEval.Children().has_value());
 }
 
@@ -660,8 +660,8 @@ TEST(ViewsEval, FormatsCharacters)
 {
   Builder b;
   FakeMemory memory;
-  const Root rootInfo{ .mType = b.mView.mRootType, .mAddress = 0, .mBytes = {} };
-  Evaluator eval{ b.mView, memory, std::span{ &rootInfo, 1 } };
+  const Root rootInfo{ .mType = b.mCodeObject.mRootType, .mAddress = 0, .mBytes = {} };
+  Evaluator eval{ b.mCodeObject, memory, std::span{ &rootInfo, 1 } };
   EvalValue value = EvalValue::Scalar(b.mChar16, 0x65E5);
   EXPECT_EQ(*eval.Format(value, FormatSpec::Default), "26085 '\xE6\x97\xA5'");
   value = EvalValue::Scalar(b.mChar16, '\n');
@@ -676,13 +676,13 @@ TEST(ViewsEval, RootsWithAndWithoutAddresses)
   const auto firstRootBytes = Bytes(u32{ 17 });
   const auto secondRootBytes = Bytes(u32{ 29 });
   const Root roots[] = {
-    { .mType = b.mView.mRootType, .mAddress = 0x5000, .mBytes = firstRootBytes },
+    { .mType = b.mCodeObject.mRootType, .mAddress = 0x5000, .mBytes = firstRootBytes },
     { .mType = secondRootType, .mAddress = std::nullopt, .mBytes = secondRootBytes },
   };
   FakeMemory memory;
-  Evaluator eval{ b.mView, memory, std::span{ roots } };
+  Evaluator eval{ b.mCodeObject, memory, std::span{ roots } };
 
-  const NodeId firstRoot = b.Node({ .mOp = BoundOp::Root, .mType = b.mView.mRootType, .mImm = 0 });
+  const NodeId firstRoot = b.Node({ .mOp = BoundOp::Root, .mType = b.mCodeObject.mRootType, .mImm = 0 });
   const NodeId firstValue = b.Node({ .mOp = BoundOp::Load,
     .mType = b.mU32,
     .mA = b.Node({ .mOp = BoundOp::Member, .mType = b.mU32, .mA = firstRoot }) });
@@ -711,8 +711,8 @@ TEST(ViewsEval, ViewedObjectAtAddressZeroIsReadFromItsBytes)
   const NodeId length = b.LoadMember(b.mU32, 8);
   FakeMemory memory;
   const auto root = Bytes(u64{ 0 }, u32{ 7 }, u32{ 0 });
-  const Root rootInfo{ .mType = b.mView.mRootType, .mAddress = 0, .mBytes = root };
-  Evaluator eval{ b.mView, memory, std::span{ &rootInfo, 1 } };
+  const Root rootInfo{ .mType = b.mCodeObject.mRootType, .mAddress = 0, .mBytes = root };
+  Evaluator eval{ b.mCodeObject, memory, std::span{ &rootInfo, 1 } };
   auto value = CallNode(eval, b, length, 0);
   ASSERT_TRUE(value.has_value()) << value.error().mMessage;
   EXPECT_EQ(value->Bits(), 7);
@@ -722,10 +722,10 @@ TEST(ViewsEval, ViewedObjectAtAddressZeroIsReadFromItsBytes)
 TEST(ViewsEval, RunBudgetStopsAndCallReportsExhaustion)
 {
   Builder b;
-  b.mView.mProgram.mFunctions.push_back(Function{ .mName = "loop", .mEntry = 0 });
-  b.mView.mProgram.mCode.push_back(Instruction{ .mOp = Op::Jump, .mImm = 0 });
+  b.mCodeObject.mProgram.mFunctions.push_back(Function{ .mName = "loop", .mEntry = 0 });
+  b.mCodeObject.mProgram.mCode.push_back(Instruction{ .mOp = Op::Jump, .mImm = 0 });
   FakeMemory memory;
-  Evaluator eval{ b.mView, memory, std::span<const Root>{} };
+  Evaluator eval{ b.mCodeObject, memory, std::span<const Root>{} };
 
   ProgramState state = eval.Start(0, std::span<const EvalValue>{});
   const auto noYield = [](const YieldedElement &) {};
@@ -743,7 +743,7 @@ TEST(ViewsEval, YieldPausesAndCopiesProgramState)
 {
   Builder b;
   const TypeId intPointer = b.PointerTo(b.mI32);
-  CodeGen codegen{ b.mView };
+  CodeGen codegen{ b.mCodeObject };
   const u32 function = codegen.BeginFunction("children", true);
   const u32 dataSlot = codegen.AddLocal(function, intPointer);
   const u32 indexSlot = codegen.AddLocal(function, b.mI64);
@@ -794,11 +794,11 @@ TEST(ViewsEval, YieldPausesAndCopiesProgramState)
   codegen.PatchTarget(exit, codegen.Here());
   codegen.Emit(Instruction{ .mOp = Op::Return, .mA = 0 });
 
-  b.mView.mChildrenFunction = function;
+  b.mCodeObject.mChildrenFunction = function;
   FakeMemory memory;
   memory.Map(0x1000, Bytes(i32{ 10 }, i32{ 20 }, i32{ 30 }, i32{ 40 }, i32{ 50 }, i32{ 60 }));
-  Evaluator eval{ b.mView, memory, std::span<const Root>{} };
-  const EvalValue thisPointer = EvalValue::Scalar(b.mView.mThisType, 0);
+  Evaluator eval{ b.mCodeObject, memory, std::span<const Root>{} };
+  const EvalValue thisPointer = EvalValue::Scalar(b.mCodeObject.mThisType, 0);
   ProgramState state = eval.Start(function, std::span{ &thisPointer, 1 });
   std::vector<YieldedElement> yielded;
   const auto collect = [&](const YieldedElement &element) { yielded.push_back(element); };
@@ -832,7 +832,7 @@ TEST(ViewsEval, YieldPausesAndCopiesProgramState)
 TEST(ViewsEval, ComputedYieldPausesAndCopiesProgramState)
 {
   Builder b;
-  CodeGen codegen{ b.mView };
+  CodeGen codegen{ b.mCodeObject };
   const u32 function = codegen.BeginFunction("children", true);
   const u64 values[]{ 11, 22, 33 };
   for (const u64 value : values) {
@@ -841,11 +841,11 @@ TEST(ViewsEval, ComputedYieldPausesAndCopiesProgramState)
     codegen.Emit(Instruction{ .mOp = Op::Yield, .mImm = 1 });
   }
   codegen.Emit(Instruction{ .mOp = Op::Return, .mA = 0 });
-  b.mView.mChildrenFunction = function;
+  b.mCodeObject.mChildrenFunction = function;
 
   FakeMemory memory;
-  Evaluator eval{ b.mView, memory, std::span<const Root>{} };
-  const EvalValue thisPointer = EvalValue::Scalar(b.mView.mThisType, 0);
+  Evaluator eval{ b.mCodeObject, memory, std::span<const Root>{} };
+  const EvalValue thisPointer = EvalValue::Scalar(b.mCodeObject.mThisType, 0);
   ProgramState state = eval.Start(function, std::span{ &thisPointer, 1 });
   std::vector<YieldedElement> yielded;
   const auto collect = [&](const YieldedElement &element) { yielded.push_back(element); };
@@ -880,12 +880,12 @@ TEST(ViewsEval, ComputedYieldPausesAndCopiesProgramState)
 TEST(ViewsEval, CallRejectsYield)
 {
   Builder b;
-  b.mView.mProgram.mFunctions.push_back(
-    Function{ .mName = "children", .mParamCount = 1, .mLocalTypes = { b.mView.mThisType }, .mCanYield = true });
-  b.mView.mProgram.mCode.push_back(Instruction{ .mOp = Op::Yield });
+  b.mCodeObject.mProgram.mFunctions.push_back(Function{
+    .mName = "children", .mParamCount = 1, .mLocalTypes = { b.mCodeObject.mThisType }, .mCanYield = true });
+  b.mCodeObject.mProgram.mCode.push_back(Instruction{ .mOp = Op::Yield });
   FakeMemory memory;
-  Evaluator eval{ b.mView, memory, std::span<const Root>{} };
-  const EvalValue thisPointer = EvalValue::Scalar(b.mView.mThisType, 0);
+  Evaluator eval{ b.mCodeObject, memory, std::span<const Root>{} };
+  const EvalValue thisPointer = EvalValue::Scalar(b.mCodeObject.mThisType, 0);
   auto result = eval.Call(0, std::span{ &thisPointer, 1 }, 1000);
   ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error().mMessage, "internal error: yield outside a children block");
@@ -896,16 +896,16 @@ TEST(ViewsEval, RecursiveCallsWalkAndCount)
   Builder b;
   const TypeId nodeType = b.Type(BoundType{ .mKind = TypeKind::Record, .mSize = 24, .mName = "Node" });
   const TypeId nodePointer = b.PointerTo(nodeType);
-  CodeGen codegen{ b.mView };
+  CodeGen codegen{ b.mCodeObject };
 
   const u32 walk = codegen.BeginFunction("walk", true);
   codegen.AddLocal(walk, nodePointer);
-  b.mView.mProgram.mFunctions[walk].mParamCount = 2;
+  b.mCodeObject.mProgram.mFunctions[walk].mParamCount = 2;
   codegen.Emit(Instruction{ .mOp = Op::LoadLocal, .mType = nodePointer, .mA = 1 });
   const u32 returnEmpty = codegen.Emit(Instruction{ .mOp = Op::JumpIfFalse });
 
   // walk(left)
-  codegen.Emit(Instruction{ .mOp = Op::LoadLocal, .mType = b.mView.mThisType, .mA = 0 });
+  codegen.Emit(Instruction{ .mOp = Op::LoadLocal, .mType = b.mCodeObject.mThisType, .mA = 0 });
   codegen.Emit(Instruction{ .mOp = Op::LoadLocal, .mType = nodePointer, .mA = 1 });
   codegen.Emit(Instruction{ .mOp = Op::Deref, .mType = nodeType });
   codegen.Emit(Instruction{ .mOp = Op::Member, .mType = nodePointer, .mImm = 0 });
@@ -920,7 +920,7 @@ TEST(ViewsEval, RecursiveCallsWalkAndCount)
   codegen.Emit(Instruction{ .mOp = Op::Yield, .mImm = 1 });
 
   // walk(right)
-  codegen.Emit(Instruction{ .mOp = Op::LoadLocal, .mType = b.mView.mThisType, .mA = 0 });
+  codegen.Emit(Instruction{ .mOp = Op::LoadLocal, .mType = b.mCodeObject.mThisType, .mA = 0 });
   codegen.Emit(Instruction{ .mOp = Op::LoadLocal, .mType = nodePointer, .mA = 1 });
   codegen.Emit(Instruction{ .mOp = Op::Deref, .mType = nodeType });
   codegen.Emit(Instruction{ .mOp = Op::Member, .mType = nodePointer, .mImm = 8 });
@@ -933,12 +933,12 @@ TEST(ViewsEval, RecursiveCallsWalkAndCount)
   const u32 count = codegen.BeginFunction("count", false);
   codegen.AddLocal(count, nodePointer);
   const u32 leftCountSlot = codegen.AddLocal(count, b.mI64);
-  b.mView.mProgram.mFunctions[count].mParamCount = 2;
-  b.mView.mProgram.mFunctions[count].mReturn = b.mI64;
+  b.mCodeObject.mProgram.mFunctions[count].mParamCount = 2;
+  b.mCodeObject.mProgram.mFunctions[count].mReturn = b.mI64;
   codegen.Emit(Instruction{ .mOp = Op::LoadLocal, .mType = nodePointer, .mA = 1 });
   const u32 returnZero = codegen.Emit(Instruction{ .mOp = Op::JumpIfFalse });
   const auto emitCountCall = [&](u64 offset) {
-    codegen.Emit(Instruction{ .mOp = Op::LoadLocal, .mType = b.mView.mThisType, .mA = 0 });
+    codegen.Emit(Instruction{ .mOp = Op::LoadLocal, .mType = b.mCodeObject.mThisType, .mA = 0 });
     codegen.Emit(Instruction{ .mOp = Op::LoadLocal, .mType = nodePointer, .mA = 1 });
     codegen.Emit(Instruction{ .mOp = Op::Deref, .mType = nodeType });
     codegen.Emit(Instruction{ .mOp = Op::Member, .mType = nodePointer, .mImm = offset });
@@ -956,7 +956,7 @@ TEST(ViewsEval, RecursiveCallsWalkAndCount)
   codegen.PatchTarget(returnZero, codegen.Here());
   codegen.Emit(Instruction{ .mOp = Op::PushInt, .mType = b.mI64, .mImm = 0 });
   codegen.Emit(Instruction{ .mOp = Op::Return, .mA = 1 });
-  b.mView.mChildrenFunction = walk;
+  b.mCodeObject.mChildrenFunction = walk;
 
   constexpr u64 base = 0x8000;
   FakeMemory memory;
@@ -965,8 +965,8 @@ TEST(ViewsEval, RecursiveCallsWalkAndCount)
     const u64 left = i == 0 ? 0 : address - 24;
     memory.Map(address, Bytes(left, u64{ 0 }, static_cast<i32>(i + 1), u32{ 0 }));
   }
-  Evaluator eval{ b.mView, memory, std::span<const Root>{} };
-  const EvalValue startArgs[]{ EvalValue::Scalar(b.mView.mThisType, 0),
+  Evaluator eval{ b.mCodeObject, memory, std::span<const Root>{} };
+  const EvalValue startArgs[]{ EvalValue::Scalar(b.mCodeObject.mThisType, 0),
     EvalValue::Scalar(nodePointer, base + 6 * 24) };
   ProgramState state = eval.Start(walk, startArgs);
   std::vector<u64> keys;
@@ -1004,13 +1004,13 @@ TEST(ViewsEval, RecursiveCallDepthIsLimited)
   Builder b;
   const TypeId nodeType = b.Type(BoundType{ .mKind = TypeKind::Record, .mSize = 24, .mName = "Node" });
   const TypeId nodePointer = b.PointerTo(nodeType);
-  CodeGen codegen{ b.mView };
+  CodeGen codegen{ b.mCodeObject };
   const u32 walk = codegen.BeginFunction("walk", true);
   codegen.AddLocal(walk, nodePointer);
-  b.mView.mProgram.mFunctions[walk].mParamCount = 2;
+  b.mCodeObject.mProgram.mFunctions[walk].mParamCount = 2;
   codegen.Emit(Instruction{ .mOp = Op::LoadLocal, .mType = nodePointer, .mA = 1 });
   const u32 jump = codegen.Emit(Instruction{ .mOp = Op::JumpIfFalse });
-  codegen.Emit(Instruction{ .mOp = Op::LoadLocal, .mType = b.mView.mThisType, .mA = 0 });
+  codegen.Emit(Instruction{ .mOp = Op::LoadLocal, .mType = b.mCodeObject.mThisType, .mA = 0 });
   codegen.Emit(Instruction{ .mOp = Op::LoadLocal, .mType = nodePointer, .mA = 1 });
   codegen.Emit(Instruction{ .mOp = Op::Deref, .mType = nodeType });
   codegen.Emit(Instruction{ .mOp = Op::Member, .mType = nodePointer, .mImm = 0 });
@@ -1022,8 +1022,8 @@ TEST(ViewsEval, RecursiveCallDepthIsLimited)
   constexpr u64 address = 0x9000;
   FakeMemory memory;
   memory.Map(address, Bytes(address, address, i32{ 1 }, u32{ 0 }));
-  Evaluator eval{ b.mView, memory, std::span<const Root>{} };
-  const EvalValue args[]{ EvalValue::Scalar(b.mView.mThisType, 0), EvalValue::Scalar(nodePointer, address) };
+  Evaluator eval{ b.mCodeObject, memory, std::span<const Root>{} };
+  const EvalValue args[]{ EvalValue::Scalar(b.mCodeObject.mThisType, 0), EvalValue::Scalar(nodePointer, address) };
   ProgramState state = eval.Start(walk, args);
   const auto noYield = [](const YieldedElement &) {};
   auto result = eval.Run(state, RunLimits{ .mBudget = 100000 }, noYield);
@@ -1035,13 +1035,13 @@ TEST(ViewsEval, RecursiveCallDepthIsLimited)
 TEST(ViewsEval, FailInstructionUsesProgramConstant)
 {
   Builder b;
-  b.mView.mProgram.mFunctions.push_back(
-    Function{ .mName = "fail", .mParamCount = 1, .mLocalTypes = { b.mView.mThisType } });
-  b.mView.mProgram.mConstants.push_back("function failed");
-  b.mView.mProgram.mCode.push_back(Instruction{ .mOp = Op::Fail, .mA = 0, .mLoc = { 3, 5 } });
+  b.mCodeObject.mProgram.mFunctions.push_back(
+    Function{ .mName = "fail", .mParamCount = 1, .mLocalTypes = { b.mCodeObject.mThisType } });
+  b.mCodeObject.mProgram.mConstants.push_back("function failed");
+  b.mCodeObject.mProgram.mCode.push_back(Instruction{ .mOp = Op::Fail, .mA = 0, .mLoc = { 3, 5 } });
   FakeMemory memory;
-  Evaluator eval{ b.mView, memory, std::span<const Root>{} };
-  const EvalValue thisPointer = EvalValue::Scalar(b.mView.mThisType, 0);
+  Evaluator eval{ b.mCodeObject, memory, std::span<const Root>{} };
+  const EvalValue thisPointer = EvalValue::Scalar(b.mCodeObject.mThisType, 0);
   auto result = eval.Call(0, std::span{ &thisPointer, 1 }, 1000);
   ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error().mMessage, "function failed");
@@ -1054,12 +1054,12 @@ TEST(ViewsEval, ReferenceParameterAccumulatesRecursively)
   Builder b;
   const TypeId nodeType = b.Type(BoundType{ .mKind = TypeKind::Record, .mSize = 24, .mName = "Node" });
   const TypeId nodePointer = b.PointerTo(nodeType);
-  CodeGen codegen{ b.mView };
+  CodeGen codegen{ b.mCodeObject };
 
   const u32 sum = codegen.BeginFunction("sum", false);
   codegen.AddLocal(sum, nodePointer);
   codegen.AddLocal(sum, b.mU64);
-  b.mView.mProgram.mFunctions[sum].mParamCount = 3;
+  b.mCodeObject.mProgram.mFunctions[sum].mParamCount = 3;
   codegen.Emit(Instruction{ .mOp = Op::LoadLocal, .mType = nodePointer, .mA = 1 });
   const u32 done = codegen.Emit(Instruction{ .mOp = Op::JumpIfFalse });
 
@@ -1072,7 +1072,7 @@ TEST(ViewsEval, ReferenceParameterAccumulatesRecursively)
   codegen.Emit(Instruction{ .mOp = Op::StoreRef, .mA = 2 });
 
   const auto emitRecursiveCall = [&](u64 offset) {
-    codegen.Emit(Instruction{ .mOp = Op::LoadLocal, .mType = b.mView.mThisType, .mA = 0 });
+    codegen.Emit(Instruction{ .mOp = Op::LoadLocal, .mType = b.mCodeObject.mThisType, .mA = 0 });
     codegen.Emit(Instruction{ .mOp = Op::LoadLocal, .mType = nodePointer, .mA = 1 });
     codegen.Emit(Instruction{ .mOp = Op::Deref, .mType = nodeType });
     codegen.Emit(Instruction{ .mOp = Op::Member, .mType = nodePointer, .mImm = offset });
@@ -1089,11 +1089,11 @@ TEST(ViewsEval, ReferenceParameterAccumulatesRecursively)
   const u32 total = codegen.BeginFunction("total", false);
   codegen.AddLocal(total, nodePointer);
   const u32 totalSlot = codegen.AddLocal(total, b.mU64);
-  b.mView.mProgram.mFunctions[total].mParamCount = 2;
-  b.mView.mProgram.mFunctions[total].mReturn = b.mU64;
+  b.mCodeObject.mProgram.mFunctions[total].mParamCount = 2;
+  b.mCodeObject.mProgram.mFunctions[total].mReturn = b.mU64;
   codegen.Emit(Instruction{ .mOp = Op::PushInt, .mType = b.mU64, .mImm = 0 });
   codegen.Emit(Instruction{ .mOp = Op::StoreLocal, .mA = totalSlot });
-  codegen.Emit(Instruction{ .mOp = Op::LoadLocal, .mType = b.mView.mThisType, .mA = 0 });
+  codegen.Emit(Instruction{ .mOp = Op::LoadLocal, .mType = b.mCodeObject.mThisType, .mA = 0 });
   codegen.Emit(Instruction{ .mOp = Op::LoadLocal, .mType = nodePointer, .mA = 1 });
   codegen.Emit(Instruction{ .mOp = Op::PushRef, .mA = totalSlot });
   codegen.Emit(Instruction{ .mOp = Op::Call, .mA = sum });
@@ -1107,8 +1107,8 @@ TEST(ViewsEval, ReferenceParameterAccumulatesRecursively)
   memory.Map(root, Bytes(left, right, u64{ 5 }));
   memory.Map(left, Bytes(u64{ 0 }, u64{ 0 }, u64{ 7 }));
   memory.Map(right, Bytes(u64{ 0 }, u64{ 0 }, u64{ 11 }));
-  Evaluator eval{ b.mView, memory, std::span<const Root>{} };
-  const EvalValue args[]{ EvalValue::Scalar(b.mView.mThisType, 0), EvalValue::Scalar(nodePointer, root) };
+  Evaluator eval{ b.mCodeObject, memory, std::span<const Root>{} };
+  const EvalValue args[]{ EvalValue::Scalar(b.mCodeObject.mThisType, 0), EvalValue::Scalar(nodePointer, root) };
   auto result = eval.Call(total, args, 10000);
   ASSERT_TRUE(result.has_value()) << result.error().mMessage;
   EXPECT_EQ(result->Bits(), 23);
@@ -1117,10 +1117,10 @@ TEST(ViewsEval, ReferenceParameterAccumulatesRecursively)
 TEST(ViewsEval, ReferenceParameterSurvivesYieldAndStateCopy)
 {
   Builder b;
-  CodeGen codegen{ b.mView };
+  CodeGen codegen{ b.mCodeObject };
   const u32 yielding = codegen.BeginFunction("yielding", true);
   codegen.AddLocal(yielding, b.mU64);
-  b.mView.mProgram.mFunctions[yielding].mParamCount = 2;
+  b.mCodeObject.mProgram.mFunctions[yielding].mParamCount = 2;
   for (u64 i = 0; i < 3; ++i) {
     codegen.Emit(Instruction{ .mOp = Op::LoadRef, .mType = b.mU64, .mA = 1 });
     codegen.Emit(Instruction{ .mOp = Op::PushInt, .mType = b.mU64, .mImm = 1 });
@@ -1135,15 +1135,15 @@ TEST(ViewsEval, ReferenceParameterSurvivesYieldAndStateCopy)
   const u32 totalSlot = codegen.AddLocal(children, b.mU64);
   codegen.Emit(Instruction{ .mOp = Op::PushInt, .mType = b.mU64, .mImm = 10 });
   codegen.Emit(Instruction{ .mOp = Op::StoreLocal, .mA = totalSlot });
-  codegen.Emit(Instruction{ .mOp = Op::LoadLocal, .mType = b.mView.mThisType, .mA = 0 });
+  codegen.Emit(Instruction{ .mOp = Op::LoadLocal, .mType = b.mCodeObject.mThisType, .mA = 0 });
   codegen.Emit(Instruction{ .mOp = Op::PushRef, .mA = totalSlot });
   codegen.Emit(Instruction{ .mOp = Op::Call, .mA = yielding });
   codegen.Emit(Instruction{ .mOp = Op::Return, .mA = 0 });
-  b.mView.mChildrenFunction = children;
+  b.mCodeObject.mChildrenFunction = children;
 
   FakeMemory memory;
-  Evaluator eval{ b.mView, memory, std::span<const Root>{} };
-  const EvalValue thisPointer = EvalValue::Scalar(b.mView.mThisType, 0);
+  Evaluator eval{ b.mCodeObject, memory, std::span<const Root>{} };
+  const EvalValue thisPointer = EvalValue::Scalar(b.mCodeObject.mThisType, 0);
   ProgramState state = eval.Start(children, std::span{ &thisPointer, 1 });
   std::vector<u64> values;
   const auto collect = [&](const YieldedElement &element) { values.push_back(element.mValue.Bits()); };
@@ -1183,7 +1183,7 @@ TEST(ViewsEval, ShortCircuitAndDoesNotEvaluateFalseBranch)
   const NodeId node =
     b.Node({ .mOp = BoundOp::LogicalAnd, .mType = b.mBool, .mA = b.Int(b.mBool, 0), .mB = nullDereference });
   FakeMemory memory;
-  Evaluator eval{ b.mView, memory, std::span<const Root>{} };
+  Evaluator eval{ b.mCodeObject, memory, std::span<const Root>{} };
   auto value = CallNode(eval, b, node);
   ASSERT_TRUE(value.has_value()) << value.error().mMessage;
   EXPECT_EQ(value->Bits(), 0);

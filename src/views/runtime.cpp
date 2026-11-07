@@ -109,20 +109,20 @@ SupervisorOf(const sym::Value &value) noexcept
 
 // The bytes of the object the view looks at: the value itself, or the base class sub-object a view matched.
 std::span<const u8>
-RootBytes(const BoundView &view, const sym::Value &value) noexcept
+RootBytes(const CodeObject &view, const sym::Value &value) noexcept
 {
   const auto bytes = value.MemoryView();
   return view.mRootOffset <= bytes.size() ? bytes.subspan(view.mRootOffset) : std::span<const u8>{};
 }
 
 u64
-RootAddress(const BoundView &view, const sym::Value &value) noexcept
+RootAddress(const CodeObject &view, const sym::Value &value) noexcept
 {
   return value.Address().GetRaw() + view.mRootOffset;
 }
 
 std::string
-FormatError(const BoundView &view, const EvalError &error)
+FormatError(const CodeObject &view, const EvalError &error)
 {
   return std::format(
     "<view error: {}:{}:{}: {}>", view.mDef->mFile->mPath, error.mLoc.mLine, error.mLoc.mColumn, error.mMessage);
@@ -145,7 +145,7 @@ std::optional<std::pmr::string>
 ViewSerializer::SerializeVariable(const sym::Value &value, std::pmr::memory_resource *allocator) noexcept
 {
   const sym::CanonicalType type = value.GetType();
-  const BoundView *view = mRegistry.Lookup(type.TypeEntry());
+  const CodeObject *view = mRegistry.Lookup(type.TypeEntry());
 
   std::string summary;
   std::optional<u64> indexedVariables;
@@ -232,7 +232,7 @@ MakeErrorChild(const VariableContext &context, sym::Value &parent, std::string m
 static Ref<sym::Value>
 MakeYieldedChild(const VariableContext &context,
   tc::SupervisorState &supervisor,
-  const BoundView &view,
+  const CodeObject &view,
   const YieldedElement &element,
   u64 index) noexcept
 {
@@ -280,7 +280,7 @@ static bool
 RunBlock(GlobalCursorCache::Cursor &cursor,
   tc::SupervisorState *supervisor,
   Evaluator &evaluator,
-  const BoundView &view,
+  const CodeObject &view,
   const VariableContext &context,
   sym::Value &value,
   sym::ValueRange range,
@@ -362,7 +362,7 @@ ResolveUsingView(const VariableContext &context,
     return false;
   }
 
-  const BoundView *view = registry.Lookup(value.GetType().TypeEntry());
+  const CodeObject *view = registry.Lookup(value.GetType().TypeEntry());
 
   if (!view) {
     return false;
