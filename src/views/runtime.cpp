@@ -15,6 +15,7 @@
 #include <views/evaluator.h>
 #include <views/registry.h>
 #include <views/resolver.h>
+#include <views/target_reader.h>
 #include <views/text.h>
 #include <views/view_serializer.h>
 
@@ -27,75 +28,10 @@
 
 namespace mdb::views {
 
-static constexpr u64 kPageSize = 4096;
-// Small reads are widened (within the page) so that neighbouring reads, like the fields of a header struct, are
-// served from one read of the target.
-static constexpr u64 kMinimumRead = 64;
-static constexpr size_t kMaxCachedBlocks = 32;
 // When the client asks for children without a range, this is how many we hand out.
 static constexpr u64 kDefaultChildrenPage = 1000;
 
 namespace {
-
-class TargetReader final : public MemoryReader
-{
-  tc::SupervisorState *mSupervisor;
-  struct Block
-  {
-    u64 mAddress;
-    std::vector<u8> mBytes;
-  };
-  std::vector<Block> mBlocks;
-
-  bool
-  ReadTarget(u64 address, u64 size, std::vector<u8> &out) noexcept
-  {
-    auto result = mSupervisor->SafeRead(AddrPtr{ address }, size);
-    if (!result.is_expected()) {
-      return false;
-    }
-    auto buffer = result.take_value();
-    const auto span = buffer->Span();
-    if (span.size() < size) {
-      return false;
-    }
-    out.assign(span.begin(), span.begin() + static_cast<i64>(size));
-    return true;
-  }
-
-public:
-  explicit TargetReader(tc::SupervisorState *supervisor) noexcept : mSupervisor(supervisor) {}
-
-  bool
-  Read(u64 address, std::span<u8> out) noexcept final
-  {
-    if (out.empty()) {
-      return true;
-    }
-    for (const auto &block : mBlocks) {
-      if (address >= block.mAddress && address - block.mAddress + out.size() <= block.mBytes.size()) {
-        std::memcpy(out.data(), block.mBytes.data() + (address - block.mAddress), out.size());
-        return true;
-      }
-    }
-    if (mSupervisor == nullptr) {
-      return false;
-    }
-
-    const u64 untilPageEnd = kPageSize - (address % kPageSize);
-    const u64 widened = std::max<u64>(out.size(), std::min(kMinimumRead, untilPageEnd));
-    Block block{ .mAddress = address };
-    if (!ReadTarget(address, widened, block.mBytes) &&
-        (widened == out.size() || !ReadTarget(address, out.size(), block.mBytes))) {
-      return false;
-    }
-    std::memcpy(out.data(), block.mBytes.data(), out.size());
-    if (mBlocks.size() < kMaxCachedBlocks) {
-      mBlocks.push_back(std::move(block));
-    }
-    return true;
-  }
-};
 
 tc::SupervisorState *
 SupervisorOf(const sym::Value &value) noexcept
