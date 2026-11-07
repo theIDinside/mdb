@@ -287,6 +287,7 @@ struct Root
   TypeId mType;
   std::optional<u64> mAddress;
   std::span<const u8> mBytes;
+  std::optional<std::string> mUnavailable;
 };
 
 enum class RunStop : u8
@@ -303,8 +304,8 @@ struct RunResult
 };
 
 /**
- * Evaluates the bytecode of a bound view against the supplied roots. Let values are cached at most once per
- * evaluator and `(view, let, this address)` tuple.
+ * Evaluates the bytecode of a code object against the supplied roots. Let values are cached at most once per
+ * evaluator and `(code object, let, this address)` tuple.
  */
 class Evaluator
 {
@@ -319,6 +320,7 @@ class Evaluator
   std::map<LetKey, EvalValue> mLetValues;
   std::set<LetKey> mLetInProgress;
   u64 mStepsUsed{ 0 };
+  std::function<std::optional<std::string>(sym::Type *, u64)> mAggregateFormatter;
 
   using Result = std::expected<EvalValue, EvalError>;
 
@@ -350,6 +352,13 @@ public:
   Result Call(u32 function, std::span<const EvalValue> args, u64 budget) noexcept;
 
   std::expected<std::string, EvalError> Summary(u64 budget = kDefaultBudget) noexcept;
+  std::string FormatTemplate(u64 budget = kDefaultBudget) noexcept;
+  using AggregateFormatter = std::function<std::optional<std::string>(sym::Type *, u64)>;
+  void
+  SetAggregateFormatter(AggregateFormatter formatter) noexcept
+  {
+    mAggregateFormatter = std::move(formatter);
+  }
   std::expected<ArrayChildren, EvalError> Children(u64 budget = kDefaultBudget) noexcept;
   std::expected<EvalValue, EvalError> ThisArgument() const noexcept;
   std::expected<std::string, EvalError> Format(const EvalValue &value, FormatSpec format) noexcept;
