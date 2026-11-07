@@ -12,7 +12,7 @@ compinit
 _mdbuild() {
     local -a commands build_opts configure_opts
 
-    commands=(help build clean dev-setup configure-buildroot configure list-presets select autocomplete)
+    commands=(help build clean dev-setup configure-buildroot configure list-presets select autocomplete format lint)
     build_opts=(debug release fulldebug fullrelease)
     configure_opts=(debug release fulldebug fullrelease)
 
@@ -30,6 +30,8 @@ _mdbuild() {
     case $words[2] in
         build)      _values 'build options' $build_opts ;;
         configure)  _values 'configure options' $configure_opts ;;
+        format)     _values -w 'format options' all check ;;
+        lint)       _values -w 'lint options' all fix ;;
         help)       _values 'help topics' $commands ;;
     esac
 }
@@ -98,6 +100,12 @@ def createScriptEpilogue(presets):
         configure)
             local configure_opts="{" ".join(presets)}"
             COMPREPLY=( $(compgen -W "${{configure_opts}}" -- "${{cur}}") )
+            ;;
+        format)
+            COMPREPLY=( $(compgen -W "all check" -- "${{cur}}") )
+            ;;
+        lint)
+            COMPREPLY=( $(compgen -W "all fix" -- "${{cur}}") )
             ;;
         help)
             COMPREPLY=( $(compgen -W "${{commands}}" -- "${{cur}}") )
