@@ -267,7 +267,7 @@ BreakpointEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) c
     mBreakpoint->IsVerified());
 
   if (mMessage) {
-    it = std::format_to(it, R"(,"message": "{}")", mMessage.value());
+    it = std::format_to(it, R"(,"message": "{}")", EscapeFormatter{ mMessage.value() });
   }
   if (auto src = mBreakpoint->GetSourceFile(); src) {
     it = std::format_to(it, R"(,"source": {{"name":"{}", "path": "{}"}})", src.value(), src.value());
