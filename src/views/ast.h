@@ -357,7 +357,21 @@ struct Declaration
   u32 mIndex;
 };
 
-struct ViewFile;
+// Owns parsed mscript source. AST string_views point into mSource, so this must remain
+// heap-allocated and never move (including when mSource uses small-string storage).
+struct ParsedSource
+{
+  std::string mPath;
+  std::string mSource;
+  ExprArena mArena;
+  std::vector<Diagnostic> mDiagnostics;
+
+  ParsedSource() noexcept = default;
+  ParsedSource(const ParsedSource &) = delete;
+  ParsedSource &operator=(const ParsedSource &) = delete;
+  ParsedSource(ParsedSource &&) = delete;
+  ParsedSource &operator=(ParsedSource &&) = delete;
+};
 
 struct ViewDefinition
 {
@@ -372,21 +386,13 @@ struct ViewDefinition
   SummarySpec mSummary;
   ChildrenSpec mChildren;
   SourceLoc mLoc;
-  const ViewFile *mFile{ nullptr };
+  const ParsedSource *mSource{ nullptr };
 };
 
 struct ViewFile
 {
-  std::string mPath;
-  // All string_views in the AST point into this.
-  std::string mSource;
-  ExprArena mArena;
+  ParsedSource mUnit;
   std::vector<ViewDefinition> mViews;
-  std::vector<Diagnostic> mDiagnostics;
-
-  ViewFile() noexcept = default;
-  ViewFile(const ViewFile &) = delete;
-  ViewFile &operator=(const ViewFile &) = delete;
 };
 
 } // namespace mdb::views

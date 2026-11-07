@@ -64,13 +64,14 @@ LoadResult
 ViewRegistry::LoadSource(std::string name, std::string source) noexcept
 {
   auto file = ParseViewFile(std::move(name), std::move(source));
-  LoadResult result{ .mViewCount = static_cast<u32>(file->mViews.size()), .mDiagnostics = file->mDiagnostics };
+  LoadResult result{ .mViewCount = static_cast<u32>(file->mViews.size()),
+    .mDiagnostics = file->mUnit.mDiagnostics };
   for (const auto &diagnostic : result.mDiagnostics) {
     DBGLOG(core, "[views] {}", diagnostic.ToString());
   }
 
   // Reloading a file replaces it, but keeps its position (and therefore its precedence).
-  auto existing = std::ranges::find_if(mFiles, [&](const auto &f) { return f->mPath == file->mPath; });
+  auto existing = std::ranges::find_if(mFiles, [&](const auto &f) { return f->mUnit.mPath == file->mUnit.mPath; });
   if (existing != mFiles.end()) {
     *existing = std::move(file);
   } else {
@@ -190,7 +191,7 @@ ViewRegistry::Lookup(sym::Type *type) noexcept
       "[views] '{}' uses view '{}' ({}:{}){}",
       QualifiedTypeName(type),
       view.mPattern.mSource,
-      view.mFile->mPath,
+      view.mSource->mPath,
       view.mLoc.mLine,
       through);
   }

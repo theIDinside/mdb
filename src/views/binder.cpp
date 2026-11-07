@@ -107,7 +107,7 @@ public:
   std::optional<Diagnostic> mError;
 
   Binder(const ViewDefinition &def, CodeObject &view, sym::Type *matchedType, BindingEnvironment &environment)
-      : mDef(def), mArena(def.mFile->mArena), mCodeObject(view), mMatchedType(matchedType),
+      : mDef(def), mArena(def.mSource->mArena), mCodeObject(view), mMatchedType(matchedType),
         mObjectFile(matchedType->DefiningObjectFile()), mEnvironment(environment), mCodeGen(view)
   {
     mI64 = FromBuiltin(BuiltinI64());
@@ -125,7 +125,7 @@ private:
   Fail(SourceLoc loc, std::string message) noexcept
   {
     if (!mError) {
-      mError = Diagnostic{ .mFile = mDef.mFile->mPath, .mLoc = loc, .mMessage = std::move(message) };
+      mError = Diagnostic{ .mFile = mDef.mSource->mPath, .mLoc = loc, .mMessage = std::move(message) };
     }
     return false;
   }
@@ -1953,7 +1953,7 @@ Binder::EmitCode() noexcept
   }
   if (mCodeGen.Error()) {
     mCodeObject.mBindError =
-      Diagnostic{ .mFile = mDef.mFile->mPath, .mLoc = mDef.mLoc, .mMessage = *mCodeGen.Error() };
+      Diagnostic{ .mFile = mDef.mSource->mPath, .mLoc = mDef.mLoc, .mMessage = *mCodeGen.Error() };
   }
 }
 
@@ -1963,6 +1963,7 @@ std::unique_ptr<CodeObject>
 BindView(const ViewDefinition &view, sym::Type *matchedType, u32 rootOffset) noexcept
 {
   auto bound = std::make_unique<CodeObject>();
+  bound->mSource = view.mSource;
   bound->mDef = &view;
   bound->mMatchedType = matchedType;
   bound->mRootOffset = rootOffset;

@@ -88,7 +88,7 @@ TEST(ViewsParser, FullView)
       children array((T*)(hdr + 1), hdr->mLength)
     }
   )");
-  ASSERT_TRUE(file->mDiagnostics.empty()) << file->mDiagnostics[0].ToString();
+  ASSERT_TRUE(file->mUnit.mDiagnostics.empty()) << file->mUnit.mDiagnostics[0].ToString();
   ASSERT_EQ(file->mViews.size(), 1);
   const ViewDefinition &view = file->mViews[0];
   EXPECT_EQ(view.mPattern.mSource, "nsTArray<.*>");
@@ -102,7 +102,7 @@ TEST(ViewsParser, FullView)
   EXPECT_EQ(view.mUsings[0].mIndex, 0);
   ASSERT_EQ(view.mLets.size(), 1);
   EXPECT_EQ(view.mLets[0].mName, "hdr");
-  EXPECT_EQ(file->mArena.Get(view.mLets[0].mExpr).mKind, ExprKind::Identifier);
+  EXPECT_EQ(file->mUnit.mArena.Get(view.mLets[0].mExpr).mKind, ExprKind::Identifier);
   // Declarations keep their order
   ASSERT_EQ(view.mDeclarations.size(), 2);
   EXPECT_EQ(view.mDeclarations[0].mKind, Declaration::Kind::Using);
@@ -111,23 +111,23 @@ TEST(ViewsParser, FullView)
   ASSERT_EQ(view.mSummary.mKind, SummarySpec::Kind::Template);
   ASSERT_EQ(view.mSummary.mParts.size(), 1);
   EXPECT_EQ(view.mSummary.mParts[0].mLiteral, "length=");
-  const Expr &arrow = file->mArena.Get(view.mSummary.mParts[0].mExpr);
+  const Expr &arrow = file->mUnit.mArena.Get(view.mSummary.mParts[0].mExpr);
   EXPECT_EQ(arrow.mKind, ExprKind::Arrow);
   EXPECT_EQ(arrow.mName, "mLength");
   // Positions of expressions inside the template point into the file
   EXPECT_EQ(arrow.mLoc.mLine, 6);
 
   ASSERT_EQ(view.mChildren.mKind, ChildrenSpec::Kind::Expression);
-  const Expr &call = file->mArena.Get(view.mChildren.mExpr);
+  const Expr &call = file->mUnit.mArena.Get(view.mChildren.mExpr);
   ASSERT_EQ(call.mKind, ExprKind::Call);
   EXPECT_EQ(call.mName, "array");
-  const auto args = file->mArena.Args(call);
+  const auto args = file->mUnit.mArena.Args(call);
   ASSERT_EQ(args.size(), 2);
   // `(T*)` is a cast because T was declared by `using`
-  const Expr &cast = file->mArena.Get(args[0].mExpr);
+  const Expr &cast = file->mUnit.mArena.Get(args[0].mExpr);
   ASSERT_EQ(cast.mKind, ExprKind::Cast);
-  EXPECT_EQ(file->mArena.mTypes[cast.mType].Spelling(), "T *");
-  EXPECT_EQ(file->mArena.Get(cast.mA).mKind, ExprKind::Binary);
+  EXPECT_EQ(file->mUnit.mArena.mTypes[cast.mType].Spelling(), "T *");
+  EXPECT_EQ(file->mUnit.mArena.Get(cast.mA).mKind, ExprKind::Binary);
 }
 
 TEST(ViewsParser, Patterns)
@@ -139,7 +139,7 @@ TEST(ViewsParser, Patterns)
     view "\(anonymous namespace\)::Hidden" {}
     view Plain { children none }
   )");
-  ASSERT_TRUE(file->mDiagnostics.empty()) << file->mDiagnostics[0].ToString();
+  ASSERT_TRUE(file->mUnit.mDiagnostics.empty()) << file->mUnit.mDiagnostics[0].ToString();
   ASSERT_EQ(file->mViews.size(), 5);
   EXPECT_EQ(file->mViews[0].mPattern.mSource, "std::vector<.*>");
   EXPECT_EQ(file->mViews[1].mPattern.mSource, "mozilla::detail::nsTStringRepr<(char|char16_t)>");
@@ -171,7 +171,7 @@ TEST(ViewsParser, ViewIsAnOrdinaryNameInsideABody)
       summary "{view.mX}"
     }
   )");
-  ASSERT_TRUE(file->mDiagnostics.empty()) << file->mDiagnostics[0].ToString();
+  ASSERT_TRUE(file->mUnit.mDiagnostics.empty()) << file->mUnit.mDiagnostics[0].ToString();
   ASSERT_EQ(file->mViews.size(), 1);
   EXPECT_EQ(file->mViews[0].mLets[0].mName, "view");
 }
@@ -188,20 +188,20 @@ TEST(ViewsParser, Usings)
       let c = sizeof(Header) + template_arg(1);
     }
   )");
-  ASSERT_TRUE(file->mDiagnostics.empty()) << file->mDiagnostics[0].ToString();
+  ASSERT_TRUE(file->mUnit.mDiagnostics.empty()) << file->mUnit.mDiagnostics[0].ToString();
   const auto &view = file->mViews[0];
   ASSERT_EQ(view.mUsings.size(), 3);
   EXPECT_EQ(view.mUsings[0].mKind, UsingBinding::Kind::Type);
-  EXPECT_EQ(file->mArena.mTypes[view.mUsings[0].mType].Spelling(), "mozilla::Header");
+  EXPECT_EQ(file->mUnit.mArena.mTypes[view.mUsings[0].mType].Spelling(), "mozilla::Header");
   EXPECT_EQ(view.mUsings[1].mKind, UsingBinding::Kind::TypeOf);
-  EXPECT_EQ(file->mArena.Get(view.mUsings[1].mExpr).Unary(), UnaryOp::Deref);
-  EXPECT_EQ(file->mArena.mTypes[view.mUsings[2].mType].Spelling(), "Element *");
-  const auto kindOf = [&](size_t i) { return file->mArena.Get(view.mLets[i].mExpr).mKind; };
+  EXPECT_EQ(file->mUnit.mArena.Get(view.mUsings[1].mExpr).Unary(), UnaryOp::Deref);
+  EXPECT_EQ(file->mUnit.mArena.mTypes[view.mUsings[2].mType].Spelling(), "Element *");
+  const auto kindOf = [&](size_t i) { return file->mUnit.mArena.Get(view.mLets[i].mExpr).mKind; };
   EXPECT_EQ(kindOf(0), ExprKind::Cast);
   EXPECT_EQ(kindOf(1), ExprKind::Cast);
-  const Expr &sum = file->mArena.Get(view.mLets[2].mExpr);
-  EXPECT_EQ(file->mArena.Get(sum.mA).mKind, ExprKind::SizeofType);
-  EXPECT_EQ(file->mArena.Get(sum.mB).mKind, ExprKind::Call);
+  const Expr &sum = file->mUnit.mArena.Get(view.mLets[2].mExpr);
+  EXPECT_EQ(file->mUnit.mArena.Get(sum.mA).mKind, ExprKind::SizeofType);
+  EXPECT_EQ(file->mUnit.mArena.Get(sum.mB).mKind, ExprKind::Call);
 }
 
 TEST(ViewsParser, CastsVersusParentheses)
@@ -218,27 +218,27 @@ TEST(ViewsParser, CastsVersusParentheses)
       let g = (ns::Type*)mPtr;
     }
   )");
-  ASSERT_TRUE(file->mDiagnostics.empty()) << file->mDiagnostics[0].ToString();
+  ASSERT_TRUE(file->mUnit.mDiagnostics.empty()) << file->mUnit.mDiagnostics[0].ToString();
   const auto &lets = file->mViews[0].mLets;
-  const auto kindOf = [&](size_t i) { return file->mArena.Get(lets[i].mExpr).mKind; };
+  const auto kindOf = [&](size_t i) { return file->mUnit.mArena.Get(lets[i].mExpr).mKind; };
   EXPECT_EQ(kindOf(0), ExprKind::Binary);
   EXPECT_EQ(kindOf(1), ExprKind::Cast);
   EXPECT_EQ(kindOf(2), ExprKind::Cast);
   EXPECT_EQ(kindOf(3), ExprKind::Cast);
-  EXPECT_EQ(file->mArena.mTypes[file->mArena.Get(lets[3].mExpr).mType].Spelling(), "unsigned long");
+  EXPECT_EQ(file->mUnit.mArena.mTypes[file->mUnit.mArena.Get(lets[3].mExpr).mType].Spelling(), "unsigned long");
   EXPECT_EQ(kindOf(4), ExprKind::Cast);
-  const Expr &sizes = file->mArena.Get(lets[5].mExpr);
-  EXPECT_EQ(file->mArena.Get(sizes.mA).mKind, ExprKind::SizeofType);
-  EXPECT_EQ(file->mArena.Get(sizes.mB).mKind, ExprKind::SizeofExpr);
+  const Expr &sizes = file->mUnit.mArena.Get(lets[5].mExpr);
+  EXPECT_EQ(file->mUnit.mArena.Get(sizes.mA).mKind, ExprKind::SizeofType);
+  EXPECT_EQ(file->mUnit.mArena.Get(sizes.mB).mKind, ExprKind::SizeofExpr);
   EXPECT_EQ(kindOf(6), ExprKind::Cast);
-  EXPECT_EQ(file->mArena.mTypes[file->mArena.Get(lets[6].mExpr).mType].Spelling(), "ns::Type *");
+  EXPECT_EQ(file->mUnit.mArena.mTypes[file->mUnit.mArena.Get(lets[6].mExpr).mType].Spelling(), "ns::Type *");
 }
 
 TEST(ViewsParser, Precedence)
 {
   auto file = Parse("view V { summary a + b * c == d && !e ? f : g }");
-  ASSERT_TRUE(file->mDiagnostics.empty()) << file->mDiagnostics[0].ToString();
-  const auto &arena = file->mArena;
+  ASSERT_TRUE(file->mUnit.mDiagnostics.empty()) << file->mUnit.mDiagnostics[0].ToString();
+  const auto &arena = file->mUnit.mArena;
   const Expr &ternary = arena.Get(file->mViews[0].mSummary.mExpr);
   ASSERT_EQ(ternary.mKind, ExprKind::Ternary);
   const Expr &logicalAnd = arena.Get(ternary.mA);
@@ -254,7 +254,7 @@ TEST(ViewsParser, Precedence)
 TEST(ViewsParser, SummaryTemplates)
 {
   auto file = Parse(R"(view V { summary "{{literal}} \"q\" x={mX,x} y={mY}" })");
-  ASSERT_TRUE(file->mDiagnostics.empty()) << file->mDiagnostics[0].ToString();
+  ASSERT_TRUE(file->mUnit.mDiagnostics.empty()) << file->mUnit.mDiagnostics[0].ToString();
   const auto &parts = file->mViews[0].mSummary.mParts;
   ASSERT_EQ(parts.size(), 2);
   EXPECT_EQ(parts[0].mLiteral, "{literal} \"q\" x=");
@@ -267,9 +267,9 @@ TEST(ViewsParser, SummaryTemplates)
   EXPECT_EQ(literalOnly->mViews[0].mSummary.mParts[0].mExpr, kNoExpr);
 
   auto expression = Parse(R"(view V { summary text(mData, mLength, limit: 10) })");
-  ASSERT_TRUE(expression->mDiagnostics.empty()) << expression->mDiagnostics[0].ToString();
-  const Expr &call = expression->mArena.Get(expression->mViews[0].mSummary.mExpr);
-  const auto args = expression->mArena.Args(call);
+  ASSERT_TRUE(expression->mUnit.mDiagnostics.empty()) << expression->mUnit.mDiagnostics[0].ToString();
+  const Expr &call = expression->mUnit.mArena.Get(expression->mViews[0].mSummary.mExpr);
+  const auto args = expression->mUnit.mArena.Args(call);
   ASSERT_EQ(args.size(), 3);
   EXPECT_EQ(args[2].mName, "limit");
 }
@@ -288,17 +288,17 @@ view Good3 {}
   EXPECT_EQ(file->mViews[0].mPattern.mSource, "Good1");
   EXPECT_EQ(file->mViews[1].mPattern.mSource, "Good2");
   EXPECT_EQ(file->mViews[2].mPattern.mSource, "Good3");
-  ASSERT_EQ(file->mDiagnostics.size(), 2);
-  EXPECT_EQ(file->mDiagnostics[0].mLoc.mLine, 4);
-  EXPECT_EQ(file->mDiagnostics[1].mLoc.mLine, 6);
-  EXPECT_NE(file->mDiagnostics[1].mMessage.find("unterminated"), std::string::npos);
+  ASSERT_EQ(file->mUnit.mDiagnostics.size(), 2);
+  EXPECT_EQ(file->mUnit.mDiagnostics[0].mLoc.mLine, 4);
+  EXPECT_EQ(file->mUnit.mDiagnostics[1].mLoc.mLine, 6);
+  EXPECT_NE(file->mUnit.mDiagnostics[1].mMessage.find("unterminated"), std::string::npos);
 }
 
 TEST(ViewsParser, Errors)
 {
   const auto errorOf = [](std::string source) {
     auto file = Parse(std::move(source));
-    return file->mDiagnostics.empty() ? std::string{} : file->mDiagnostics[0].mMessage;
+    return file->mUnit.mDiagnostics.empty() ? std::string{} : file->mUnit.mDiagnostics[0].mMessage;
   };
   EXPECT_NE(errorOf("view V { summary 1 summary 2 }").find("only have one summary"), std::string::npos);
   EXPECT_NE(errorOf("view V { let a = 1; let a = 2; }").find("already defined"), std::string::npos);
@@ -337,10 +337,10 @@ TEST(ViewsParser, StatementsAndChildrenBlocks)
     }
     view Empty { children {} }
   )");
-  ASSERT_TRUE(file->mDiagnostics.empty()) << file->mDiagnostics[0].ToString();
+  ASSERT_TRUE(file->mUnit.mDiagnostics.empty()) << file->mUnit.mDiagnostics[0].ToString();
   ASSERT_EQ(file->mViews.size(), 2);
 
-  const auto &arena = file->mArena;
+  const auto &arena = file->mUnit.mArena;
   const auto &children = file->mViews[0].mChildren;
   EXPECT_EQ(children.mKind, ChildrenSpec::Kind::Block);
   const Stmt &body = arena.GetStmt(children.mBody);
@@ -374,15 +374,15 @@ TEST(ViewsParser, StatementErrorsAndExpressionChildren)
 {
   const auto errorOf = [](std::string source) {
     auto file = Parse(std::move(source));
-    return file->mDiagnostics.empty() ? std::string{} : file->mDiagnostics[0].mMessage;
+    return file->mUnit.mDiagnostics.empty() ? std::string{} : file->mUnit.mDiagnostics[0].mMessage;
   };
   EXPECT_NE(errorOf("view V { children { auto x = 1 } }").find("expected ';'"), std::string::npos);
   EXPECT_NE(errorOf("view V { children { x + 1; } }").find("expected a statement"), std::string::npos);
 
   auto file = Parse("view V { children (array(p, n)) }");
-  ASSERT_TRUE(file->mDiagnostics.empty()) << file->mDiagnostics[0].ToString();
+  ASSERT_TRUE(file->mUnit.mDiagnostics.empty()) << file->mUnit.mDiagnostics[0].ToString();
   EXPECT_EQ(file->mViews[0].mChildren.mKind, ChildrenSpec::Kind::Expression);
-  EXPECT_EQ(file->mArena.Get(file->mViews[0].mChildren.mExpr).mName, "array");
+  EXPECT_EQ(file->mUnit.mArena.Get(file->mViews[0].mChildren.mExpr).mName, "array");
 }
 
 TEST(ViewsParser, StatementViewFiles)
@@ -400,7 +400,7 @@ TEST(ViewsParser, StatementViewFiles)
       }
     }
   )");
-  ASSERT_TRUE(hashtable->mDiagnostics.empty()) << hashtable->mDiagnostics[0].ToString();
+  ASSERT_TRUE(hashtable->mUnit.mDiagnostics.empty()) << hashtable->mUnit.mDiagnostics[0].ToString();
 
   auto loops = Parse(R"(
     view MdbList {
@@ -423,7 +423,7 @@ TEST(ViewsParser, StatementViewFiles)
       }
     }
   )");
-  ASSERT_TRUE(loops->mDiagnostics.empty()) << loops->mDiagnostics[0].ToString();
+  ASSERT_TRUE(loops->mUnit.mDiagnostics.empty()) << loops->mUnit.mDiagnostics[0].ToString();
 }
 
 TEST(ViewsParser, Functions)
@@ -436,7 +436,7 @@ TEST(ViewsParser, Functions)
       children walk(value)
     }
   )");
-  ASSERT_TRUE(file->mDiagnostics.empty()) << file->mDiagnostics[0].ToString();
+  ASSERT_TRUE(file->mUnit.mDiagnostics.empty()) << file->mUnit.mDiagnostics[0].ToString();
   const auto &view = file->mViews[0];
   ASSERT_EQ(view.mFunctions.size(), 2);
   EXPECT_EQ(view.mFunctions[0].mName, "empty");
@@ -450,21 +450,21 @@ TEST(ViewsParser, Functions)
   EXPECT_EQ(view.mChildren.mKind, ChildrenSpec::Kind::Expression);
 
   auto duplicate = Parse("view V { fn f() {} fn f() {} }");
-  ASSERT_FALSE(duplicate->mDiagnostics.empty());
-  EXPECT_NE(duplicate->mDiagnostics[0].mMessage.find("function 'f' is already defined"), std::string::npos);
+  ASSERT_FALSE(duplicate->mUnit.mDiagnostics.empty());
+  EXPECT_NE(duplicate->mUnit.mDiagnostics[0].mMessage.find("function 'f' is already defined"), std::string::npos);
   auto letCollision = Parse("view V { let f = 1; fn f() {} }");
-  ASSERT_FALSE(letCollision->mDiagnostics.empty());
-  EXPECT_NE(letCollision->mDiagnostics[0].mMessage.find("'f' is already defined"), std::string::npos);
+  ASSERT_FALSE(letCollision->mUnit.mDiagnostics.empty());
+  EXPECT_NE(letCollision->mUnit.mDiagnostics[0].mMessage.find("'f' is already defined"), std::string::npos);
   auto missingName = Parse("view V { fn f(int) {} }");
-  ASSERT_FALSE(missingName->mDiagnostics.empty());
-  EXPECT_NE(missingName->mDiagnostics[0].mMessage.find("expected a parameter name"), std::string::npos);
+  ASSERT_FALSE(missingName->mUnit.mDiagnostics.empty());
+  EXPECT_NE(missingName->mUnit.mDiagnostics[0].mMessage.find("expected a parameter name"), std::string::npos);
   auto missingReturnType = Parse("view V { fn f() -> {} }");
-  ASSERT_FALSE(missingReturnType->mDiagnostics.empty());
-  EXPECT_NE(missingReturnType->mDiagnostics[0].mMessage.find("expected a type"), std::string::npos);
+  ASSERT_FALSE(missingReturnType->mUnit.mDiagnostics.empty());
+  EXPECT_NE(missingReturnType->mUnit.mDiagnostics[0].mMessage.find("expected a type"), std::string::npos);
   auto missingBody = Parse("view V { fn f() }");
-  ASSERT_FALSE(missingBody->mDiagnostics.empty());
-  EXPECT_NE(
-    missingBody->mDiagnostics[0].mMessage.find("expected '{' to start the function body"), std::string::npos);
+  ASSERT_FALSE(missingBody->mUnit.mDiagnostics.empty());
+  EXPECT_NE(missingBody->mUnit.mDiagnostics[0].mMessage.find("expected '{' to start the function body"),
+    std::string::npos);
 }
 
 TEST(ViewsBuiltinTypes, Lookup)

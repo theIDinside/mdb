@@ -125,7 +125,7 @@ std::string
 FormatError(const CodeObject &view, const EvalError &error)
 {
   return std::format(
-    "<view error: {}:{}:{}: {}>", view.mDef->mFile->mPath, error.mLoc.mLine, error.mLoc.mColumn, error.mMessage);
+    "<view error: {}:{}:{}: {}>", view.mSource->mPath, error.mLoc.mLine, error.mLoc.mColumn, error.mMessage);
 }
 
 void

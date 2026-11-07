@@ -12,7 +12,7 @@ namespace mdb::views {
 
 /**
  * Parses a view file (.mdbv). Never fails as a whole: views that contain errors are dropped and reported in
- * `ViewFile::mDiagnostics`, the rest of the file is still usable.
+ * `ViewFile::mUnit.mDiagnostics`, the rest of the file is still usable.
  *
  *   view nsTArray<.*> in "libxul.so" {
  *     using T = template_arg(0)
