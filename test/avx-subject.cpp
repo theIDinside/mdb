@@ -86,7 +86,7 @@ main()
   printf("Found %zu newlines at positions: ", newlines.size());
   const auto newspan = newlines.size() > 1 ? ({
     printf("%d", *newlines.begin());
-    std::span{newlines}.subspan(1);
+    std::span{ newlines }.subspan(1);
   })
                                            : std::span<u32>{};
 

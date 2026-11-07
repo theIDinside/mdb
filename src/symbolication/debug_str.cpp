@@ -19,8 +19,8 @@ std::string_view
 DebugString::str_view(const DebugStringSection &sec) const noexcept
 {
   auto str_size = sec.bit_mask & ptr;
-  auto cstr_ptr = c_str(sec);
-  return std::string_view{cstr_ptr, str_size};
+  const char *cstr_ptr = c_str(sec);
+  return std::string_view{ cstr_ptr, str_size };
 }
 
 } // namespace mdb::sym

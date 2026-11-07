@@ -7,9 +7,9 @@
 int
 main()
 {
-  Person p{"Luo", "Ji", 1};
-  Person p2{"Mike", "Evans", 1};
-  Person p3{"Isaac", "Asimof", 3};
+  Person p{ "Luo", "Ji", 1 };
+  Person p2{ "Mike", "Evans", 1 };
+  Person p3{ "Isaac", "Asimof", 3 };
   ChangePersonLastName(p3, "Asimov");
   ChangePersonId(p2, 2);
   return 0;

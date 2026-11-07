@@ -46,7 +46,8 @@ public:
     using non_const_value_type_it = std::remove_const_t<UnderlyingIter>;
     using const_value_type_it = std::add_const_t<non_const_value_type_it>;
     friend std::conditional_t<std::is_same<UnderlyingIter, non_const_value_type_it>::value,
-                              Iterator<const_value_type_it>, void>;
+      Iterator<const_value_type_it>,
+      void>;
 
     Iterator(UnderlyingIter it, UnderlyingIter end, Fn f) noexcept : iter(it), end(end), f(f)
     {
@@ -99,7 +100,7 @@ public:
     Iterator
     operator++(int) noexcept
     {
-      Iterator copy{iter, end, f};
+      Iterator copy{ iter, end, f };
       do {
         ++copy.iter;
       } while (copy.keep_going());
@@ -113,8 +114,8 @@ public:
     }
   };
 
-  friend std::conditional_t<std::is_same<Container, non_const_value_type>::value, FilterView<const_value_type, Fn>,
-                            void>;
+  friend std::
+    conditional_t<std::is_same<Container, non_const_value_type>::value, FilterView<const_value_type, Fn>, void>;
 
   template <class U = Container>
   FilterView(
@@ -128,25 +129,25 @@ public:
   auto
   begin() noexcept
   {
-    return Iterator<decltype(c.begin())>{c.begin(), c.end(), f};
+    return Iterator<decltype(c.begin())>{ c.begin(), c.end(), f };
   }
 
   auto
   end() noexcept
   {
-    return Iterator<decltype(c.end())>{c.end(), c.end(), f};
+    return Iterator<decltype(c.end())>{ c.end(), c.end(), f };
   }
 
   auto
   cbegin() const noexcept
   {
-    return Iterator{c.cbegin(), c.cend(), f};
+    return Iterator{ c.cbegin(), c.cend(), f };
   }
 
   auto
   cend() const noexcept
   {
-    return Iterator{c.cend(), c.cend(), f};
+    return Iterator{ c.cend(), c.cend(), f };
   }
 };
 } // namespace mdb

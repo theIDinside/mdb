@@ -49,10 +49,7 @@ main(int argc, const char **argv)
 {
   // Person is a free standing fn, Person::Person is a member function (constructor)
   // thus, a fn bkpt request should return 2 results for `Person`
-  class Person me
-  {
-    "hello"
-  };
+  class Person me{ "hello" };
   Person(10);
 
   me.sayHello("Hello");

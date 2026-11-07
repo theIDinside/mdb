@@ -465,7 +465,7 @@ async function readArrayTypes(debugAdapter) {
   }
   const count = 5
   const arrayId = variables[0].variablesReference
-  for (let i = 0; i < 55; ) {
+  for (let i = 0; i < 55;) {
     console.log(`VARIABLES REQUEST FOR START=${i}`)
     const five = await debugAdapter.sendReqGetResponse('variables', {
       variablesReference: arrayId,

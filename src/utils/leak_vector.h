@@ -25,7 +25,7 @@ public:
   static std::unique_ptr<LeakVector<T>>
   Create(u64 capacity, std::pmr::memory_resource *resource)
   {
-    return std::unique_ptr<LeakVector<T>>(new LeakVector<T>{capacity, resource});
+    return std::unique_ptr<LeakVector<T>>(new LeakVector<T>{ capacity, resource });
   }
 
   void
@@ -50,7 +50,7 @@ public:
   std::span<T>
   span() noexcept
   {
-    return std::span<T>{data, size};
+    return std::span<T>{ data, size };
   }
 
 private:

@@ -26,6 +26,6 @@ struct ParentResult
 };
 
 std::optional<MasterPty> open_pty_master() noexcept;
-std::variant<pid_t, PtyParentResult, ParentResult> ptyFork(bool dontDuplicateStdio, const termios *slave_termios,
-                                                           const winsize *slave_winsize);
+std::variant<pid_t, PtyParentResult, ParentResult> ptyFork(
+  bool dontDuplicateStdio, const termios *slave_termios, const winsize *slave_winsize);
 } // namespace mdb

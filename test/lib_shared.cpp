@@ -73,7 +73,7 @@ main(int argc, const char **argv)
     std::printf("You need to pass the path to the metricsconv shared object.\n");
     exit(-1);
   }
-  const auto path = std::filesystem::path{argv[1]};
+  const auto path = std::filesystem::path{ argv[1] };
   if (!fs::exists(path)) {
     std::printf("metricsconv shared object does not exist at %s\n", argv[1]);
   }
@@ -82,7 +82,7 @@ main(int argc, const char **argv)
     std::printf("Could not load library\n");
     exit(-1);
   }
-  MetricsLibHandle metrics{handle};
+  MetricsLibHandle metrics{ handle };
 
   std::printf("%f fahrenheit = %f celsius", 32.0f, metrics.f_to_c(32.0f));
   std::printf("%f C = %f F", 37.0f, metrics.c_to_f(37.0f));
