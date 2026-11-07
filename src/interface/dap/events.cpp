@@ -296,11 +296,18 @@ OutputEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const
 {
   std::pmr::string result{ arenaAllocator };
   std::format_to(std::back_inserter(result),
-    R"({{"seq":{},"processId":{},"type":"event","event":"output","body":{{"category":"{}","output":"{}"}}}})",
+    R"({{"seq":{},"processId":{},"type":"event","event":"output","body":{{"category":"{}","output":"{}")",
     seq,
     mProcessId,
     mCategory,
     EscapeFormatter{ mOutput });
+  if (mSourcePath) {
+    std::format_to(std::back_inserter(result), R"(,"source":{{"path":"{}"}})", EscapeFormatter{ *mSourcePath });
+  }
+  if (mLine) {
+    std::format_to(std::back_inserter(result), R"(,"line":{})", *mLine);
+  }
+  result.append("}}");
   return result;
 }
 } // namespace mdb::ui::dap

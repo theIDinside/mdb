@@ -186,6 +186,8 @@ struct OutputEvent final : public ui::UIResult
 
   std::string_view mCategory; // static category strings exist, we always pass literals to this
   std::string mOutput;
+  std::optional<std::string> mSourcePath;
+  std::optional<u32> mLine;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *allocator) const noexcept final;
 };
 
