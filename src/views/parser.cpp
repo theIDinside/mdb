@@ -279,6 +279,9 @@ public:
   {
   }
 
+  friend std::unique_ptr<FrameTemplate> mdb::views::ParseFrameTemplate(
+    std::string path, std::string_view message) noexcept;
+
   // Parse all tokens of a file
   void ParseFile() noexcept;
 
@@ -1114,7 +1117,7 @@ Parser::ParseTemplateString(const Token &token, SummarySpec &summary) noexcept
       }
       Token at = token;
       at.mLoc.mColumn += static_cast<u32>(i + 1);
-      Error(at, "unmatched '}' in summary template (write '}}' for a literal brace)");
+      Error(at, "unmatched '}' in template (write '}}' for a literal brace)");
       return false;
     }
     if (c != '{') {
@@ -1147,7 +1150,7 @@ Parser::ParseTemplateString(const Token &token, SummarySpec &summary) noexcept
     Token at = token;
     at.mLoc.mColumn += static_cast<u32>(i + 1);
     if (j >= body.size()) {
-      Error(at, "unterminated '{' in summary template");
+      Error(at, "unterminated '{' in template");
       return false;
     }
 
@@ -1164,7 +1167,7 @@ Parser::ParseTemplateString(const Token &token, SummarySpec &summary) noexcept
       return false;
     }
     if (tokens.size() == 1) {
-      Error(at, "empty '{}' in summary template");
+      Error(at, "empty '{}' in template");
       return false;
     }
 
@@ -1655,6 +1658,28 @@ ParseViewFile(std::string path, std::string source) noexcept
   Parser parser{ file->mUnit, file.get(), std::move(tokens) };
   parser.ParseFile();
   return file;
+}
+
+std::unique_ptr<FrameTemplate>
+ParseFrameTemplate(std::string path, std::string_view message) noexcept
+{
+  auto tmpl = std::make_unique<FrameTemplate>();
+  tmpl->mUnit.mPath = std::move(path);
+  tmpl->mUnit.mSource.reserve(message.size() + 2);
+  tmpl->mUnit.mSource.push_back('"');
+  tmpl->mUnit.mSource.append(message);
+  tmpl->mUnit.mSource.push_back('"');
+  tmpl->mSummary.mKind = SummarySpec::Kind::Template;
+  tmpl->mSummary.mLoc = SourceLoc{ .mLine = 1, .mColumn = 0 };
+  std::vector<Token> tokens{ Token{ .mKind = TokenKind::Eof } };
+  Parser parser{ tmpl->mUnit, nullptr, std::move(tokens) };
+  Token token{ .mKind = TokenKind::String, .mText = tmpl->mUnit.mSource, .mLoc = tmpl->mSummary.mLoc };
+  if (!parser.ParseTemplateString(token, tmpl->mSummary)) {
+    if (auto error = parser.TakeError()) {
+      tmpl->mUnit.mDiagnostics.push_back(std::move(*error));
+    }
+  }
+  return tmpl;
 }
 
 } // namespace mdb::views

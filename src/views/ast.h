@@ -395,4 +395,11 @@ struct ViewFile
   std::vector<ViewDefinition> mViews;
 };
 
+// A template bound against a stack frame. Valid only when mUnit.mDiagnostics is empty.
+struct FrameTemplate
+{
+  ParsedSource mUnit;
+  SummarySpec mSummary;
+};
+
 } // namespace mdb::views
