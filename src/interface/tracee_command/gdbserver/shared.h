@@ -16,12 +16,12 @@ enum class ArchId
 // Defaulted to x86_64
 struct RegisterNumbers
 {
-  u32 rip_number{16};
+  u32 rip_number{ 16 };
 };
 
 struct ArchInfo
 {
-  ArchId id{ArchId::X86_64};
+  ArchId id{ ArchId::X86_64 };
   RegisterNumbers regs{};
 };
 

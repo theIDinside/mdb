@@ -70,7 +70,7 @@ TEST(XML, ParsedThreadValues)
     }
   }
 
-  for (const auto &name : {"fork", "threads_shared", "Foo", "Bar", "Baz", "Quux", "420", "1337", "MDB", "DAP"}) {
+  for (const auto &name : { "fork", "threads_shared", "Foo", "Bar", "Baz", "Quux", "420", "1337", "MDB", "DAP" }) {
     EXPECT_TRUE(thread_names.contains(name));
   }
 }

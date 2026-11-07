@@ -4,11 +4,11 @@
 void
 stdlib_arr_ptrs()
 {
-  int arr_a[3]{1, 2, 3};
-  int arr_b[3]{10, 20, 30};
-  int arr_c[3]{100, 200, 300};
+  int arr_a[3]{ 1, 2, 3 };
+  int arr_b[3]{ 10, 20, 30 };
+  int arr_c[3]{ 100, 200, 300 };
 
-  std::array<int[3], 3> arr_of_arrs = std::array<int[3], 3>({{1, 2, 3}, {10, 20, 30}, {100, 200, 300}});
+  std::array<int[3], 3> arr_of_arrs = std::array<int[3], 3>({ { 1, 2, 3 }, { 10, 20, 30 }, { 100, 200, 300 } });
 }
 
 int
@@ -48,15 +48,15 @@ ptr_int_ptr()
 int
 person_ptr()
 {
-  Person *john = new Person{1, 42, "John Doe"};
-  Person *jane = new Person{2, 34, "Jane Doe"};
+  Person *john = new Person{ 1, 42, "John Doe" };
+  Person *jane = new Person{ 2, 34, "Jane Doe" };
   return 1; // #PERSON_PTR_RET_BP
 }
 
 int
 int_ptr()
 {
-  int *ptr = new int{10};
+  int *ptr = new int{ 10 };
   *ptr = 42;       // #INT_PTR_STORE_BP
   int read = *ptr; // #INT_PTR_LOAD_BP
   return read;     // #INT_PTR_RET_BP
@@ -65,8 +65,8 @@ int_ptr()
 int
 main()
 {
-  int *a = new int{42};
-  int *b = new int{1337};
+  int *a = new int{ 42 };
+  int *b = new int{ 1337 };
   int *c = b;
   c = a;
   c = nullptr;

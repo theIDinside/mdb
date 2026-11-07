@@ -29,7 +29,7 @@ public:
 template <typename T> class Vector
 {
   T *mPtr;
-  u32 mSize{0};
+  u32 mSize{ 0 };
   u32 mCapacity;
   std::pmr::memory_resource *mAllocator;
 

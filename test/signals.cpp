@@ -2,19 +2,21 @@
 #include <cstdio>
 #include <cstring>
 
-
-
-void RaiseSignal(int signal) {
+void
+RaiseSignal(int signal)
+{
   std::printf("Raise signal %d=%s\n", signal, strsignal(signal));
   raise(signal);
 }
 
-void HandleSigint(int signal) {
-    if(signal != SIGINT) {
-      std::printf("Sigint signal handler called with another signal?!\n");
-    } else {
-      std::printf("SIGINT handled!\n");
-    }
+void
+HandleSigint(int signal)
+{
+  if (signal != SIGINT) {
+    std::printf("Sigint signal handler called with another signal?!\n");
+  } else {
+    std::printf("SIGINT handled!\n");
+  }
 }
 
 int

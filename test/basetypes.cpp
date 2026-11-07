@@ -18,7 +18,7 @@ struct FloatStringDoubleIntArr
 FloatStringDoubleIntPair
 createFloatStringDoubleIntPair(int a, int b, const char *name)
 {
-  return FloatStringDoubleIntPair{.f = 0.125, .n = name, .d = 0.997, .a = a, .b = b};
+  return FloatStringDoubleIntPair{ .f = 0.125, .n = name, .d = 0.997, .a = a, .b = b };
 }
 
 // type > 16 bytes: should be returned via implicit pointer (passed in as %rdi, on %rax in return)
@@ -26,7 +26,8 @@ FloatStringDoubleIntArr
 createFloatStringDoubleIntArr(float f, double d, const char *name, int arrayValues)
 {
   return FloatStringDoubleIntArr{
-      .f = f, .n = name, .d = d, .a = {arrayValues, arrayValues, arrayValues, arrayValues}};
+    .f = f, .n = name, .d = d, .a = { arrayValues, arrayValues, arrayValues, arrayValues }
+  };
 }
 
 struct FloatString
@@ -39,7 +40,7 @@ struct FloatString
 FloatString
 createFloatString(const char *name)
 {
-  return FloatString{.f = 0.125, .str = name};
+  return FloatString{ .f = 0.125, .str = name };
 }
 
 // type <= 16 bytes: struct contains floating point value (double), float will be in %xmmN, const char* in %rax
@@ -67,19 +68,19 @@ struct TwoAndAPointer
 TwoDoubles
 createTwoDoubles(double a)
 {
-  return TwoDoubles{a * 2, a * 5};
+  return TwoDoubles{ a * 2, a * 5 };
 }
 
 TwoAndAPointer
 createTwo(double a, const char *name)
 {
-  return TwoAndAPointer{.doubles = {a * 2, a * 5}, .n = name};
+  return TwoAndAPointer{ .doubles = { a * 2, a * 5 }, .n = name };
 }
 
 DoubleString
 createDoubleString(const char *name)
 {
-  return DoubleString{.f = 0.125, .str = name};
+  return DoubleString{ .f = 0.125, .str = name };
 }
 
 struct BigStruct
@@ -95,12 +96,12 @@ run_functions_where_we_can_determine_return_value_convention()
   auto dblString = createDoubleString("A double with a string pointer");
   auto fltString = createFloatString("A float with a string pointer");
   auto fltStrDoubleIntArr = createFloatStringDoubleIntArr(
-      0.125, 0.997, "A float, double, string pointer and array of 4 ints of value 42", 42);
+    0.125, 0.997, "A float, double, string pointer and array of 4 ints of value 42", 42);
   auto fltStrDblIntPair =
-      createFloatStringDoubleIntPair(1, 2, "Createa  float, string pointer, double and two ints");
+    createFloatStringDoubleIntPair(1, 2, "Createa  float, string pointer, double and two ints");
   auto twoDoubles = createTwoDoubles(0.1337);
-  auto twoAndAPointer = createTwo(
-      0.1337, "Is this returned via implicit rdi then out via rax, or some constellation of xmm and rax?");
+  auto twoAndAPointer =
+    createTwo(0.1337, "Is this returned via implicit rdi then out via rax, or some constellation of xmm and rax?");
 }
 
 struct Structure
@@ -151,7 +152,7 @@ structured_ptrref(Structure *s)
 void
 structured(const char *name, int count, float fr)
 {
-  Structure structure{name, count, fr};
+  Structure structure{ name, count, fr };
   structure.count += 1;
   structure.fraction += 0.02; // STRUCT_BP
   structured_byvalue(structure);
@@ -181,16 +182,16 @@ args(int a, float b, long c)
 Structure
 createStruct(const char *name, int i, float frac)
 {
-  return Structure{name, i, frac};
+  return Structure{ name, i, frac };
 }
 
 BigStruct
 createBig(const char *smallName, const char *bigName)
 {
   auto res = BigStruct{
-      .integerArray = {},
-      .bigName = bigName,
-      .smallName = smallName,
+    .integerArray = {},
+    .bigName = bigName,
+    .smallName = smallName,
   };
   auto cnt = 0;
   auto it = smallName;
@@ -214,7 +215,7 @@ lexical_block(const char *name, bool should_take)
     a = 1;
     float b = 3.14;
     args(a, b, 1337); // LEX_BLOCK
-    Class myClass{a, structure};
+    Class myClass{ a, structure };
     const auto newStructure = myClass.getClassInfo();
     const auto big = createBig("Args", "Locals");
   } else {

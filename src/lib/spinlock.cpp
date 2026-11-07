@@ -5,7 +5,7 @@
 void
 SpinLock::lock() noexcept
 {
-  static timespec ns = {0, 2};
+  static timespec ns = { .tv_sec = 0, .tv_nsec = 2 };
   auto &ns_ = ns.tv_nsec;
   auto inc = 0;
   for (auto i = 0; m_flag.load(std::memory_order_relaxed) || m_flag.exchange(1, std::memory_order_acquire); ++i) {

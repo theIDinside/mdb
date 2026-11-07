@@ -17,7 +17,7 @@ open_pty_master() noexcept
   std::string pty_name = ptsname(masterFile);
   VERIFY(!pty_name.empty(), "Failed to get name of Master PTY");
 
-  return MasterPty{.mName = pty_name, .mFd = masterFile};
+  return MasterPty{ .mName = pty_name, .mFd = masterFile };
 }
 
 std::variant<pid_t, PtyParentResult, ParentResult>
@@ -27,7 +27,7 @@ ptyFork(bool dontDuplicateStdio, const termios *slaveTermios, const winsize *sla
     auto childPid = fork();
 
     if (childPid != 0) {
-      return ParentResult{.mChildPid = childPid};
+      return ParentResult{ .mChildPid = childPid };
     } else {
       return 0;
     }
@@ -39,7 +39,7 @@ ptyFork(bool dontDuplicateStdio, const termios *slaveTermios, const winsize *sla
   auto childPid = fork();
 
   if (childPid != 0) {
-    return PtyParentResult{.mPtyName = name, .mPid = childPid, .mFd = fd};
+    return PtyParentResult{ .mPtyName = name, .mPid = childPid, .mFd = fd };
   }
 
   VERIFY(setsid() != -1, "Failed to setsid in child");

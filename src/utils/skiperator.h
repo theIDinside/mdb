@@ -79,7 +79,7 @@ public:
     Iterator
     operator++(int) noexcept
     {
-      auto copy = Iterator{iter};
+      auto copy = Iterator{ iter };
       ++(copy.iter);
       return copy;
     }
@@ -97,26 +97,26 @@ public:
   begin() noexcept
   {
     auto it = skip_it();
-    return Iterator<decltype(c.begin())>{it};
+    return Iterator<decltype(c.begin())>{ it };
   }
 
   auto
   end() noexcept
   {
-    return Iterator<decltype(c.end())>{c.end()};
+    return Iterator<decltype(c.end())>{ c.end() };
   }
 
   auto
   cbegin() const noexcept
   {
     const auto it = skip_it();
-    return Iterator{it};
+    return Iterator{ it };
   }
 
   auto
   cend() const noexcept
   {
-    return Iterator{c.cend()};
+    return Iterator{ c.cend() };
   }
 };
 

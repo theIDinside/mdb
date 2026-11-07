@@ -18,12 +18,12 @@ template <typename Payload> class SynchronizedSignalPipe
   std::mutex payload_guard{};
   std::list<Payload> payload{};
 
-  int read_fd{-1};
-  int write_fd{-1};
+  int read_fd{ -1 };
+  int write_fd{ -1 };
   pollfd pollcfg;
 
   SynchronizedSignalPipe(int read, int write) noexcept
-      : read_fd(read), write_fd(write), pollcfg{.fd = read_fd, .events = POLLIN, .revents = 0}
+      : read_fd(read), write_fd(write), pollcfg{ .fd = read_fd, .events = POLLIN, .revents = 0 }
   {
   }
 
@@ -105,7 +105,7 @@ public:
     VERIFY(flags != -1, "Failed to get flags for read-end of pipe");
     VERIFY(-1 != fcntl(notify_pipe[0], F_SETFL, flags | O_NONBLOCK), "Failed to set non-blocking for pipe");
 
-    return SynchronizedSignalPipe<Payload>{notify_pipe[0], notify_pipe[1]};
+    return SynchronizedSignalPipe<Payload>{ notify_pipe[0], notify_pipe[1] };
   }
 
   bool
@@ -133,12 +133,12 @@ public:
 
 template <> class SynchronizedSignalPipe<void>
 {
-  int read_fd{-1};
-  int write_fd{-1};
+  int read_fd{ -1 };
+  int write_fd{ -1 };
   pollfd pollcfg;
 
   SynchronizedSignalPipe(int read, int write) noexcept
-      : read_fd(read), write_fd(write), pollcfg{.fd = read_fd, .events = POLLIN, .revents = 0}
+      : read_fd(read), write_fd(write), pollcfg{ .fd = read_fd, .events = POLLIN, .revents = 0 }
   {
   }
 
@@ -247,7 +247,7 @@ template <typename... Args> class SignalPipes
 public:
   constexpr SignalPipes(SynchronizedSignalPipe<Args>... add_pipes) noexcept : pipes(std::move(add_pipes)...)
   {
-    poll_configurations = std::array<pollfd, PipesCount>{add_pipes.get_config()...};
+    poll_configurations = std::array<pollfd, PipesCount>{ add_pipes.get_config()... };
   }
 
   PollResult
@@ -261,9 +261,9 @@ public:
     if (res == 0) {
       return PollResult{};
     }
-    PollResult result{res};
+    PollResult result{ res };
 
-    for (auto [i, cfg] : mdb::EnumerateView{poll_configurations}) {
+    for (auto [i, cfg] : mdb::EnumerateView{ poll_configurations }) {
       if (cfg.revents != 0) {
         result.add(i);
         cfg.revents = 0;
@@ -276,7 +276,7 @@ public:
 static constexpr auto
 CreateSignalPipes(auto &&...ps) noexcept
 {
-  return SignalPipes{ps...};
+  return SignalPipes{ ps... };
 }
 
 } // namespace mdb

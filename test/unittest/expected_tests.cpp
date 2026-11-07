@@ -51,7 +51,7 @@ take_chars_must_have_len(const std::string &s, unsigned count)
 {
   if (s.size() > count) {
     auto str = s.substr(0, count);
-    return mdb::Expected<Destructible, int>{str};
+    return mdb::Expected<Destructible, int>{ str };
   } else {
     return mdb::unexpected(static_cast<int>(count - s.size()));
   }
@@ -79,12 +79,12 @@ TEST(Expected, TestNonTrivialT)
   for (auto i = 7; i < 11; ++i) {
     auto sub = take_chars_must_have_len(str, i);
     EXPECT_TRUE(sub.is_expected());
-    Destructible foo{sub.value()};
+    Destructible foo{ sub.value() };
   }
 
   for (auto i = 7; i < 11; ++i) {
     // should trigger Destructible move ctor
-    Destructible foo{take_chars_must_have_len(str, i).value()};
+    Destructible foo{ take_chars_must_have_len(str, i).value() };
   }
 
   EXPECT_EQ(Destructible::destroyed_n_times, 12);

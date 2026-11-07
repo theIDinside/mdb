@@ -28,7 +28,7 @@ struct source_location;
 
 #endif
 
-[[noreturn]] void panic(std::string_view err_msg, const char *functionName, const char *file, int line,
-                        int strip_levels);
+[[noreturn]] void panic(
+  std::string_view err_msg, const char *functionName, const char *file, int line, int strip_levels);
 
 void panic(std::string_view err_msg, const std::source_location &loc, int strip_levels);
