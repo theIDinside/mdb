@@ -12,11 +12,11 @@ namespace mdb::views {
 
 class CodeGen
 {
-  BoundView &mView;
+  CodeObject &mCodeObject;
   std::optional<std::string> mError;
 
 public:
-  explicit CodeGen(BoundView &view) noexcept : mView(view) {}
+  explicit CodeGen(CodeObject &code) noexcept : mCodeObject(code) {}
 
   u32 Emit(Instruction instruction) noexcept;
   void PatchTarget(u32 jump, u32 target) noexcept;

@@ -15,8 +15,8 @@ static constexpr u64 kDefaultArrayLimit = 1'000'000;
 
 /**
  * Binds `view` against `matchedType` (the type, or base class of the type, that the view's pattern matched).
- * Always returns a BoundView; if binding failed it carries the error in `mBindError`.
+ * Always returns a CodeObject; if binding failed it carries the error in `mBindError`.
  */
-std::unique_ptr<BoundView> BindView(const ViewDefinition &view, sym::Type *matchedType, u32 rootOffset) noexcept;
+std::unique_ptr<CodeObject> BindView(const ViewDefinition &view, sym::Type *matchedType, u32 rootOffset) noexcept;
 
 } // namespace mdb::views

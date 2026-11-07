@@ -253,7 +253,7 @@ struct ArrayChildren
 
 struct Frame
 {
-  const BoundView *mView;
+  const CodeObject *mCodeObject;
   u32 mFunction;
   u32 mPc;
   u32 mLocalBase;
@@ -308,14 +308,14 @@ struct RunResult
  */
 class Evaluator
 {
-  const BoundView &mView;
+  const CodeObject &mCodeObject;
   MemoryReader &mReader;
   std::vector<Root> mRoots;
   // Own decoded text without moving strings as more text is added.
   std::deque<std::string> mOwnedTexts;
   // Handles index views into mOwnedTexts or immutable program constants.
   std::vector<std::string_view> mTexts;
-  using LetKey = std::tuple<const BoundView *, u32, u64>;
+  using LetKey = std::tuple<const CodeObject *, u32, u64>;
   std::map<LetKey, EvalValue> mLetValues;
   std::set<LetKey> mLetInProgress;
   u64 mStepsUsed{ 0 };
@@ -341,7 +341,7 @@ class Evaluator
   Result RunToCompletion(ProgramState &state, const RunLimits &limits, u64 &stepsLeft) noexcept;
 
 public:
-  Evaluator(const BoundView &view, MemoryReader &reader, std::span<const Root> roots) noexcept;
+  Evaluator(const CodeObject &code, MemoryReader &reader, std::span<const Root> roots) noexcept;
 
   ProgramState Start(u32 function, std::span<const EvalValue> args) noexcept;
   std::expected<RunResult, EvalError> Run(ProgramState &state,
