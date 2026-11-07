@@ -16,3 +16,4 @@ test-dep/
 .vscode/launch.json
 prompts/
 mdbuild-autocomplete
+prototyping/**
