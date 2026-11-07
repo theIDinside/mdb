@@ -49,7 +49,7 @@ FunctionSymbolicationContext::ProcessLexicalBlockDie(DieReference die) noexcept
 {
   AddrPtr low = nullptr;
   AddrPtr hi = nullptr;
-  const auto block_seen = [&]() { return low != nullptr && hi != nullptr; };
+  const auto blockSeen = [&]() { return low != nullptr && hi != nullptr; };
   const auto &attr = die.GetUnitData()->GetAbbreviation(die.GetDie()->mAbbreviationCode);
   UnitReader reader{ die.GetUnitData() };
   reader.SeekDie(*die.GetDie());
@@ -80,17 +80,9 @@ FunctionSymbolicationContext::ProcessLexicalBlockDie(DieReference die) noexcept
     return;
   }
 
-  for (const auto abbr : attr.mAttributes) {
-    auto value = ReadAttributeValue(reader, abbr, attr.mImplicitConsts);
-
-    if (value.name == Attribute::DW_AT_high_pc) {
-      hi = value.AsAddress();
-    }
-    if (block_seen()) {
-      break;
-    }
-  }
-  mLexicalBlockStack.emplace_back(std::vector{ AddressRange{ low, low + hi } }, std::vector<Symbol>{});
+  // A block without a pc range still needs a stack entry so its children don't leak into the parent block.
+  auto ranges = blockSeen() ? std::vector{ AddressRange{ low, hi } } : std::vector<AddressRange>{};
+  mLexicalBlockStack.emplace_back(std::move(ranges), std::vector<Symbol>{});
 }
 
 void
