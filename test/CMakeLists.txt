@@ -23,6 +23,7 @@ set(MDB_TESTS
   stupid_shared
   basetypes # testing of variable symbol parsing for base types and POD types
   variables
+  logpoints
 )
 
 # For tests with additional sources (beyond the sources with the same name of the test, that is)
@@ -63,6 +64,9 @@ function(build_tests tests)
 endfunction()
 
 build_tests("${MDB_TESTS}")
+
+BuildTestSubject(NAME logpoints_opt SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/logpoints.cpp)
+target_compile_options(logpoints_opt PRIVATE -O2)
 
 BuildTestSubject(
   NAME forever
