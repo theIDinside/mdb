@@ -105,7 +105,7 @@ SupervisorState::SupervisorState(
   SupervisorType type, Tid taskLeader, ui::dap::DebugAdapterManager *client, bool stopAtEntryAfterExec) noexcept
     : mTaskLeader(taskLeader), mUserBreakpoints(*this), mDebugAdapterClient(client),
       mScheduler{ std::make_unique<TaskScheduler>(this) }, mNullUnwinder{ new sym::Unwinder{ nullptr } },
-      mSupervisorType(type), mStopAtEntryAfterExec(stopAtEntryAfterExec)
+      mStopAtEntryAfterExec(stopAtEntryAfterExec), mSupervisorType(type)
 {
   mNewObjectFilePublisher.Subscribe(SubscriberIdentity::Of(this), [this](const SymbolFile *sf) {
     mDebugAdapterClient->PostDapEvent(new ui::dap::ModuleEvent{ mTaskLeader, "new", *sf });
