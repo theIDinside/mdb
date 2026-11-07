@@ -168,6 +168,8 @@ struct BoundTemplatePart
 
 struct CodeObject
 {
+  // Source compiled into this program.
+  const ParsedSource *mSource{ nullptr };
   const ViewDefinition *mDef{ nullptr };
   // The type the view's pattern matched. This can be a base class of the type of the displayed value.
   sym::Type *mMatchedType{ nullptr };

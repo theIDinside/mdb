@@ -8,6 +8,7 @@
 // std
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <format>
 
 namespace mdb::views {
@@ -258,7 +259,8 @@ Unescape(std::string_view body, std::string &out)
 
 class Parser
 {
-  ViewFile &mFile;
+  ParsedSource &mUnit;
+  ViewFile *mFile;
   std::vector<Token> mTokens;
   u32 mPos{ 0 };
   std::optional<Diagnostic> mError;
@@ -272,7 +274,10 @@ class Parser
   }
 
 public:
-  Parser(ViewFile &file, std::vector<Token> tokens) noexcept : mFile(file), mTokens(std::move(tokens)) {}
+  Parser(ParsedSource &unit, ViewFile *file, std::vector<Token> tokens) noexcept
+      : mUnit(unit), mFile(file), mTokens(std::move(tokens))
+  {
+  }
 
   // Parse all tokens of a file
   void ParseFile() noexcept;
@@ -341,7 +346,7 @@ private:
     if (at.Is(TokenKind::Error)) {
       message = std::string{ at.mText };
     }
-    mError = Diagnostic{ .mFile = mFile.mPath, .mLoc = at.mLoc, .mMessage = std::move(message) };
+    mError = Diagnostic{ .mFile = mUnit.mPath, .mLoc = at.mLoc, .mMessage = std::move(message) };
   }
 
   bool
@@ -357,21 +362,21 @@ private:
   ExprId
   AddNewExpression(ExprKind kind, SourceLoc loc) noexcept
   {
-    mFile.mArena.mExprs.push_back(Expr{ .mKind = kind, .mLoc = loc });
-    return static_cast<ExprId>(mFile.mArena.mExprs.size() - 1);
+    mUnit.mArena.mExprs.push_back(Expr{ .mKind = kind, .mLoc = loc });
+    return static_cast<ExprId>(mUnit.mArena.mExprs.size() - 1);
   }
 
   Expr &
   Get(ExprId id) noexcept
   {
-    return mFile.mArena.mExprs[id];
+    return mUnit.mArena.mExprs[id];
   }
 
   StmtId
   AddStatement(Stmt stmt) noexcept
   {
-    mFile.mArena.mStmts.push_back(std::move(stmt));
-    return static_cast<StmtId>(mFile.mArena.mStmts.size() - 1);
+    mUnit.mArena.mStmts.push_back(std::move(stmt));
+    return static_cast<StmtId>(mUnit.mArena.mStmts.size() - 1);
   }
 
   void ParseView() noexcept;
@@ -409,10 +414,11 @@ private:
 void
 Parser::ParseFile() noexcept
 {
+  assert(mFile != nullptr);
   while (!Peek().Is(TokenKind::Eof)) {
     if (Peek().Is(TokenKind::Error)) {
       Error(Peek(), "");
-      mFile.mDiagnostics.push_back(*TakeError());
+      mUnit.mDiagnostics.push_back(*TakeError());
       break;
     }
     ParseView();
@@ -456,14 +462,14 @@ Parser::ParseView() noexcept
   const Token &start = Peek();
   if (!AcceptIdentifier("view")) {
     Error(start, std::format("expected 'view', found '{}'", start.mText));
-    mFile.mDiagnostics.push_back(*TakeError());
+    mUnit.mDiagnostics.push_back(*TakeError());
     SkipView(viewStart);
     return;
   }
 
   ViewDefinition view;
   view.mLoc = start.mLoc;
-  view.mFile = &mFile;
+  view.mSource = &mUnit;
 
   mTypeNames.clear();
   bool ok = ParsePattern(view.mPattern);
@@ -484,11 +490,11 @@ Parser::ParseView() noexcept
   mTypeNames.clear();
 
   if (!ok) {
-    mFile.mDiagnostics.push_back(*TakeError());
+    mUnit.mDiagnostics.push_back(*TakeError());
     SkipView(viewStart);
     return;
   }
-  mFile.mViews.push_back(std::move(view));
+  mFile->mViews.push_back(std::move(view));
 }
 
 bool
@@ -796,9 +802,9 @@ Parser::ParseBlock() noexcept
   }
   Stmt block{ .mKind = StmtKind::Block,
     .mLoc = open.mLoc,
-    .mFirst = static_cast<u32>(mFile.mArena.mBlockItems.size()),
+    .mFirst = static_cast<u32>(mUnit.mArena.mBlockItems.size()),
     .mCount = static_cast<u32>(items.size()) };
-  mFile.mArena.mBlockItems.insert(mFile.mArena.mBlockItems.end(), items.begin(), items.end());
+  mUnit.mArena.mBlockItems.insert(mUnit.mArena.mBlockItems.end(), items.begin(), items.end());
   return AddStatement(std::move(block));
 }
 
@@ -1020,7 +1026,7 @@ Parser::ParseStatement() noexcept
     if (Failed()) {
       return kNoStmt;
     }
-    if (mFile.mArena.Get(call).mKind != ExprKind::Call) {
+    if (mUnit.mArena.Get(call).mKind != ExprKind::Call) {
       Error(start, "expected a call");
       return kNoStmt;
     }
@@ -1162,7 +1168,7 @@ Parser::ParseTemplateString(const Token &token, SummarySpec &summary) noexcept
       return false;
     }
 
-    Parser sub{ mFile, std::move(tokens) };
+    Parser sub{ mUnit, mFile, std::move(tokens) };
     FormatSpec format = FormatSpec::Default;
     const ExprId expr = sub.ParseStandaloneExpression(format, mTypeNames);
     if (auto err = sub.TakeError(); err) {
@@ -1211,8 +1217,8 @@ Parser::ParseStandaloneExpression(FormatSpec &format, std::span<const std::strin
 u32
 Parser::AddType(TypeExpr type) noexcept
 {
-  mFile.mArena.mTypes.push_back(std::move(type));
-  return static_cast<u32>(mFile.mArena.mTypes.size() - 1);
+  mUnit.mArena.mTypes.push_back(std::move(type));
+  return static_cast<u32>(mUnit.mArena.mTypes.size() - 1);
 }
 
 bool
@@ -1515,7 +1521,7 @@ Parser::ParseCall(const Token &name) noexcept
       }
     }
   }
-  auto &arena = mFile.mArena;
+  auto &arena = mUnit.mArena;
   Get(id).mName = name.mText;
   Get(id).mFirstArg = static_cast<u32>(arena.mArgs.size());
   Get(id).mArgCount = static_cast<u32>(args.size());
@@ -1562,8 +1568,8 @@ Parser::ParsePrimary() noexcept
       return kNoExpr;
     }
     const ExprId id = AddNewExpression(ExprKind::StringLiteral, token.mLoc);
-    mFile.mArena.mStrings.push_back(std::move(*value));
-    Get(id).mString = static_cast<u32>(mFile.mArena.mStrings.size() - 1);
+    mUnit.mArena.mStrings.push_back(std::move(*value));
+    Get(id).mString = static_cast<u32>(mUnit.mArena.mStrings.size() - 1);
     return id;
   }
   case TokenKind::LParen: {
@@ -1632,10 +1638,10 @@ std::unique_ptr<ViewFile>
 ParseViewFile(std::string path, std::string source) noexcept
 {
   auto file = std::make_unique<ViewFile>();
-  file->mPath = std::move(path);
-  file->mSource = std::move(source);
+  file->mUnit.mPath = std::move(path);
+  file->mUnit.mSource = std::move(source);
 
-  Lexer lexer{ file->mSource };
+  Lexer lexer{ file->mUnit.mSource };
   std::vector<Token> tokens;
   // Lex everything up front, which gives the parser arbitrary lookahead (needed to tell casts from parenthesized
   // expressions). An error token terminates lexing; the parser reports it when it gets there.
@@ -1646,7 +1652,7 @@ ParseViewFile(std::string path, std::string source) noexcept
     tokens.push_back(Token{ .mKind = TokenKind::Eof, .mLoc = tokens.back().mLoc });
   }
 
-  Parser parser{ *file, std::move(tokens) };
+  Parser parser{ file->mUnit, file.get(), std::move(tokens) };
   parser.ParseFile();
   return file;
 }
