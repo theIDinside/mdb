@@ -437,6 +437,11 @@ Evaluator::RunWithBudget(ProgramState &state,
         return fail("internal error: root index out of range");
       }
       const Root &root = mRoots[instruction.mA];
+      if (root.mUnavailable) {
+        const auto name =
+          instruction.mA < mCodeObject.mRootNames.size() ? mCodeObject.mRootNames[instruction.mA] : "?";
+        return fail(std::format("'{}' is {}", name, *root.mUnavailable));
+      }
       if (root.mAddress) {
         state.mOperands.push_back(EvalValue::LValue(root.mType, *root.mAddress));
       } else {
@@ -805,6 +810,11 @@ Evaluator::Format(const EvalValue &input, FormatSpec format) noexcept
   std::string out;
   if (input.IsLValue()) {
     if (type.mKind == TypeKind::Record || type.mKind == TypeKind::Array) {
+      if (mAggregateFormatter && input.Root() == kNoRoot && type.mDwarf) {
+        if (auto formatted = mAggregateFormatter(type.mDwarf, input.Address())) {
+          return *formatted;
+        }
+      }
       out.append("{");
       out.append(type.mName);
       out.append("}");
@@ -925,6 +935,31 @@ Evaluator::Summary(u64 budget) noexcept
       return std::unexpected(std::move(formatted.error()));
     }
     out.append(*formatted);
+  }
+  return out;
+}
+
+std::string
+Evaluator::FormatTemplate(u64 budget) noexcept
+{
+  const EvalValue hiddenThis = EvalValue::Scalar(mCodeObject.mThisType, 0);
+  std::string out;
+  for (const auto &part : mCodeObject.mSummaryParts) {
+    out.append(part.mLiteral);
+    if (part.mFunction == kNoFunction) {
+      continue;
+    }
+    auto value = Call(part.mFunction, std::span{ &hiddenThis, 1 }, budget);
+    if (!value) {
+      out.append(std::format("<error: {}>", value.error().mMessage));
+      continue;
+    }
+    auto formatted = Format(*value, part.mFormat);
+    if (!formatted) {
+      out.append(std::format("<error: {}>", formatted.error().mMessage));
+    } else {
+      out.append(*formatted);
+    }
   }
   return out;
 }
