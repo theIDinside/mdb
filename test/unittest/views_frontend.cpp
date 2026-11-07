@@ -551,3 +551,68 @@ TEST(ViewsText, QuotingAndJson)
   AppendJsonEscaped(std::string_view{ "\x02\t", 2 }, control);
   EXPECT_EQ(control, R"(\u0002\t)");
 }
+
+TEST(ViewsParser, FrameTemplateLiterals)
+{
+  for (const auto &[message, literal] : std::vector<std::pair<std::string_view, std::string_view>>{
+         { "plain text", "plain text" }, { "{{literal}}", "{literal}" }, { "a\\nb", "a\nb" } }) {
+    SCOPED_TRACE(message);
+    auto tmpl = ParseFrameTemplate("<frame>", message);
+    ASSERT_TRUE(tmpl->mUnit.mDiagnostics.empty());
+    EXPECT_EQ(tmpl->mUnit.mPath, "<frame>");
+    EXPECT_EQ(tmpl->mSummary.mKind, SummarySpec::Kind::Template);
+    ASSERT_EQ(tmpl->mSummary.mParts.size(), 1);
+    EXPECT_EQ(tmpl->mSummary.mParts[0].mLiteral, literal);
+    EXPECT_EQ(tmpl->mSummary.mParts[0].mExpr, kNoExpr);
+  }
+}
+
+TEST(ViewsParser, FrameTemplateExpressions)
+{
+  auto tmpl = ParseFrameTemplate("<frame>", "i={i} j={j,x}");
+  ASSERT_TRUE(tmpl->mUnit.mDiagnostics.empty());
+  const auto &parts = tmpl->mSummary.mParts;
+  ASSERT_EQ(parts.size(), 2);
+  EXPECT_EQ(parts[0].mLiteral, "i=");
+  EXPECT_EQ(parts[1].mLiteral, " j=");
+  ASSERT_NE(parts[0].mExpr, kNoExpr);
+  ASSERT_NE(parts[1].mExpr, kNoExpr);
+  EXPECT_EQ(tmpl->mUnit.mArena.Get(parts[0].mExpr).mName, "i");
+  EXPECT_EQ(tmpl->mUnit.mArena.Get(parts[1].mExpr).mName, "j");
+  EXPECT_EQ(parts[0].mFormat, FormatSpec::Default);
+  EXPECT_EQ(parts[1].mFormat, FormatSpec::Hex);
+}
+
+TEST(ViewsParser, FrameTemplateTrailingLiteral)
+{
+  auto tmpl = ParseFrameTemplate("<frame>", "i={i}!");
+  ASSERT_TRUE(tmpl->mUnit.mDiagnostics.empty());
+  ASSERT_EQ(tmpl->mSummary.mParts.size(), 2);
+  EXPECT_EQ(tmpl->mSummary.mParts[0].mLiteral, "i=");
+  ASSERT_NE(tmpl->mSummary.mParts[0].mExpr, kNoExpr);
+  EXPECT_EQ(tmpl->mSummary.mParts[1].mLiteral, "!");
+  EXPECT_EQ(tmpl->mSummary.mParts[1].mExpr, kNoExpr);
+}
+
+TEST(ViewsParser, FrameTemplateErrors)
+{
+  for (std::string_view message : { "{", "}", "{}", "{1 +}" }) {
+    SCOPED_TRACE(message);
+    auto tmpl = ParseFrameTemplate("<logpoint test.cpp:42>", message);
+    ASSERT_EQ(tmpl->mUnit.mDiagnostics.size(), 1);
+    EXPECT_EQ(tmpl->mUnit.mDiagnostics[0].mFile, "<logpoint test.cpp:42>");
+  }
+}
+
+TEST(ViewsParser, FrameTemplateSourceLifetime)
+{
+  auto tmpl = ParseFrameTemplate("<frame>", "{shortName}");
+  ASSERT_TRUE(tmpl->mUnit.mDiagnostics.empty());
+  ASSERT_LT(tmpl->mUnit.mSource.size(), 15);
+  ASSERT_EQ(tmpl->mSummary.mParts.size(), 1);
+  ASSERT_NE(tmpl->mSummary.mParts[0].mExpr, kNoExpr);
+  const auto &expr = tmpl->mUnit.mArena.Get(tmpl->mSummary.mParts[0].mExpr);
+  EXPECT_EQ(expr.mKind, ExprKind::Identifier);
+  EXPECT_EQ(expr.mName, "shortName");
+  EXPECT_EQ(expr.mName.data(), tmpl->mUnit.mSource.data() + 2);
+}

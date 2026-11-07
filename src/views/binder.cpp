@@ -12,6 +12,7 @@
 
 // std
 #include <algorithm>
+#include <cassert>
 #include <cstring>
 #include <format>
 #include <unordered_map>
@@ -55,6 +56,31 @@ public:
   virtual BindResult ResolveUnknownName(Binder &binder, const Expr &expr) noexcept = 0;
 };
 
+class FrameEnvironment final : public BindingEnvironment
+{
+  std::span<const FrameVariable> mVariables;
+  std::unordered_map<u32, u32> mRootOf;
+  std::optional<u32> mThisVariable;
+
+public:
+  std::vector<u32> mRootVariables;
+  explicit FrameEnvironment(std::span<const FrameVariable> variables) noexcept : mVariables(variables)
+  {
+    for (u32 i = 0; i < variables.size(); ++i) {
+      if (variables[i].mName == "this") {
+        mThisVariable = i;
+        break;
+      }
+    }
+  }
+  void
+  PopulateGlobalScope(Binder &, Scope &) noexcept override
+  {
+  }
+  BindResult ResolveUnknownName(Binder &, const Expr &) noexcept override;
+  u32 RootFor(Binder &, u32) noexcept;
+};
+
 class ViewEnvironment;
 
 struct FieldLookup
@@ -66,8 +92,11 @@ struct FieldLookup
 class Binder
 {
   friend class ViewEnvironment;
+  friend class FrameEnvironment;
 
-  const ViewDefinition &mDef;
+  const ParsedSource &mUnit;
+  const ViewDefinition *mDef;
+  SourceLoc mCodeLoc;
   const ExprArena &mArena;
   CodeObject &mCodeObject;
   sym::Type *mMatchedType;
@@ -106,9 +135,14 @@ class Binder
 public:
   std::optional<Diagnostic> mError;
 
-  Binder(const ViewDefinition &def, CodeObject &view, sym::Type *matchedType, BindingEnvironment &environment)
-      : mDef(def), mArena(def.mSource->mArena), mCodeObject(view), mMatchedType(matchedType),
-        mObjectFile(matchedType->DefiningObjectFile()), mEnvironment(environment), mCodeGen(view)
+  Binder(const ParsedSource &unit,
+    const ViewDefinition *def,
+    CodeObject &code,
+    sym::Type *matchedType,
+    ObjectFile *objectFile,
+    BindingEnvironment &environment)
+      : mUnit(unit), mDef(def), mArena(unit.mArena), mCodeObject(code), mMatchedType(matchedType),
+        mObjectFile(objectFile), mEnvironment(environment), mCodeGen(code)
   {
     mI64 = FromBuiltin(BuiltinI64());
     mU64 = FromBuiltin(BuiltinU64());
@@ -118,6 +152,8 @@ public:
   }
 
   bool BindAll() noexcept;
+  bool BindFrame(const SummarySpec &summary) noexcept;
+  bool BindTemplate(const SummarySpec &summary) noexcept;
   void EmitCode() noexcept;
 
 private:
@@ -125,7 +161,7 @@ private:
   Fail(SourceLoc loc, std::string message) noexcept
   {
     if (!mError) {
-      mError = Diagnostic{ .mFile = mDef.mSource->mPath, .mLoc = loc, .mMessage = std::move(message) };
+      mError = Diagnostic{ .mFile = mUnit.mPath, .mLoc = loc, .mMessage = std::move(message) };
     }
     return false;
   }
@@ -511,6 +547,7 @@ Binder::ResolveTypeExpr(const TypeExpr &typeExpr) noexcept
 bool
 Binder::EnsureSignature(u32 function) noexcept
 {
+  assert(mDef);
   if (mSignatureState[function] == 2) {
     return true;
   }
@@ -518,7 +555,7 @@ Binder::EnsureSignature(u32 function) noexcept
     return true;
   }
   mSignatureState[function] = 1;
-  const FunctionDef &definition = mDef.mFunctions[function];
+  const FunctionDef &definition = mDef->mFunctions[function];
   for (const Parameter &parameter : definition.mParams) {
     auto type = ResolveTypeExpr(mArena.mTypes[parameter.mType]);
     if (!type) {
@@ -557,7 +594,7 @@ Binder::BindFunctionArguments(const Expr &expr, u32 function) noexcept
   if (!EnsureSignature(function)) {
     return std::nullopt;
   }
-  const FunctionDef &definition = mDef.mFunctions[function];
+  const FunctionDef &definition = mDef->mFunctions[function];
   const auto args = mArena.Args(expr);
   for (const CallArg &arg : args) {
     if (!arg.mName.empty()) {
@@ -1139,6 +1176,10 @@ Binder::BindCast(const Expr &expr) noexcept
 const sym::TemplateParameter *
 Binder::TemplateArgumentOf(sym::Type *type, u64 index, SourceLoc loc) noexcept
 {
+  if (type == nullptr) {
+    Fail(loc, "template_arg is only available in views");
+    return nullptr;
+  }
   type->ResolveType();
   const auto params = type->TemplateParameters();
   if (index >= params.size()) {
@@ -1214,6 +1255,9 @@ Binder::BindCall(const Expr &expr) noexcept
   const auto args = mArena.Args(expr);
 
   if (name == "template_arg") {
+    if (mMatchedType == nullptr) {
+      return FailExpr(expr.mLoc, "template_arg is only available in views");
+    }
     // A template value argument, e.g. the N of AutoTArray<T, N>
     const Expr *index = args.size() == 1 && args[0].mName.empty() ? &mArena.Get(args[0].mExpr) : nullptr;
     if (index == nullptr || index->mKind != ExprKind::IntLiteral) {
@@ -1807,8 +1851,42 @@ Binder::Bind(ExprId id) noexcept
 }
 
 bool
+Binder::BindTemplate(const SummarySpec &summary) noexcept
+{
+  mCodeObject.mSummaryKind = summary.mKind;
+  mCodeObject.mSummaryFormat = summary.mFormat;
+  for (const auto &part : summary.mParts) {
+    BoundTemplatePart boundPart{ .mLiteral = part.mLiteral, .mFormat = part.mFormat };
+    NodeId partNode = kNoNode;
+    if (part.mExpr != kNoExpr) {
+      auto bound = Bind(part.mExpr);
+      if (!bound) {
+        return false;
+      }
+      partNode = bound->mNode;
+    }
+    mCodeObject.mSummaryParts.push_back(boundPart);
+    mSummaryPartNodes.push_back(partNode);
+  }
+  return true;
+}
+
+bool
+Binder::BindFrame(const SummarySpec &summary) noexcept
+{
+  mCodeLoc = summary.mLoc;
+  mCodeObject.mRootType = kNoType;
+  mCodeObject.mThisType = PointerTo(AddType(BoundType{ .mKind = TypeKind::Void, .mName = "void" }));
+  mScopes.emplace_back();
+  mEnvironment.PopulateGlobalScope(*this, mScopes.back());
+  return !mError && BindTemplate(summary);
+}
+
+bool
 Binder::BindAll() noexcept
 {
+  assert(mDef && mMatchedType);
+  mCodeLoc = mDef->mLoc;
   mCodeObject.mRootType = FromDwarf(mMatchedType);
   mCodeObject.mThisType = PointerTo(mCodeObject.mRootType);
   mCodeObject.mRootTypes = { mCodeObject.mRootType };
@@ -1819,13 +1897,13 @@ Binder::BindAll() noexcept
     return false;
   }
 
-  for (u32 i = 0; i < mDef.mFunctions.size(); ++i) {
+  for (u32 i = 0; i < mDef->mFunctions.size(); ++i) {
     if (!EnsureSignature(i)) {
       return false;
     }
   }
-  for (u32 i = 0; i < mDef.mFunctions.size(); ++i) {
-    const FunctionDef &definition = mDef.mFunctions[i];
+  for (u32 i = 0; i < mDef->mFunctions.size(); ++i) {
+    const FunctionDef &definition = mDef->mFunctions[i];
     mCurrentFunction = mFunctionIndex.find(definition.mName)->second;
     mCodeObject.mProgram.mFunctions[mCurrentFunction].mEntry = mCodeGen.Here();
     mLoops.clear();
@@ -1854,7 +1932,7 @@ Binder::BindAll() noexcept
   }
   mCurrentFunction = kNoFunction;
 
-  const auto &summary = mDef.mSummary;
+  const auto &summary = mDef->mSummary;
   mCodeObject.mSummaryKind = summary.mKind;
   mCodeObject.mSummaryFormat = summary.mFormat;
   if (summary.mKind == SummarySpec::Kind::Expression) {
@@ -1864,22 +1942,12 @@ Binder::BindAll() noexcept
     }
     mSummaryNode = bound->mNode;
   } else if (summary.mKind == SummarySpec::Kind::Template) {
-    for (const auto &part : summary.mParts) {
-      BoundTemplatePart boundPart{ .mLiteral = part.mLiteral, .mFormat = part.mFormat };
-      NodeId partNode = kNoNode;
-      if (part.mExpr != kNoExpr) {
-        auto bound = Bind(part.mExpr);
-        if (!bound) {
-          return false;
-        }
-        partNode = bound->mNode;
-      }
-      mCodeObject.mSummaryParts.push_back(boundPart);
-      mSummaryPartNodes.push_back(partNode);
+    if (!BindTemplate(summary)) {
+      return false;
     }
   }
 
-  const auto &children = mDef.mChildren;
+  const auto &children = mDef->mChildren;
   bool expressionCall = false;
   ExprId expressionCallId = kNoExpr;
   if (children.mKind == ChildrenSpec::Kind::Expression && children.mExpr != kNoExpr) {
@@ -1934,9 +2002,11 @@ Binder::BindAll() noexcept
 void
 Binder::EmitCode() noexcept
 {
-  for (size_t i = 0; i < mLetNodes.size(); ++i) {
-    mCodeObject.mLetFunctions.push_back(
-      mCodeGen.EmitExprFunction(std::format("let {}", mDef.mLets[i].mName), mLetNodes[i]));
+  if (mDef) {
+    for (size_t i = 0; i < mLetNodes.size(); ++i) {
+      mCodeObject.mLetFunctions.push_back(
+        mCodeGen.EmitExprFunction(std::format("let {}", mDef->mLets[i].mName), mLetNodes[i]));
+    }
   }
   if (mCodeObject.mSummaryKind == SummarySpec::Kind::Template) {
     for (size_t i = 0; i < mCodeObject.mSummaryParts.size(); ++i) {
@@ -1948,12 +2018,11 @@ Binder::EmitCode() noexcept
   } else if (mCodeObject.mSummaryKind == SummarySpec::Kind::Expression) {
     mCodeObject.mSummaryFunction = mCodeGen.EmitExprFunction("summary", mSummaryNode);
   }
-  if (mCodeObject.mChildrenKind == ChildrenSpec::Kind::Expression) {
+  if (mDef && mCodeObject.mChildrenKind == ChildrenSpec::Kind::Expression) {
     mCodeObject.mChildrenFunction = mCodeGen.EmitExprFunction("children", mChildrenNode);
   }
   if (mCodeGen.Error()) {
-    mCodeObject.mBindError =
-      Diagnostic{ .mFile = mDef.mSource->mPath, .mLoc = mDef.mLoc, .mMessage = *mCodeGen.Error() };
+    mCodeObject.mBindError = Diagnostic{ .mFile = mUnit.mPath, .mLoc = mCodeLoc, .mMessage = *mCodeGen.Error() };
   }
 }
 
@@ -1969,13 +2038,86 @@ BindView(const ViewDefinition &view, sym::Type *matchedType, u32 rootOffset) noe
   bound->mRootOffset = rootOffset;
 
   ViewEnvironment environment{ view };
-  Binder binder{ view, *bound, matchedType, environment };
+  Binder binder{ *view.mSource, &view, *bound, matchedType, matchedType->DefiningObjectFile(), environment };
   if (!binder.BindAll()) {
     bound->mBindError = std::move(binder.mError);
   } else {
     binder.EmitCode();
   }
   return bound;
+}
+
+u32
+FrameEnvironment::RootFor(Binder &binder, u32 variable) noexcept
+{
+  if (auto found = mRootOf.find(variable); found != mRootOf.end()) {
+    return found->second;
+  }
+  const u32 root = static_cast<u32>(mRootVariables.size());
+  mRootOf.emplace(variable, root);
+  mRootVariables.push_back(variable);
+  binder.mCodeObject.mRootTypes.push_back(binder.FromDwarf(mVariables[variable].mType));
+  binder.mCodeObject.mRootNames.emplace_back(mVariables[variable].mName);
+  return root;
+}
+
+BindResult
+FrameEnvironment::ResolveUnknownName(Binder &binder, const Expr &expr) noexcept
+{
+  for (u32 i = 0; i < mVariables.size(); ++i) {
+    if (mVariables[i].mName == expr.mName) {
+      const u32 root = RootFor(binder, i);
+      return BoundExpr{
+        .mNode = binder.AddNode(BoundNode{
+          .mOp = BoundOp::Root, .mType = binder.mCodeObject.mRootTypes[root], .mImm = root, .mLoc = expr.mLoc }),
+        .mIsLValue = true
+      };
+    }
+  }
+  if (mThisVariable) {
+    const u32 root = RootFor(binder, *mThisVariable);
+    BoundExpr thisPtr{
+      .mNode = binder.AddNode(BoundNode{
+        .mOp = BoundOp::Root, .mType = binder.mCodeObject.mRootTypes[root], .mImm = root, .mLoc = expr.mLoc }),
+      .mIsLValue = true
+    };
+    auto ptr = binder.RValue(thisPtr, expr.mLoc);
+    if (ptr) {
+      auto deref = binder.AutoDeref(BoundExpr{ .mNode = *ptr }, expr.mLoc);
+      if (deref) {
+        auto member = binder.MemberOf(*deref, expr.mName, expr.mLoc);
+        if (member) {
+          return member;
+        }
+      }
+    }
+  }
+  return binder.FailExpr(expr.mLoc, std::format("no variable '{}' in this frame", expr.mName));
+}
+
+BoundFrameTemplate
+BindFrameTemplate(
+  std::unique_ptr<FrameTemplate> tmpl, std::span<const FrameVariable> variables, ObjectFile *objectFile) noexcept
+{
+  BoundFrameTemplate result;
+  result.mTemplate = std::move(tmpl);
+  result.mCodeObject = std::make_unique<CodeObject>();
+  result.mCodeObject->mSource = &result.mTemplate->mUnit;
+  if (!result.mTemplate->mUnit.mDiagnostics.empty()) {
+    result.mCodeObject->mBindError = result.mTemplate->mUnit.mDiagnostics.front();
+    return result;
+  }
+  FrameEnvironment environment{ variables };
+  Binder binder{ result.mTemplate->mUnit, nullptr, *result.mCodeObject, nullptr, objectFile, environment };
+  if (!binder.BindFrame(result.mTemplate->mSummary)) {
+    result.mCodeObject->mBindError = std::move(binder.mError);
+  } else {
+    binder.EmitCode();
+  }
+  if (!result.mCodeObject->mBindError) {
+    result.mRootVariables = std::move(environment.mRootVariables);
+  }
+  return result;
 }
 
 } // namespace mdb::views

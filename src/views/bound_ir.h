@@ -166,10 +166,13 @@ struct BoundTemplatePart
   u32 mFunction{ kNoFunction };
 };
 
+// The compiled form of one parsed source: a view bound against one concrete type, or a frame template (logpoint
+// message) bound against a frame's variables.
 struct CodeObject
 {
-  // Source compiled into this program.
+  // Source compiled into this program, for views and frame templates.
   const ParsedSource *mSource{ nullptr };
+  // View definition; null for frame templates.
   const ViewDefinition *mDef{ nullptr };
   // The type the view's pattern matched. This can be a base class of the type of the displayed value.
   sym::Type *mMatchedType{ nullptr };
@@ -182,6 +185,7 @@ struct CodeObject
   std::vector<BoundType> mTypes;
   std::vector<BoundNode> mNodes;
   std::vector<TypeId> mRootTypes;
+  std::vector<std::string> mRootNames;
   std::vector<u32> mLetFunctions;
   std::vector<NodeId> mCallArgs;
 

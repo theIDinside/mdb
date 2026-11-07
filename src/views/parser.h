@@ -23,6 +23,9 @@ namespace mdb::views {
  */
 std::unique_ptr<ViewFile> ParseViewFile(std::string path, std::string source) noexcept;
 
+// Parses the body of a template string. Never returns null; errors are in mUnit.mDiagnostics.
+std::unique_ptr<FrameTemplate> ParseFrameTemplate(std::string path, std::string_view message) noexcept;
+
 // Keywords that start a builtin type in a cast or sizeof: `unsigned`, `char16_t`, `u32`, ...
 bool IsBuiltinTypeKeyword(std::string_view word) noexcept;
 
