@@ -11,11 +11,17 @@
 #include <utils/expected.h>
 #include <utils/immutable.h>
 #include <utils/smartptr.h>
+#include <views/binder.h>
 
 // stdlib
 #include <functional>
 
 namespace mdb {
+
+namespace sym {
+class Frame;
+class Symbol;
+} // namespace sym
 
 namespace js {
 struct JsBreakpointFunction;
@@ -203,7 +209,7 @@ public:
   void Disable(tc::SupervisorState &controller) noexcept;
 
   std::optional<AddrPtr> Address() const noexcept;
-  bool IsVerified() const noexcept;
+  virtual bool IsVerified() const noexcept;
   std::optional<u32> Line() const noexcept;
   std::optional<u32> Column() const noexcept;
   std::optional<std::string_view> GetSourceFile() const noexcept;
@@ -292,9 +298,15 @@ public:
 
 class Logpoint : public Breakpoint
 {
-  std::string mExpressionString;
-  void prepareExpression(std::string_view expr) noexcept;
-  void EvaluateLog(TaskInfo &t) noexcept;
+  std::string mMessage;
+  std::optional<views::BoundFrameTemplate> mBound;
+  AddrPtr mBoundPc{ nullptr };
+  ObjectFile *mBoundObjectFile{ nullptr };
+  std::vector<sym::Symbol *> mRootSymbols;
+  bool mReportedBindError{ false };
+  bool mBindFailed{ false };
+  bool EnsureBound(tc::SupervisorState &, sym::Frame &) noexcept;
+  std::string Evaluate(tc::SupervisorState &, sym::Frame &) noexcept;
 
 public:
   explicit Logpoint(RequiredUserParameters param,
@@ -302,6 +314,13 @@ public:
     std::unique_ptr<BreakpointSpecification> spec) noexcept;
 
   BreakpointHitEventResult OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcept final;
+  bool
+  IsVerified() const noexcept final
+  {
+    return !mBindFailed && UserBreakpoint::IsVerified();
+  }
+  Ref<UserBreakpoint> CloneBreakpoint(
+    ProcessBreakpointsManager &, tc::SupervisorState &, Ref<BreakpointLocation>) noexcept final;
 };
 
 class InternalBreakpoint : public UserBreakpoint
