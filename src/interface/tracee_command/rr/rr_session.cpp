@@ -17,6 +17,12 @@
 
 namespace mdb::tc::replay {
 
+bool
+Session::IsReversing() const noexcept
+{
+  return mReplaySupervisor->IsReversing();
+}
+
 Session::Session(ReplaySupervisor *replaySupervisor,
   Tid taskLeader,
   uint64_t frameTime,

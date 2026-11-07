@@ -37,6 +37,7 @@ private: // methods
   TaskInfo *CreateNewTask(Tid tid, std::optional<std::string_view> name) noexcept;
 
 public:
+  bool IsReversing() const noexcept final;
   static Session *Create(ReplaySupervisor *replaySupervisor,
     Tid taskLeader,
     ui::dap::DebugAdapterManager *dap,
