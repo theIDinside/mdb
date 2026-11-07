@@ -224,11 +224,19 @@ FunctionSymbolicationContext::ProcessSymbolInformation() noexcept
       "Origin die for a fn wasn't subprogram! It was: {}",
       to_str(compUnitDieReference.GetDie()->mTag));
 
+    // Only the concrete (addressable) instance carries locations for its children. Abstract instance roots
+    // (DW_AT_inline) and specifications are reached via DW_AT_abstract_origin/DW_AT_specification from the
+    // concrete children in ProcessVariableDie - walking their children here would produce location-less
+    // duplicates.
+    if (!compUnitDieReference.GetAbbreviation().mIsAddressable) {
+      continue;
+    }
+
     const DieMetaData *dieIterator = compUnitDieReference.GetDie()->GetChildren();
     // Means this fn ctx has no children. Whatever meta data (like pc start, pc end, etc) we may have, must already
     // have been processed.
     if (dieIterator == nullptr) {
-      return;
+      continue;
     }
     const DieMetaData *parent = compUnitDieReference.GetDie();
     const auto next = [&parent](auto curr, auto next) {
