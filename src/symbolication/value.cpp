@@ -827,6 +827,112 @@ MemoryContentsObject::CreateFrameVariable(
     std::move(variableContext), symbol.Name(), symbol, u32{}, std::move(memory_object));
 }
 
+std::expected<VariableStorage, std::string>
+ResolveVariableStorage(tc::SupervisorState &tc, const sym::Frame &frame, sym::Symbol &symbol) noexcept
+{
+  auto *fnSymbol = frame.MaybeGetFullSymbolInfo();
+  if (!fnSymbol) {
+    return std::unexpected("not available at this location");
+  }
+  if (!symbol.Computed()) {
+    auto *obj = frame.GetSymbolFile()->GetObjectFile();
+    ReadInLocationList(
+      symbol, tc.GetDebugAdapterProtocolClient()->GetCommandArenaAllocator(), *obj->GetElf()->mDebugLoclist);
+  }
+  const auto expression = symbol.GetDwarfExpression(frame.GetSymbolFile()->UnrelocateAddress(frame.FramePc()));
+  if (expression.empty()) {
+    return std::unexpected("not available at this location");
+  }
+  ExprByteCodeInterpreter interp{ frame.FrameLevel(),
+    tc,
+    *frame.mTask,
+    expression,
+    fnSymbol->GetFrameBaseDwarfExpression(),
+    frame.GetSymbolFile()->GetObjectFile() };
+  const auto location = interp.Run();
+  if (location.mKind == LocationKind::Memory && location.IsSimple()) {
+    return VariableStorage{ .mAddress = AddrPtr{ location.uAddress } };
+  }
+  if (location.mKind == LocationKind::Unavailable) {
+    return std::unexpected("optimized out");
+  }
+  const auto size = symbol.Type()->Size();
+  const auto readRegister = [&](u64 number, std::span<u8> out) -> bool {
+    if (out.size() > sizeof(u64)) {
+      return false;
+    }
+    const u64 value = frame.FrameLevel() == 0
+                        ? frame.Task()->GetDwarfRegister(number)
+                        : frame.Task()->GetCallstack().UnwindRegister(frame.FrameLevel(), number);
+    std::memcpy(out.data(), &value, out.size());
+    return true;
+  };
+  if (location.IsSimple() && location.mKind == LocationKind::Register) {
+    if (size > sizeof(u64)) {
+      return std::unexpected("in an unsupported location");
+    }
+    VariableStorage result;
+    result.mBytes.resize(size);
+    if (!readRegister(location.uRegisterNumber, result.mBytes)) {
+      return std::unexpected("in an unsupported location");
+    }
+    return result;
+  }
+  if (location.IsSimple() && location.mKind == LocationKind::Implicit) {
+    if (size > sizeof(u64)) {
+      return std::unexpected("in an unsupported location");
+    }
+    VariableStorage result;
+    result.mBytes.resize(size);
+    std::memcpy(result.mBytes.data(), &location.uValue, std::min<size_t>(size, sizeof(location.uValue)));
+    return result;
+  }
+  if (location.mKind == LocationKind::Composite) {
+    VariableStorage result;
+    result.mBytes.assign(size, 0);
+    size_t offset = 0;
+    for (const auto &piece : location.mPieces) {
+      if (piece.mSizeBits || offset + piece.mSizeBytes > result.mBytes.size()) {
+        return std::unexpected("in an unsupported location");
+      }
+      auto out = std::span<u8>{ result.mBytes }.subspan(offset, piece.mSizeBytes);
+      switch (piece.kind) {
+      case LocationKind::Memory: {
+        auto read = tc.SafeRead(AddrPtr{ piece.uMemoryAddress }, piece.mSizeBytes);
+        if (!read.is_expected()) {
+          return std::unexpected("not available at this location");
+        }
+        auto bytes = read.take_value()->Span();
+        if (bytes.size() != out.size()) {
+          return std::unexpected("not available at this location");
+        }
+        std::copy(bytes.begin(), bytes.end(), out.begin());
+        break;
+      }
+      case LocationKind::Register:
+        if (!readRegister(piece.uRegisterNumber, out)) {
+          return std::unexpected("in an unsupported location");
+        }
+        break;
+      case LocationKind::Implicit: {
+        const auto count = std::min<size_t>(out.size(), piece.uImplicit.mLength);
+        std::memcpy(out.data(), piece.uImplicit.mData, count);
+        break;
+      }
+      case LocationKind::Unavailable:
+        return std::unexpected("optimized out");
+      case LocationKind::ImplicitPtr:
+        return std::unexpected("in an unsupported location");
+      case LocationKind::Composite:
+        return std::unexpected("in an unsupported location");
+      }
+      offset += piece.mSizeBytes;
+    }
+    return result;
+  }
+  return std::unexpected("in an unsupported location");
+}
+
 /* static */
 Ref<Value>
 MemoryContentsObject::CreateSyntheticVariable(

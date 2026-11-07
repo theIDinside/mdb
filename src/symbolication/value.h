@@ -14,6 +14,8 @@
 #include <expected>
 #include <memory_resource>
 #include <span>
+#include <string>
+#include <vector>
 
 namespace mdb {
 using Bytes = std::span<const u8>;
@@ -33,6 +35,15 @@ class Symbol;
 class Type;
 class DebugAdapterSerializer;
 class Frame;
+
+struct VariableStorage
+{
+  std::optional<AddrPtr> mAddress;
+  std::vector<u8> mBytes;
+  std::optional<std::string> mUnavailable;
+};
+std::expected<VariableStorage, std::string> ResolveVariableStorage(
+  tc::SupervisorState &tc, const Frame &frame, Symbol &symbol) noexcept;
 
 enum class ValueDisplayType : u8
 {
