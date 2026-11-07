@@ -17,6 +17,7 @@ option(USE_DWARF5 "Setting to make sure clang or gcc uses DWARF5 for it's debug 
 option(BUILD_MDB_TESTS "Setting that configures & builds test subjects" OFF)
 option(CLANG_TIDY_CHECK "Configure clang-tidy to run during build" OFF)
 option(MDB_PROFILE_LOGGER "Configure mdb to build with profile logging" OFF)
+option(MDB_REMOTE_TESTS "Generate the DriverTest.Remote.* (gdb remote session) driver tests" OFF)
 
 find_package(PkgConfig REQUIRED)
 string(TOUPPER ${CMAKE_BUILD_TYPE} MIDAS_BUILD_TYPE)
@@ -355,7 +356,11 @@ if(BUILD_MDB_TESTS)
   find_program(NODEJS "node")
   if(NODEJS)
     message("Exporting tests using MDB test exporter: ${CMAKE_CURRENT_SOURCE_DIR}/test/export_tests.js")
-    execute_process(COMMAND node ${CMAKE_CURRENT_SOURCE_DIR}/test/export_tests.js
+    set(EXPORT_TESTS_ARGS "")
+    if(MDB_REMOTE_TESTS)
+      list(APPEND EXPORT_TESTS_ARGS "--remote")
+    endif()
+    execute_process(COMMAND node ${CMAKE_CURRENT_SOURCE_DIR}/test/export_tests.js ${EXPORT_TESTS_ARGS}
     RESULT_VARIABLE GENERATOR_EXIT_CODE
     ERROR_VARIABLE GENERATOR_ERROR
     OUTPUT_VARIABLE GENERATOR_OUTPUT)

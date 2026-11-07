@@ -22,20 +22,23 @@ function readFiles(directory) {
   })
 }
 
+// Remote (gdb remote session) tests are only generated when passed --remote (CMake option MDB_REMOTE_TESTS).
+const sessions = process.argv.includes('--remote') ? ['Native', 'Remote'] : ['Native']
+
 function addTest(suite, test, is_todo = false) {
-  if (is_todo) {
-    return `add_test(NAME DriverTest.Native.${suite}.${test} COMMAND node \${CMAKE_CURRENT_SOURCE_DIR}/test/driver/runDebugAdapterTest.js --build-dir=\${CMAKE_BINARY_DIR} --test-suite=${suite} --test=${test} --session=native)
-add_test(NAME DriverTest.Remote.${suite}.${test} COMMAND node \${CMAKE_CURRENT_SOURCE_DIR}/test/driver/runDebugAdapterTest.js --build-dir=\${CMAKE_BINARY_DIR} --test-suite=${suite} --test=${test} --session=remote)
-set_tests_properties(DriverTest.Remote.${suite}.${test} PROPERTIES LABELS "Todo: Not Implemented" WILL_FAIL TRUE)
-set_tests_properties(DriverTest.Native.${suite}.${test} PROPERTIES LABELS "Todo: Not Implemented" WILL_FAIL TRUE)
-set_tests_properties(DriverTest.Native.${suite}.${test} PROPERTIES ENVIRONMENT "LOG=all")
-set_tests_properties(DriverTest.Remote.${suite}.${test} PROPERTIES ENVIRONMENT "LOG=all")`
-  } else {
-    return `add_test(NAME DriverTest.Native.${suite}.${test} COMMAND node \${CMAKE_CURRENT_SOURCE_DIR}/test/driver/runDebugAdapterTest.js --build-dir=\${CMAKE_BINARY_DIR} --test-suite=${suite} --test=${test} --session=native)
-add_test(NAME DriverTest.Remote.${suite}.${test} COMMAND node \${CMAKE_CURRENT_SOURCE_DIR}/test/driver/runDebugAdapterTest.js --build-dir=\${CMAKE_BINARY_DIR} --test-suite=${suite} --test=${test} --session=remote)
-set_tests_properties(DriverTest.Native.${suite}.${test} PROPERTIES ENVIRONMENT "LOG=all")
-set_tests_properties(DriverTest.Remote.${suite}.${test} PROPERTIES ENVIRONMENT "LOG=all")`
-  }
+  return sessions
+    .map((session) => {
+      const name = `DriverTest.${session}.${suite}.${test}`
+      const lines = [
+        `add_test(NAME ${name} COMMAND node \${CMAKE_CURRENT_SOURCE_DIR}/test/driver/runDebugAdapterTest.js --build-dir=\${CMAKE_BINARY_DIR} --test-suite=${suite} --test=${test} --session=${session.toLowerCase()})`,
+      ]
+      if (is_todo) {
+        lines.push(`set_tests_properties(${name} PROPERTIES LABELS "Todo: Not Implemented" WILL_FAIL TRUE)`)
+      }
+      lines.push(`set_tests_properties(${name} PROPERTIES ENVIRONMENT "LOG=all")`)
+      return lines.join('\n')
+    })
+    .join('\n')
 }
 
 // Test names should match file names (but without .js extension)
