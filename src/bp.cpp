@@ -5,18 +5,28 @@
 #include <common/panic.h>
 #include <events/stop_event.h>
 #include <interface/dap/events.h>
+#include <interface/dap/interface.h>
 #include <interface/tracee_command/supervisor_state.h>
 #include <mdbjs/bpjs.h>
 #include <mdbjs/mdbjs.h>
 #include <mdbsys/ptrace.h>
+#include <symbolication/callstack.h>
+#include <symbolication/dwarf/typeread.h>
+#include <symbolication/fnsymbol.h>
 #include <symbolication/objfile.h>
+#include <symbolication/value.h>
 #include <task.h>
 #include <tracer.h>
 #include <utils/logger.h>
 #include <utils/todo.h>
+#include <views/evaluator.h>
+#include <views/parser.h>
+#include <views/registry.h>
+#include <views/target_reader.h>
 
 // std
 #include <algorithm>
+#include <format>
 #include <type_traits>
 
 #define BP_KEEP(STOP)                                                                                             \
@@ -467,66 +477,170 @@ ResumeToBreakpoint::OnHit([[maybe_unused]] tc::SupervisorState &controller, Task
 Logpoint::Logpoint(RequiredUserParameters param,
   std::string_view logExpression,
   std::unique_ptr<BreakpointSpecification> specification) noexcept
-    : Breakpoint(std::move(param), LocationUserKind::LogPoint, std::move(specification))
+    : Breakpoint(std::move(param), LocationUserKind::LogPoint, std::move(specification)), mMessage(logExpression)
 {
-  MDB_ASSERT(!mBreakpointSpec->mCondition, "logpoint should not have condition!");
-  prepareExpression(logExpression);
-  auto res =
-    js::JsBreakpointFunction::CreateJsBreakpointFunction(js::Scripting::Get().GetContext(), mExpressionString);
-  // auto res = Tracer::GetScriptingInstance().SourceBreakpointCondition(mId, mExpressionString);
-  if (res.has_value()) {
-    SetExpression(std::move(*res));
+  if (mBreakpointSpec->mCondition) {
+    DBGLOG(warning, "condition on a logpoint is ignored");
   }
 }
 
-void
-Logpoint::prepareExpression(std::string_view expr) noexcept
+bool
+Logpoint::EnsureBound(tc::SupervisorState &controller, sym::Frame &frame) noexcept
 {
-  if (!expr.starts_with("return")) {
-    mExpressionString.append("return `");
+  auto *obj = frame.GetSymbolFile()->GetObjectFile();
+  if (mBound && mBoundPc == frame.FramePc() && mBoundObjectFile == obj) {
+    return mBound->mCodeObject && !mBound->mCodeObject->mBindError;
   }
-  // we magically guess that we have at most 24 interpolated values. Therefore add space for 24 '$'
-  mExpressionString.reserve(expr.size() + 24 + "return"sv.size());
-  bool previousWasBracket = false;
-  for (auto ch : expr) {
-    if (ch == '{') {
-      if (previousWasBracket) {
-        mExpressionString.push_back('{');
-        mExpressionString.push_back('{');
-        // an "escaped" interpolation was seen ({{ }} should not be interpreted as ${})
-        previousWasBracket = false;
-      } else {
-        previousWasBracket = true;
-      }
-    } else {
-      if (previousWasBracket) {
-        mExpressionString.push_back('$');
-        mExpressionString.push_back('{');
-        previousWasBracket = false;
-      }
-      mExpressionString.push_back(ch);
+  mBoundPc = frame.FramePc();
+  mBoundObjectFile = obj;
+  mRootSymbols.clear();
+  mBindFailed = false;
+  auto *fn = frame.MaybeGetFullSymbolInfo();
+  if (!fn) {
+    return false;
+  }
+  if (!fn->IsResolved()) {
+    sym::dw::FunctionSymbolicationContext symbolicationContext{ *obj, frame };
+    symbolicationContext.ProcessSymbolInformation();
+  }
+  const AddrPtr pc = frame.GetSymbolFile()->UnrelocateAddress(frame.FramePc());
+  std::vector<const sym::SymbolBlock *> blocks;
+  for (const auto &block : fn->GetFrameLocalVariableBlocks()) {
+    if (block.ContainsPc(pc)) {
+      blocks.push_back(&block);
     }
   }
-  mExpressionString.push_back('`');
+  std::ranges::sort(blocks, [](auto *a, auto *b) {
+    return (static_cast<u64>(a->EndPc()) - static_cast<u64>(a->StartPc())) <
+           (static_cast<u64>(b->EndPc()) - static_cast<u64>(b->StartPc()));
+  });
+  std::vector<sym::Symbol *> symbols;
+  std::vector<views::FrameVariable> variables;
+  for (const sym::SymbolBlock *block : blocks) {
+    for (auto &symbol : const_cast<sym::SymbolBlock *>(block)->mSymbols) {
+      symbols.push_back(&symbol);
+      variables.push_back({ symbol.Name(), symbol.Type().TypeEntry() });
+    }
+  }
+  for (auto &symbol : const_cast<sym::SymbolBlock &>(fn->GetFunctionArguments()).mSymbols) {
+    symbols.push_back(&symbol);
+    variables.push_back({ symbol.Name(), symbol.Type().TypeEntry() });
+  }
+  const auto *loc = GetLocation()->GetSourceLocationInfo();
+  const auto path = loc ? std::string_view{ loc->mSourceFile } : std::string_view{ "unknown" };
+  const auto line = loc ? *loc->mLineNumber : 0;
+  auto tmpl = views::ParseFrameTemplate(std::format("<logpoint {}:{}>", path, line), mMessage);
+  mBound = views::BindFrameTemplate(std::move(tmpl), variables, obj);
+  for (u32 i : mBound->mRootVariables) {
+    mRootSymbols.push_back(symbols[i]);
+  }
+  if (mBound->mCodeObject && mBound->mCodeObject->mBindError) {
+    mBindFailed = true;
+  }
+  if (mBound->mCodeObject && mBound->mCodeObject->mBindError && !mReportedBindError) {
+    mReportedBindError = true;
+    auto diagnostic = mBound->mCodeObject->mBindError->mMessage;
+    auto *event = new ui::dap::OutputEvent{
+      controller.TaskLeaderTid(), "console", std::format("logpoint {}:{}: {}\n", path, line, diagnostic)
+    };
+    if (loc) {
+      event->mSourcePath = std::string{ loc->mSourceFile };
+      event->mLine = *loc->mLineNumber;
+    }
+    controller.GetDebugAdapterProtocolClient()->PostDapEvent(event);
+    controller.EmitBreakpointEvent("changed", *this, diagnostic);
+  }
+  return mBound->mCodeObject && !mBound->mCodeObject->mBindError;
 }
 
-void
-Logpoint::EvaluateLog([[maybe_unused]] TaskInfo &t) noexcept
+std::string
+Logpoint::Evaluate(tc::SupervisorState &controller, sym::Frame &frame) noexcept
 {
-  if (!mExpression) {
-    return;
+  std::vector<sym::VariableStorage> storage;
+  std::vector<views::Root> roots;
+  storage.reserve(mRootSymbols.size());
+  roots.reserve(mRootSymbols.size());
+  for (u32 i = 0; i < mRootSymbols.size(); ++i) {
+    auto value = sym::ResolveVariableStorage(controller, frame, *mRootSymbols[i]);
+    if (value) {
+      storage.push_back(std::move(*value));
+    } else {
+      storage.push_back({ .mUnavailable = value.error() });
+    }
+    auto &s = storage.back();
+    roots.push_back({ .mType = mBound->mCodeObject->mRootTypes[i],
+      .mAddress = s.mAddress ? std::optional<u64>{ static_cast<u64>(*s.mAddress) } : std::nullopt,
+      .mBytes = s.mBytes,
+      .mUnavailable = s.mUnavailable });
   }
-  TODO("Evaluate the log fn and post a DAP event with the string contents it produced.");
+  views::TargetReader reader{ &controller };
+  views::Evaluator evaluator{ *mBound->mCodeObject, reader, roots };
+  evaluator.SetAggregateFormatter([&reader](sym::Type *type, u64 address) -> std::optional<std::string> {
+    const auto *view = views::ViewRegistry::Get().Lookup(type);
+    if (!view || view->mBindError || view->mSummaryKind == views::SummarySpec::Kind::Default) {
+      return std::nullopt;
+    }
+    views::Root root{ .mType = view->mRootTypes.front(), .mAddress = address, .mBytes = {} };
+    views::Evaluator nested{ *view, reader, std::span{ &root, 1 } };
+    auto summary = nested.Summary();
+    return summary ? std::optional<std::string>{ std::move(*summary) } : std::nullopt;
+  });
+  return evaluator.FormatTemplate();
 }
 
 BreakpointHitEventResult
 Logpoint::OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcept
 {
-  TODO("Implement this");
-  (void)controller;
-  (void)task;
-  EvaluateLog(task);
+  IncrementHitCount();
+  if (controller.IsReversing()) {
+    return BP_KEEP(Resume);
+  }
+  auto frame = controller.GetCurrentFrame(task);
+  const LocationSourceInfo *loc = mBreakpointLocation->GetSourceLocationInfo();
+  if (!frame.MaybeGetFullSymbolInfo()) {
+    if (!mReportedBindError) {
+      mReportedBindError = true;
+      const auto path = loc ? std::string_view{ loc->mSourceFile } : std::string_view{ "unknown" };
+      const auto line = loc ? *loc->mLineNumber : 0;
+      auto *event = new ui::dap::OutputEvent{ controller.TaskLeaderTid(),
+        "console",
+        std::format("logpoint {}:{}: no debug info for this location\n", path, line) };
+      if (loc) {
+        event->mSourcePath = std::string{ loc->mSourceFile };
+        event->mLine = *loc->mLineNumber;
+      }
+      controller.GetDebugAdapterProtocolClient()->PostDapEvent(event);
+    }
+    return BP_KEEP(Resume);
+  }
+  if (!EnsureBound(controller, frame)) {
+    return BP_KEEP(Resume);
+  }
+  controller.BuildCallFrameStack(task, CallStackRequest::partial(1));
+  auto text = Evaluate(controller, frame);
+
+  auto *event = new ui::dap::OutputEvent{ controller.TaskLeaderTid(), "console", std::move(text) + "\n" };
+  if (loc) {
+    event->mSourcePath = std::string{ loc->mSourceFile };
+    event->mLine = *loc->mLineNumber;
+  }
+  controller.GetDebugAdapterProtocolClient()->PostDapEvent(event);
   return BP_KEEP(Resume);
+}
+
+Ref<UserBreakpoint>
+Logpoint::CloneBreakpoint(
+  ProcessBreakpointsManager &storage, tc::SupervisorState &controller, Ref<BreakpointLocation> location) noexcept
+{
+  auto clone = Ref<Logpoint>::MakeShared(RequiredUserParameters{ .mTaskId = mTid,
+                                           .mBreakpointId = storage.NewBreakpointId(),
+                                           .mBreakpointLocationResult = std::move(location),
+                                           .mTimesToHit = {},
+                                           .mControl = controller },
+    mMessage,
+    mBreakpointSpec->Clone());
+  storage.AddUser(clone);
+  return clone;
 }
 
 BreakpointHitEventResult
