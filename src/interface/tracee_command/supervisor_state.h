@@ -316,6 +316,11 @@ public:
   {
     return true;
   }
+  virtual bool
+  IsReversing() const noexcept
+  {
+    return false;
+  }
   bool HasTask(Tid tid) noexcept;
 
   /* Resumes all tasks in this target. */
