@@ -12,7 +12,7 @@ compinit
 _mdbuild() {
     local -a commands build_opts configure_opts
 
-    commands=(help build clean dev-setup configure-buildroot configure list-presets select autocomplete format lint)
+    commands=(help build clean dev-setup configure-buildroot configure list-presets select autocomplete format lint test)
     build_opts=(debug release fulldebug fullrelease)
     configure_opts=(debug release fulldebug fullrelease)
 

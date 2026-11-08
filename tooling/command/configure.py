@@ -285,7 +285,7 @@ class ConfigureBuildRootCommand(Command):
 
 class ConfigureCommand(Command):
     description = "Run cmake configure for a preset"
-    useMessage = "Configure a CMake build preset and place the build directory in the configured root build directory, with the preset name append to the path. See 'build.py help setup'. If no root build directory is configured, ./build will be used."
+    useMessage = "Configure a CMake build preset and place the build directory in the configured root build directory, with the preset name append to the path. See 'build.py help setup'. If no root build directory is configured, ./build will be used. Arguments after the preset are passed on to cmake. Remote session driver tests are not generated unless '-DMDB_REMOTE_TESTS=ON' is passed."
     arguments = [
         Argument(
             name="Build preset",
@@ -323,6 +323,9 @@ class ConfigureCommand(Command):
         ]
         for arg in args[1:]:
             cmakeCommand.append(arg)
+        # Remote session tests are off unless asked for on this configure, so a previously cached ON doesn't stick.
+        if not any(arg.startswith("-DMDB_REMOTE_TESTS") for arg in args[1:]):
+            cmakeCommand.append("-DMDB_REMOTE_TESTS=OFF")
 
         runCommand(cmakeCommand, cwd=buildDirectory)
         buildMetadata.addConfigured(buildType=buildPreset)

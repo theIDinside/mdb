@@ -6,3 +6,4 @@ from .configure import *
 from .select import *
 from .autocomplete import *
 from .format import *
+from .test import *
