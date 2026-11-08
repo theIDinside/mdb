@@ -778,6 +778,21 @@ struct SetBreakpointsResponse final : ui::UIResult
   }
 };
 
+// A client can send a request before it has seen the launch/attach response, naming the session by an id that
+// isn't a pid mdb knows. If the config token's session already has its supervisor, that's the target. Deferring
+// the request instead would run it after configurationDone has resumed the process, so breakpoints would fail to
+// install.
+static tc::SupervisorState *
+TargetOrConfiguredSupervisor(
+  DebugAdapterManager *dap, tc::SupervisorState *target, std::optional<std::string_view> configToken) noexcept
+{
+  if (target || !configToken) {
+    return target;
+  }
+  SupervisorSessionConfiguration *config = dap->GetConfigurationFor(*configToken);
+  return config ? config->GetSupervisor() : nullptr;
+}
+
 struct SetBreakpoints final : public ui::UICommand
 {
 private:
@@ -817,7 +832,8 @@ public:
   void
   Execute() noexcept final
   {
-    tc::SupervisorState *target = GetSupervisor();
+    tc::SupervisorState *target = TargetOrConfiguredSupervisor(
+      mDebugAdapterManager, GetSupervisor(), get<std::string_view>(args, kConfigToken));
 
     MDB_ASSERT(args.Contains("source"), "setBreakpoints request requires a 'source' field");
     MDB_ASSERT(args.At("source")->Contains("path"), "source field requires a 'path' field");
@@ -851,7 +867,9 @@ public:
     }
 
     if (!target) {
-      TODO("Implement sending error response here, e.g. 'No target with id foo'.");
+      std::pmr::string err{ MemoryResource() };
+      std::format_to(std::back_inserter(err), "Session '{}' could not be found.", mProcessId);
+      return WriteResponse(ErrorResponse{ Request, this, std::move(err), {} });
     }
 
     target->SetSourceBreakpoints(file, specs);
@@ -932,7 +950,8 @@ public:
   void
   Execute() noexcept final
   {
-    tc::SupervisorState *target = GetSupervisor();
+    tc::SupervisorState *target = TargetOrConfiguredSupervisor(
+      mDebugAdapterManager, GetSupervisor(), get<std::string_view>(mArgs, kConfigToken));
 
     using BP = ui::dap::Breakpoint;
     Set<BreakpointSpecification> specs{};
@@ -953,7 +972,9 @@ public:
       return WriteResponse(SetBreakpointsResponse{ true, this, BreakpointRequestKind::instruction, {} });
     }
     if (!target) {
-      TODO("Implement sending error response here, e.g. 'No target with id foo'.");
+      std::pmr::string err{ MemoryResource() };
+      std::format_to(std::back_inserter(err), "Session '{}' could not be found.", mProcessId);
+      return WriteResponse(ErrorResponse{ Request, this, std::move(err), {} });
     }
     target->SetInstructionBreakpoints(specs);
 
@@ -1008,7 +1029,8 @@ public:
   void
   Execute() noexcept final
   {
-    tc::SupervisorState *target = GetSupervisor();
+    tc::SupervisorState *target = TargetOrConfiguredSupervisor(
+      mDebugAdapterManager, GetSupervisor(), get<std::string_view>(mArgs, kConfigToken));
 
     using BP = ui::dap::Breakpoint;
     Set<BreakpointSpecification> specs{};
@@ -1034,7 +1056,9 @@ public:
       return WriteResponse(SetBreakpointsResponse{ true, this, BreakpointRequestKind::function, {} });
     }
     if (!target) {
-      TODO("Implement sending error response here, e.g. 'No target with id foo'.");
+      std::pmr::string err{ MemoryResource() };
+      std::format_to(std::back_inserter(err), "Session '{}' could not be found.", mProcessId);
+      return WriteResponse(ErrorResponse{ Request, this, std::move(err), {} });
     }
     target->SetFunctionBreakpoints(specs);
     for (const auto &user : target->GetUserBreakpoints().AllUserBreakpoints()) {
