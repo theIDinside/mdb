@@ -202,6 +202,12 @@ public:
   ConfigureState OnLaunch(NonNullPtr<tc::SupervisorState> supervisor);
   ConfigureState OnConfigurationDone();
   void AddConfigurationRequest(ConfigRequest &&request);
+  // Set once the session has launched or attached to its process.
+  tc::SupervisorState *
+  GetSupervisor() const noexcept
+  {
+    return mSupervisor;
+  }
 };
 
 class DebugAdapterManager
