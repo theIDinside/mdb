@@ -38,10 +38,10 @@ struct ScopeEntry
     Local,
     Type
   } mKind;
-  u32 mIndex{ 0 };
-  TypeId mType{ kNoType };
   bool mIsLValue{ false };
   bool mIsReference{ false };
+  u32 mIndex{ 0 };
+  TypeId mType{ kNoType };
 };
 
 using Scope = std::unordered_map<std::string_view, ScopeEntry>;
@@ -54,6 +54,7 @@ public:
   virtual ~BindingEnvironment() noexcept = default;
   virtual void PopulateGlobalScope(Binder &binder, Scope &scope) noexcept = 0;
   virtual BindResult ResolveUnknownName(Binder &binder, const Expr &expr) noexcept = 0;
+  virtual BindResult ResolveThis(Binder &binder, const Expr &expr) noexcept = 0;
 };
 
 class FrameEnvironment final : public BindingEnvironment
@@ -78,6 +79,8 @@ public:
   {
   }
   BindResult ResolveUnknownName(Binder &, const Expr &) noexcept override;
+  BindResult ResolveThis(Binder &, const Expr &) noexcept override;
+  BoundExpr VariableExpr(Binder &, u32 variable, SourceLoc loc) noexcept;
   u32 RootFor(Binder &, u32) noexcept;
 };
 
@@ -296,16 +299,23 @@ public:
       binder.mLetNodes.push_back(bound->mNode);
       binder.mLetIsLValue.push_back(bound->mIsLValue);
       scope.emplace(binding.mName,
-        ScopeEntry{ .mKind = ScopeEntry::Kind::Let, .mIndex = declaration.mIndex, .mIsLValue = bound->mIsLValue });
+        ScopeEntry{ .mKind = ScopeEntry::Kind::Let, .mIsLValue = bound->mIsLValue, .mIndex = declaration.mIndex });
     }
   }
 
   BindResult
   ResolveUnknownName(Binder &binder, const Expr &expr) noexcept override
   {
-    const BoundExpr self{ .mNode = binder.AddNode(BoundOp::This, binder.mCodeObject.mRootType, expr.mLoc),
+    auto self = ResolveThis(binder, expr);
+    return binder.MemberOf(*self, expr.mName, expr.mLoc);
+  }
+
+  // In a view, 'this' is the viewed object.
+  BindResult
+  ResolveThis(Binder &binder, const Expr &expr) noexcept override
+  {
+    return BoundExpr{ .mNode = binder.AddNode(BoundOp::This, binder.mCodeObject.mRootType, expr.mLoc),
       .mIsLValue = true };
-    return binder.MemberOf(self, expr.mName, expr.mLoc);
   }
 };
 
@@ -1753,7 +1763,7 @@ Binder::Bind(ExprId id) noexcept
         .mOp = BoundOp::TextConst, .mType = mTextType, .mText = mArena.mStrings[expr.mString], .mLoc = expr.mLoc })
     };
   case ExprKind::This:
-    return BoundExpr{ .mNode = AddNode(BoundOp::This, mCodeObject.mRootType, expr.mLoc), .mIsLValue = true };
+    return mEnvironment.ResolveThis(*this, expr);
   case ExprKind::Identifier:
     return BindIdentifier(expr);
   case ExprKind::Member: {
@@ -1912,10 +1922,12 @@ Binder::BindAll() noexcept
       const Parameter &parameter = definition.mParams[p];
       const TypeId type = mCodeObject.mProgram.mFunctions[mCurrentFunction].mLocalTypes[p + 1];
       mScopes.back().emplace(parameter.mName,
-        ScopeEntry{ .mKind = ScopeEntry::Kind::Local,
+        ScopeEntry{
+          .mKind = ScopeEntry::Kind::Local,
+          .mIsReference = parameter.mIsReference,
           .mIndex = static_cast<u32>(p + 1),
           .mType = type,
-          .mIsReference = parameter.mIsReference });
+        });
     }
     if (!LowerStatement(definition.mBody)) {
       mScopes.pop_back();
@@ -2061,38 +2073,50 @@ FrameEnvironment::RootFor(Binder &binder, u32 variable) noexcept
   return root;
 }
 
+BoundExpr
+FrameEnvironment::VariableExpr(Binder &binder, u32 variable, SourceLoc loc) noexcept
+{
+  const u32 root = RootFor(binder, variable);
+  return BoundExpr{
+    .mNode = binder.AddNode(
+      BoundNode{ .mOp = BoundOp::Root, .mType = binder.mCodeObject.mRootTypes[root], .mImm = root, .mLoc = loc }),
+    .mIsLValue = true
+  };
+}
+
 BindResult
 FrameEnvironment::ResolveUnknownName(Binder &binder, const Expr &expr) noexcept
 {
   for (u32 i = 0; i < mVariables.size(); ++i) {
     if (mVariables[i].mName == expr.mName) {
-      const u32 root = RootFor(binder, i);
-      return BoundExpr{
-        .mNode = binder.AddNode(BoundNode{
-          .mOp = BoundOp::Root, .mType = binder.mCodeObject.mRootTypes[root], .mImm = root, .mLoc = expr.mLoc }),
-        .mIsLValue = true
-      };
+      return VariableExpr(binder, i, expr.mLoc);
     }
   }
+  // An implicit member access through the frame's 'this' pointer, like in a member function.
   if (mThisVariable) {
-    const u32 root = RootFor(binder, *mThisVariable);
-    BoundExpr thisPtr{
-      .mNode = binder.AddNode(BoundNode{
-        .mOp = BoundOp::Root, .mType = binder.mCodeObject.mRootTypes[root], .mImm = root, .mLoc = expr.mLoc }),
-      .mIsLValue = true
-    };
-    auto ptr = binder.RValue(thisPtr, expr.mLoc);
-    if (ptr) {
-      auto deref = binder.AutoDeref(BoundExpr{ .mNode = *ptr }, expr.mLoc);
-      if (deref) {
-        auto member = binder.MemberOf(*deref, expr.mName, expr.mLoc);
-        if (member) {
-          return member;
-        }
+    const TypeId pointerType = binder.FromDwarf(mVariables[*mThisVariable].mType);
+    const TypeId recordType = binder.Type(pointerType).mElement;
+    if (binder.Type(pointerType).mKind == TypeKind::Pointer && binder.Type(recordType).mKind == TypeKind::Record &&
+        binder.Type(recordType).mDwarf && binder.FindField(binder.Type(recordType).mDwarf, expr.mName)) {
+      auto pointer = binder.RValue(VariableExpr(binder, *mThisVariable, expr.mLoc), expr.mLoc);
+      if (!pointer) {
+        return std::nullopt;
       }
+      const NodeId object = binder.AddNode(BoundOp::Deref, recordType, expr.mLoc, *pointer);
+      return binder.MemberOf(BoundExpr{ .mNode = object, .mIsLValue = true }, expr.mName, expr.mLoc);
     }
   }
   return binder.FailExpr(expr.mLoc, std::format("no variable '{}' in this frame", expr.mName));
+}
+
+// In a frame template, 'this' is the frame's this pointer.
+BindResult
+FrameEnvironment::ResolveThis(Binder &binder, const Expr &expr) noexcept
+{
+  if (!mThisVariable) {
+    return binder.FailExpr(expr.mLoc, "no 'this' in this frame");
+  }
+  return VariableExpr(binder, *mThisVariable, expr.mLoc);
 }
 
 BoundFrameTemplate

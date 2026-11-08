@@ -105,13 +105,17 @@ struct CallArg
   ExprId mExpr{ kNoExpr };
 };
 
-struct Expr
+struct alignas(64) Expr
 {
   ExprKind mKind;
-  SourceLoc mLoc;
   u8 mOp{ 0 };
-  u64 mInteger{ 0 };
-  double mFloat{ 0.0 };
+  u16 mString{ 0 };
+  SourceLoc mLoc;
+  union
+  {
+    u64 mInteger{ 0 };
+    double mFloat;
+  };
   // Identifier name, member name or function name.
   std::string_view mName;
   ExprId mA{ kNoExpr };
@@ -123,7 +127,6 @@ struct Expr
   u32 mFirstArg{ 0 };
   u32 mArgCount{ 0 };
   // Index into ExprArena::mStrings for string literals
-  u32 mString{ 0 };
 
   [[nodiscard]] UnaryOp
   Unary() const noexcept
@@ -137,6 +140,8 @@ struct Expr
     return static_cast<BinaryOp>(mOp);
   }
 };
+
+static_assert(sizeof(Expr) == 64, "Remove alignas(64) if this changes");
 
 using StmtId = u32;
 static constexpr StmtId kNoStmt = std::numeric_limits<StmtId>::max();
