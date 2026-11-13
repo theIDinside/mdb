@@ -6,6 +6,26 @@ These tests are built to behave much like what a real DA (debugger adapter) woul
 2. `json` is 1st class
 3. Writing JS is easy - even if it's poorly written JS, getting the job done is what's most important.
 
+## DWARF versions
+
+With `BUILD_MDB_TESTS=ON`, each test subject is built under its usual name and
+with a `_d5` suffix that forces DWARF 5 (for example, `dynamic_types_d5`). Shared
+subject libraries get matching variants. The usual targets still follow
+`USE_DWARF5`, which defaults to DWARF 4. Use `COMPILE_OPTIONS` in
+`BuildTestSubject(...)` for flags that must apply to both variants.
+
+Every driver test is registered twice in CTest; the DWARF 5 test has a `_d5`
+suffix. Both registrations use the same test function and select the subject
+through `debugAdapter.buildDirFile(...)`.
+
+```sh
+ctest --test-dir obj/debug --output-on-failure -R 'viewCalls'
+ctest --test-dir obj/debug --output-on-failure -R 'viewCalls.*_d5$'
+```
+
+When invoking `test/driver/runDebugAdapterTest.js` directly, add `--dwarf=5` to
+select the `_d5` subjects; omitting it selects the usual subjects.
+
 ## Test File design
 
 Each file begins with `require(client)(__filename)` passing in the current test file name to the client code so that we remove a bunch of duplicated code that involves printing current file.

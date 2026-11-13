@@ -34,7 +34,7 @@ perform_dynamic()
   char *error;
 
   printf("About to dlopen libmetricsconv.so\n"); // BP_PRE_OPEN
-  auto handle = dlopen("./bin/libmetricsconv.so", RTLD_LAZY);
+  auto handle = dlopen(METRICSCONV_LIBRARY, RTLD_LAZY);
   if (!handle) {
     printf("Failed to dlopen\n");
     fputs(dlerror(), stderr);

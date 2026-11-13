@@ -27,17 +27,20 @@ const sessions = process.argv.includes('--remote') ? ['Native', 'Remote'] : ['Na
 
 function addTest(suite, test, is_todo = false) {
   return sessions
-    .map((session) => {
-      const name = `DriverTest.${session}.${suite}.${test}`
-      const lines = [
-        `add_test(NAME ${name} COMMAND node \${CMAKE_CURRENT_SOURCE_DIR}/test/driver/runDebugAdapterTest.js --build-dir=\${CMAKE_BINARY_DIR} --test-suite=${suite} --test=${test} --session=${session.toLowerCase()})`,
-      ]
-      if (is_todo) {
-        lines.push(`set_tests_properties(${name} PROPERTIES LABELS "Todo: Not Implemented" WILL_FAIL TRUE)`)
-      }
-      lines.push(`set_tests_properties(${name} PROPERTIES ENVIRONMENT "LOG=all")`)
-      return lines.join('\n')
-    })
+    .flatMap((session) =>
+      ['default', '5'].map((dwarf) => {
+        const suffix = dwarf === '5' ? '_d5' : ''
+        const name = `DriverTest.${session}.${suite}.${test}${suffix}`
+        const lines = [
+          `add_test(NAME ${name} COMMAND node \${CMAKE_CURRENT_SOURCE_DIR}/test/driver/runDebugAdapterTest.js --build-dir=\${CMAKE_BINARY_DIR} --test-suite=${suite} --test=${test} --session=${session.toLowerCase()} --dwarf=${dwarf})`,
+        ]
+        if (is_todo) {
+          lines.push(`set_tests_properties(${name} PROPERTIES LABELS "Todo: Not Implemented" WILL_FAIL TRUE)`)
+        }
+        lines.push(`set_tests_properties(${name} PROPERTIES ENVIRONMENT "LOG=all")`)
+        return lines.join('\n')
+      })
+    )
     .join('\n')
 }
 

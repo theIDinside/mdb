@@ -30,43 +30,22 @@ set(MDB_TESTS
 # name their variables by their names with _SOURCES appended
 set(stupid_shared_SOURCES todo.cpp)
 
-add_library(metricsconv SHARED dynamic_lib.cpp dynamic_lib.h)
-set_target_properties(metricsconv PROPERTIES PUBLIC_HEADER test/dynamic_lib.h)
-set_target_properties(metricsconv PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+BuildTestSubject(NAME metricsconv SHARED SOURCES dynamic_lib.cpp dynamic_lib.h)
 
-if(USE_DWARF5)
-  target_compile_options(metricsconv PRIVATE -O0 -g3 -gdwarf-5 -fdebug-types-section)
-else()
-  target_compile_options(metricsconv PRIVATE -O0 -g3 -gdwarf-4)
-endif()
+foreach(name IN LISTS MDB_TESTS)
+  set(libs "")
+  if(name MATCHES "shared")
+    list(APPEND libs metricsconv)
+  endif()
+  BuildTestSubject(
+    NAME ${name}
+    SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/${name}.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/spinlock.cpp ${${name}_SOURCES}
+    LIBS ${libs}
+  )
+endforeach()
 
-function(build_tests tests)
-  foreach(target_name ${tests})
-    set(target_source ${CMAKE_CURRENT_SOURCE_DIR}/${target_name}.cpp ${CMAKE_CURRENT_SOURCE_DIR}/spinlock.cpp)
-    if(DEFINED ${target_name}_SOURCES)
-      set(src_get "${target_name}_SOURCES")
-      set(target_source ${target_source} ${${src_get}})
-    endif()
-    add_executable(${target_name} ${target_source})  # Change the file extension if necessary
-    if(${target_name} MATCHES "shared")
-      message("${target_name} compiled with libmetricsconv")
-      target_link_libraries(${target_name} metricsconv)
-    endif()
-    set_target_properties(${target_name} PROPERTIES LINKER_LANGUAGE CXX)  # Specify the linker languag
-    set_target_properties(${target_name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
-
-    if(USE_DWARF5)
-      target_compile_options(${target_name} PRIVATE -O0 -g3 -gdwarf-5 -fdebug-types-section)
-    else()
-      target_compile_options(${target_name} PRIVATE -O0 -g3 -gdwarf-4)
-    endif()
-  endforeach()
-endfunction()
-
-build_tests("${MDB_TESTS}")
-
-BuildTestSubject(NAME logpoints_opt SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/logpoints.cpp)
-target_compile_options(logpoints_opt PRIVATE -O2)
+BuildTestSubject(NAME logpoints_opt SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/logpoints.cpp COMPILE_OPTIONS -O2)
 
 BuildTestSubject(
   NAME forever
@@ -107,6 +86,10 @@ BuildTestSubject(
   SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/dynamicLoading.cpp
   LIBS dl
 )
+add_dependencies(dynamicLoading metricsconv)
+add_dependencies(dynamicLoading_d5 metricsconv_d5)
+target_compile_definitions(dynamicLoading PRIVATE METRICSCONV_LIBRARY="./bin/libmetricsconv.so")
+target_compile_definitions(dynamicLoading_d5 PRIVATE METRICSCONV_LIBRARY="./bin/libmetricsconv_d5.so")
 
 BuildTestSubject(
   NAME fork
@@ -158,15 +141,10 @@ foreach(name ${MultiProcessSubjects})
   )
 endforeach()
 
-add_library(miniipc SHARED
+BuildTestSubject(NAME miniipc SHARED
+  SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/subjects/minibrowser/ipc.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/subjects/minibrowser/ipc.h)
-set_target_properties(miniipc PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
-if(USE_DWARF5)
-  target_compile_options(miniipc PRIVATE -O0 -g3 -gdwarf-5 -fdebug-types-section)
-else()
-  target_compile_options(miniipc PRIVATE -O0 -g3 -gdwarf-4)
-endif()
 
 set(MiniBrowserSubjects browser content)
 
@@ -179,7 +157,6 @@ foreach(name ${MiniBrowserSubjects})
     INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/subjects/minibrowser
   )
 endforeach()
-
 
 BuildTestSubject(
   NAME strings
@@ -202,8 +179,8 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   BuildTestSubject(
     NAME containers_simple_template_names
     SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/containers.cpp
+    COMPILE_OPTIONS -gsimple-template-names
   )
-  target_compile_options(containers_simple_template_names PRIVATE -gsimple-template-names)
 endif()
 
 message("Test build type: ${CMAKE_BUILD_TYPE}")
