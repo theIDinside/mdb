@@ -28,7 +28,10 @@ A view is a set of items for the types its pattern matches:
 - Builtins:
   - `template_arg(N)`, and `typeof(expr)` in a `using`;
   - `text`, `cstr`, `utf8`/`utf16`/`utf32` for strings, with `limit:` (4096 code units by default);
-  - `array(ptr, count)` for contiguous children, with `limit:` (1,000,000 by default).
+  - `array(ptr, count)` for contiguous children, with `limit:` (1,000,000 by default);
+  - `view(x).name(args)` and `view(x).summary`: a function or the summary of the view for `x`'s type, or of its
+    dynamic type if the class has a vtable (see [views.md](views.md#calling-another-view-viewx)).
+- Text joined with `+`, and `?:` between texts.
 - Summary templates: `"len={mLength} flags={mFlags,x}"`. The formats are `x`, `X`, `d`, `o`, `b` and `c`.
 
 ## Statements
@@ -44,7 +47,7 @@ They're allowed in `children { … }` blocks and in function bodies:
 - calls as statements: `walk(n->mLeft);`.
 
 **Locals** hold numbers and pointers only. They are the only thing a script can assign: a view never changes the
-program.
+program. Text can be returned from a function, but not stored in a local.
 
 ## Children
 
@@ -68,6 +71,7 @@ program.
 
 ```
 fn count(Node *n) -> u64 { … }   // value function: returns a number or pointer, can't yield
+fn spec() -> text { … }          // value function returning text
 fn walk(Node *n) { … }           // void function: can yield, is called as a statement
 ```
 
@@ -77,7 +81,8 @@ fn walk(Node *n) { … }           // void function: can yield, is called as a s
   `using`s and `let`s.
 - **Reference parameters** (`u64 &acc`) let a function update a local of its caller. Only a local, or another
   reference parameter, can be passed to one.
-- Calls can nest 1024 deep.
+- Calls can nest 1024 deep. That includes calls through `view()`, which share the caller's step limit.
+- Value functions of other views are called with `view(x).name(args)`. Void functions can't be.
 
 ## Limits and errors
 
@@ -86,6 +91,7 @@ fn walk(Node *n) { … }           // void function: can yield, is called as a s
 | a request for children | 1,000,000 steps |
 | each summary part and `let` | 100,000 steps |
 | call depth | 1024 |
+| nested summaries (`view(x).summary`, structs in summaries) | 8 |
 
 When a limit is hit, or the program's memory can't be read, the value shows `<view error: file:line:col: …>`, or the
 children end with a `[view error]` child. The rest of the variables panel is unaffected.
@@ -93,7 +99,8 @@ children end with a `[view error]` child. The rest of the variables panel is una
 ## Not supported
 
 - Calling functions in the program being debugged. A view can only read memory.
-- Functions shared between views, and calls from one view's functions into another's.
+- Functions outside any view; calls into void functions of other views.
 - Locals that hold text, structs or arrays, and containers such as a visited set.
-- Delegation (a `RefPtr<T>` displayed as its `T`), nested summaries, and `template_arg(i, j)`.
+- Delegation (a `RefPtr<T>` displayed as its `T`), and `template_arg(i, j)`.
+- Displaying a value in the variables panel as its dynamic type.
 - Watch expressions, hover and breakpoint conditions in mscript. They're planned, and still use JavaScript today.

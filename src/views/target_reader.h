@@ -2,7 +2,9 @@
 #pragma once
 
 #include <interface/tracee_command/supervisor_state.h>
+#include <symbolication/dynamic_type.h>
 #include <views/evaluator.h>
+#include <views/registry.h>
 
 #include <algorithm>
 #include <cstring>
@@ -67,6 +69,34 @@ public:
       mBlocks.push_back(std::move(block));
     }
     return true;
+  }
+};
+
+// Views from the registry, and dynamic types from the target's vtables.
+class TargetServices final : public RuntimeServices
+{
+  tc::SupervisorState *mSupervisor;
+
+public:
+  explicit TargetServices(tc::SupervisorState *supervisor) noexcept : mSupervisor(supervisor) {}
+
+  const CodeObject *
+  ViewFor(sym::Type *type) noexcept final
+  {
+    return ViewRegistry::Get().Lookup(type);
+  }
+
+  std::optional<DynamicObject>
+  DynamicTypeOf(sym::Type *type, u64 address) noexcept final
+  {
+    if (mSupervisor == nullptr) {
+      return std::nullopt;
+    }
+    const auto dynamic = sym::ResolveDynamicType(*mSupervisor, type, address);
+    if (!dynamic) {
+      return std::nullopt;
+    }
+    return DynamicObject{ .mType = dynamic->mType, .mAddress = dynamic->mAddress };
   }
 };
 

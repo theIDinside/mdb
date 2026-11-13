@@ -1,0 +1,5 @@
+// Loaded after viewcalls.mdbv: replaces SimpleURI's view.
+view SimpleURI {
+  fn spec() -> text { return "overridden"; }
+  summary "{spec()}"
+}

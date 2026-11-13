@@ -144,7 +144,14 @@ std::unique_ptr<CodeObject>
 ViewRegistry::FindAndBind(sym::Type *type, u32 depth) noexcept
 {
   if (const ViewDefinition *view = FindDirectMatch(type); view) {
-    auto bound = BindView(*view, type, 0);
+    const ViewLookup lookup = [this](sym::Type *other) -> ViewLookupResult {
+      other->ResolveType();
+      if (mBinding.contains(other)) {
+        return ViewLookupResult{ .mCycle = true };
+      }
+      return ViewLookupResult{ .mView = Lookup(other) };
+    };
+    auto bound = BindView(*view, type, 0, lookup);
     if (bound->mBindError) {
       DBGLOG(core, "[views] binding '{}' to {}: {}", view->mPattern.mSource, *type, bound->mBindError->ToString());
     }
@@ -177,7 +184,9 @@ ViewRegistry::Lookup(sym::Type *type) noexcept
     return it->second.get();
   }
   type->ResolveType();
+  mBinding.insert(type);
   auto bound = FindAndBind(type, 0);
+  mBinding.erase(type);
   if (!bound) {
     // Helps when writing a pattern: this is the name it has to match.
     DBGLOG(core, "[views] no view for '{}'", QualifiedTypeName(type));

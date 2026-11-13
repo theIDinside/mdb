@@ -1188,3 +1188,242 @@ TEST(ViewsEval, ShortCircuitAndDoesNotEvaluateFalseBranch)
   ASSERT_TRUE(value.has_value()) << value.error().mMessage;
   EXPECT_EQ(value->Bits(), 0);
 }
+
+namespace {
+
+// The view of another type, for view() calls: a "Point" with int x at 0 and y at 4, and a function
+// `sum(i64 extra) -> i64` that returns x + y + extra (or `extra + x` with `xOnly`).
+struct PointView
+{
+  Builder mBuilder;
+  ViewDefinition mDef;
+  u32 mSum{ kNoFunction };
+
+  explicit PointView(bool xOnly = false, u32 paramCount = 1)
+  {
+    Builder &p = mBuilder;
+    mDef.mFunctions.push_back(FunctionDef{ .mName = "sum" });
+    p.mCodeObject.mDef = &mDef;
+    CodeGen codegen{ p.mCodeObject };
+    mSum = codegen.BeginFunction("sum", false);
+    for (u32 i = 0; i < paramCount; ++i) {
+      codegen.AddLocal(mSum, p.mI64);
+    }
+    p.mCodeObject.mProgram.mFunctions[mSum].mParamCount = paramCount + 1;
+    p.mCodeObject.mProgram.mFunctions[mSum].mReturn = p.mI64;
+    const NodeId x = p.Node({ .mOp = BoundOp::Convert, .mType = p.mI64, .mA = p.LoadMember(p.mI32, 0) });
+    const NodeId y = p.Node({ .mOp = BoundOp::Convert, .mType = p.mI64, .mA = p.LoadMember(p.mI32, 4) });
+    const NodeId extra = p.Node({ .mOp = BoundOp::Local, .mType = p.mI64, .mImm = 1 });
+    const NodeId xy = xOnly ? x : p.Node({ .mOp = BoundOp::Add, .mType = p.mI64, .mA = x, .mB = y });
+    codegen.EmitExpr(p.Node({ .mOp = BoundOp::Add, .mType = p.mI64, .mA = xy, .mB = extra }));
+    codegen.Emit(Instruction{ .mOp = Op::Return, .mA = 1 });
+
+    // summary "({x},{y})"
+    p.mCodeObject.mSummaryKind = SummarySpec::Kind::Template;
+    p.mCodeObject.mSummaryParts.push_back({ .mLiteral = "(" });
+    p.mCodeObject.mSummaryParts.back().mFunction = codegen.EmitExprFunction("x", p.LoadMember(p.mI32, 0));
+    p.mCodeObject.mSummaryParts.push_back({ .mLiteral = "," });
+    p.mCodeObject.mSummaryParts.back().mFunction = codegen.EmitExprFunction("y", p.LoadMember(p.mI32, 4));
+    p.mCodeObject.mSummaryParts.push_back({ .mLiteral = ")" });
+  }
+};
+
+class FakeServices final : public RuntimeServices
+{
+public:
+  std::map<sym::Type *, const CodeObject *> mViews;
+  // static type -> (address -> dynamic object)
+  std::map<std::pair<sym::Type *, u64>, DynamicObject> mDynamic;
+
+  const CodeObject *
+  ViewFor(sym::Type *type) noexcept final
+  {
+    const auto it = mViews.find(type);
+    return it == mViews.end() ? nullptr : it->second;
+  }
+  std::optional<DynamicObject>
+  DynamicTypeOf(sym::Type *type, u64 address) noexcept final
+  {
+    const auto it = mDynamic.find({ type, address });
+    return it == mDynamic.end() ? std::nullopt : std::optional{ it->second };
+  }
+};
+
+// Opaque type identities: the evaluator only compares them and hands them to the services.
+sym::Type *const kStaticType = reinterpret_cast<sym::Type *>(0x10);
+sym::Type *const kDynamicType = reinterpret_cast<sym::Type *>(0x20);
+
+// view(object).sum(extra) in `b`, calling `callee`. Returns the call node.
+NodeId
+ViewCallNode(Builder &b, const CodeObject &callee, u32 function, TypeId result, u64 object, u64 extra, u32 offset)
+{
+  const u32 index = static_cast<u32>(b.mCodeObject.mViewCallees.size());
+  b.mCodeObject.mViewCallees.push_back(ViewCallee{ .mCallee = &callee,
+    .mFunction = function,
+    .mName = "sum",
+    .mThisOffset = offset,
+    .mStaticType = kStaticType });
+  const u32 first = static_cast<u32>(b.mCodeObject.mCallArgs.size());
+  b.mCodeObject.mCallArgs.push_back(b.Int(b.mI64, extra));
+  return b.Node({ .mOp = BoundOp::CallView,
+    .mType = result,
+    .mA = first,
+    .mB = 1,
+    .mC = b.Int(b.PointerTo(b.mI32), object),
+    .mImm = index });
+}
+
+} // namespace
+
+TEST(ViewsEval, ViewCallRunsAnotherCodeObject)
+{
+  PointView point;
+  Builder b;
+  // The caller's type for the result has another id than the callee's
+  const TypeId result = b.Type({ .mKind = TypeKind::SignedInt, .mSize = 8, .mIsSigned = true, .mName = "long" });
+  const NodeId call = ViewCallNode(b, point.mBuilder.mCodeObject, point.mSum, result, 0x1000, 10, 4);
+
+  FakeMemory memory;
+  // The callee's `this` is the object's address plus the offset of the type its view matched
+  memory.Map(0x1004, Bytes(i32{ 3 }, i32{ 4 }));
+  Evaluator eval{ b.mCodeObject, memory, std::span<const Root>{} };
+  auto value = CallNode(eval, b, call);
+  ASSERT_TRUE(value.has_value()) << value.error().mMessage;
+  EXPECT_EQ(value->Bits(), 17);
+  EXPECT_EQ(value->Type(), result);
+}
+
+TEST(ViewsEval, ViewCallOnNullIsAnError)
+{
+  PointView point;
+  Builder b;
+  const NodeId call = ViewCallNode(b, point.mBuilder.mCodeObject, point.mSum, b.mI64, 0, 10, 0);
+  FakeMemory memory;
+  Evaluator eval{ b.mCodeObject, memory, std::span<const Root>{} };
+  auto value = CallNode(eval, b, call);
+  ASSERT_FALSE(value.has_value());
+  EXPECT_EQ(value.error().mMessage, "view() of a null pointer");
+}
+
+TEST(ViewsEval, ViewCallDispatchesOnTheDynamicType)
+{
+  PointView base;
+  PointView derived{ true };
+  // The derived view matched a base class at offset 8 of the dynamic type
+  derived.mBuilder.mCodeObject.mRootOffset = 8;
+  Builder b;
+  const NodeId call = ViewCallNode(b, base.mBuilder.mCodeObject, base.mSum, b.mI64, 0x1000, 10, 0);
+
+  FakeMemory memory;
+  memory.Map(0x1000, Bytes(i32{ 3 }, i32{ 4 }));
+  memory.Map(0x2008, Bytes(i32{ 50 }, i32{ 0 }));
+  FakeServices services;
+  services.mViews[kDynamicType] = &derived.mBuilder.mCodeObject;
+  services.mDynamic[{ kStaticType, 0x1000 }] = DynamicObject{ .mType = kDynamicType, .mAddress = 0x2000 };
+
+  Evaluator withoutServices{ b.mCodeObject, memory, std::span<const Root>{} };
+  auto staticValue = CallNode(withoutServices, b, call);
+  ASSERT_TRUE(staticValue.has_value()) << staticValue.error().mMessage;
+  EXPECT_EQ(staticValue->Bits(), 17);
+
+  Evaluator eval{ b.mCodeObject, memory, std::span<const Root>{} };
+  eval.SetServices(&services);
+  auto value = CallNode(eval, b, call);
+  ASSERT_TRUE(value.has_value()) << value.error().mMessage;
+  EXPECT_EQ(value->Bits(), 60);
+
+  // Without a view for the dynamic type, the static callee runs
+  services.mViews.clear();
+  Evaluator noView{ b.mCodeObject, memory, std::span<const Root>{} };
+  noView.SetServices(&services);
+  auto fallback = CallNode(noView, b, call);
+  ASSERT_TRUE(fallback.has_value()) << fallback.error().mMessage;
+  EXPECT_EQ(fallback->Bits(), 17);
+}
+
+TEST(ViewsEval, ViewCallWithAnotherSignatureIsAnError)
+{
+  PointView base;
+  PointView derived{ false, 2 };
+  Builder b;
+  const NodeId call = ViewCallNode(b, base.mBuilder.mCodeObject, base.mSum, b.mI64, 0x1000, 10, 0);
+  FakeMemory memory;
+  FakeServices services;
+  services.mViews[kDynamicType] = &derived.mBuilder.mCodeObject;
+  services.mDynamic[{ kStaticType, 0x1000 }] = DynamicObject{ .mType = kDynamicType, .mAddress = 0x1000 };
+  Evaluator eval{ b.mCodeObject, memory, std::span<const Root>{} };
+  eval.SetServices(&services);
+  auto value = CallNode(eval, b, call);
+  ASSERT_FALSE(value.has_value());
+  EXPECT_NE(value.error().mMessage.find("doesn't have the signature"), std::string::npos)
+    << value.error().mMessage;
+}
+
+TEST(ViewsEval, ViewSummaryIsVerbatimText)
+{
+  PointView point;
+  Builder b;
+  b.mCodeObject.mViewCallees.push_back(
+    ViewCallee{ .mCallee = &point.mBuilder.mCodeObject, .mStaticType = kStaticType });
+  const NodeId summary =
+    b.Node({ .mOp = BoundOp::ViewSummary, .mType = b.mText, .mA = b.Int(b.PointerTo(b.mI32), 0x1000), .mImm = 0 });
+  const NodeId prefix = b.Node({ .mOp = BoundOp::TextConst, .mType = b.mText, .mText = "p=" });
+  const NodeId joined = b.Node({ .mOp = BoundOp::Concat, .mType = b.mText, .mA = prefix, .mB = summary });
+
+  FakeMemory memory;
+  memory.Map(0x1000, Bytes(i32{ 3 }, i32{ 4 }));
+  Evaluator eval{ b.mCodeObject, memory, std::span<const Root>{} };
+  auto value = CallNode(eval, b, summary);
+  ASSERT_TRUE(value.has_value()) << value.error().mMessage;
+  auto formatted = eval.Format(*value, FormatSpec::Default);
+  ASSERT_TRUE(formatted.has_value());
+  EXPECT_EQ(*formatted, "(3,4)");
+
+  // Joined with quoted text, the result is quoted text
+  auto concatenated = CallNode(eval, b, joined);
+  ASSERT_TRUE(concatenated.has_value()) << concatenated.error().mMessage;
+  EXPECT_EQ(*eval.Format(*concatenated, FormatSpec::Default), "\"p=(3,4)\"");
+}
+
+TEST(ViewsEval, NestedViewSummariesAreLimited)
+{
+  // summary "{view(mNext).summary}", on an object whose mNext points to itself
+  Builder b;
+  const TypeId pointer = b.PointerTo(b.mCodeObject.mRootType);
+  b.mCodeObject.mViewCallees.push_back(ViewCallee{ .mCallee = &b.mCodeObject, .mStaticType = kStaticType });
+  const NodeId next = b.LoadMember(pointer, 0);
+  const NodeId summary = b.Node({ .mOp = BoundOp::ViewSummary, .mType = b.mText, .mA = next, .mImm = 0 });
+  CodeGen codegen{ b.mCodeObject };
+  b.mCodeObject.mSummaryKind = SummarySpec::Kind::Template;
+  b.mCodeObject.mSummaryParts.push_back({ .mLiteral = "next=" });
+  b.mCodeObject.mSummaryParts.back().mFunction = codegen.EmitExprFunction("summary", summary);
+
+  FakeMemory memory;
+  memory.Map(0x3000, Bytes(u64{ 0x3000 }, u64{ 0 }));
+  const Root root{ .mType = b.mCodeObject.mRootType, .mAddress = 0x3000 };
+  Evaluator eval{ b.mCodeObject, memory, std::span{ &root, 1 } };
+  auto value = eval.Summary();
+  ASSERT_FALSE(value.has_value());
+  EXPECT_NE(value.error().mMessage.find("summaries nested more than 8 deep"), std::string::npos)
+    << value.error().mMessage;
+}
+
+TEST(ViewsEval, FunctionsReturnConcatenatedText)
+{
+  Builder b;
+  CodeGen codegen{ b.mCodeObject };
+  const u32 join = codegen.BeginFunction("join", false);
+  b.mCodeObject.mProgram.mFunctions[join].mReturn = b.mText;
+  const NodeId a = b.Node({ .mOp = BoundOp::TextConst, .mType = b.mText, .mText = "a" });
+  const NodeId bc = b.Node({ .mOp = BoundOp::TextConst, .mType = b.mText, .mText = "bc" });
+  codegen.EmitExpr(b.Node({ .mOp = BoundOp::Concat, .mType = b.mText, .mA = a, .mB = bc }));
+  codegen.Emit(Instruction{ .mOp = Op::Return, .mA = 1 });
+  const NodeId call = b.Node({ .mOp = BoundOp::Call, .mType = b.mText, .mA = 0, .mB = 0, .mImm = join });
+
+  FakeMemory memory;
+  Evaluator eval{ b.mCodeObject, memory, std::span<const Root>{} };
+  auto value = CallNode(eval, b, call);
+  ASSERT_TRUE(value.has_value()) << value.error().mMessage;
+  EXPECT_EQ(eval.TextOf(*value), "abc");
+  EXPECT_EQ(*eval.Format(*value, FormatSpec::Default), "\"abc\"");
+}

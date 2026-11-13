@@ -17,6 +17,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace mdb::sym {
@@ -53,6 +54,8 @@ class ViewRegistry
   std::vector<const ViewDefinition *> mViews;
   // nullptr = this type has no view
   std::unordered_map<sym::Type *, std::unique_ptr<CodeObject>> mBoundViews;
+  // Types whose view is being bound. A view() call that needs one of them would recurse.
+  std::unordered_set<sym::Type *> mBinding;
   std::unique_ptr<ViewSerializer> mSerializer;
   // Bumped whenever the set of views changes and all bound views are thrown away.
   u64 mGeneration{ 0 };

@@ -47,6 +47,9 @@ endforeach()
 
 BuildTestSubject(NAME logpoints_opt SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/logpoints.cpp COMPILE_OPTIONS -O2)
 
+# view() calls and dynamic types. Gecko is built without RTTI; dynamic types must not need it.
+BuildTestSubject(NAME dynamic_types SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/dynamic_types.cpp COMPILE_OPTIONS -fno-rtti)
+
 BuildTestSubject(
   NAME forever
   SOURCES

@@ -138,6 +138,9 @@ at most once per displayed value.
 
 Without a summary, the type name is shown, as it is for types without views.
 
+A struct, class or union inside a summary, such as `{mPoint}`, is shown with its own view's summary. Without one,
+it shows as `{TypeName}`. Summaries can nest 8 deep.
+
 ### Text
 
 | Function | |
@@ -148,6 +151,9 @@ Without a summary, the type name is shown, as it is for types without views.
 
 All of them take `limit: N` (default 4096 code units). Longer text is cut off and marked with `...`. Invalid
 sequences (bad UTF-8, unpaired surrogates) show as U+FFFD. A null pointer with length 0 is the empty string.
+
+Text is joined with `+`: `cstr(mScheme) + ":" + cstr(mPath)`. Both sides must be text; `?:` can choose between two
+texts. Text is shown in quotes, except a summary from `view(x).summary`.
 
 ### Children
 
@@ -220,6 +226,7 @@ A view can define value functions and void functions:
 
 ```
 fn count(Node *node) -> u64 { ... }  // returns a number or pointer
+fn name() -> text { ... }            // returns text
 fn walk(Node *node) { ... }          // can yield children
 ```
 
@@ -273,6 +280,46 @@ view MdbTree {
 }
 ```
 
+### Calling another view: `view(x)`
+
+`view(x).name(args)` calls the function `name` of the view for `x`'s type, and `view(x).summary` is that view's
+summary, as text. `x` is a struct, class or union, or a pointer to one. They work in summaries, functions and
+logpoint messages:
+
+```
+view LoadState {
+  summary "uri={view(mURI).spec()} type={mLoadType}"
+}
+```
+
+- The view is looked up when the calling view (or logpoint) is bound, from `x`'s type, including through base
+  classes. A missing view, a missing function, a function that doesn't return a value, or the wrong arguments are
+  errors then. Reference parameters can't be passed through `view()`.
+- `view(x)` on a null pointer is an error when it runs.
+- On an object of the type being viewed, `view(x)` runs the view's own functions: `view(mNext).count()` in a list
+  node's view is recursion.
+- Two views whose `view()` calls need each other (A calls B, which calls A) are an error.
+- `fn view` isn't allowed: `view` is a builtin.
+
+**Dynamic types.** If `x`'s class has a vtable, the call goes to the view of the object's dynamic type, when that
+view has a function with the same name and the same parameter and return types. Otherwise, the static type's
+function runs. The static type's view is the interface, and its function the default:
+
+```
+view nsIURI {
+  fn spec() -> text { return "<unknown nsIURI>"; }
+  summary "{view(this).spec()}"
+}
+view mozilla::net::nsStandardURL {
+  fn spec() -> text { return text(mSpec.mData, mSpec.mLength.mLength); }
+}
+```
+
+An `nsIURI *` that points to an `nsStandardURL` then shows the URL. The dynamic type is found from the object's
+vtable pointer and the ELF symbol of the vtable (`.symtab`), without RTTI. In a stripped binary, the static type is
+used. A struct inside a summary (`{*mURI}`) is also shown with its dynamic type's summary. Values in the variables
+panel are still shown as their static type.
+
 ## When something goes wrong
 
 A view that doesn't fit the type it matched is shown in place of the value, with the location in the view file.
@@ -289,12 +336,12 @@ so.
 
 ## Not yet supported
 
-- Functions shared between views.
+- Functions outside any view. Calls between views go through `view(x)`.
+- Showing a value in the variables panel as its dynamic type.
 - Locals that hold text, records or fixed-size arrays, such as `u64 stack[64]`.
 - Containers such as a visited set.
 - Delegation and `template_arg(i, j)`.
 - Named children next to the indexed ones, such as a `[length]` child before the elements.
-- Nested summaries: a member with its own view shows as `{TypeName}` inside a summary.
 - Template types written out in expressions or `using` (`(Foo<int>*)p`); use `template_arg(N)` or `typeof(...)`
   instead.
 - Watch and hover expressions still go to the JavaScript console. They are planned to use the same expression

@@ -736,4 +736,8 @@ const tests = {
 
 module.exports = {
   tests: tests,
+  loadViews,
+  localsOf,
+  childrenOf,
+  expectValue,
 }

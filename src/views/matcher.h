@@ -31,6 +31,10 @@ std::vector<BaseClass> DirectBaseClasses(sym::Type *type) noexcept;
 // parameters in the debug info. Empty for anonymous types.
 std::string QualifiedTypeName(sym::Type *type) noexcept;
 
+// Whitespace removed, except between two words, as in QualifiedTypeName: `vector<int, std::allocator<int> >`
+// becomes `vector<int,std::allocator<int>>`.
+std::string NormalizeTypeName(std::string_view name) noexcept;
+
 // Does `type` match the `in "objfile"` restriction of `view`, if it has one?
 bool MatchesObjectFile(const ViewDefinition &view, sym::Type *type) noexcept;
 

@@ -1,0 +1,57 @@
+// Views for test/dynamic_types.cpp: view() calls, text functions, and dispatch on dynamic types.
+
+// The interface. Its spec() is the default, for classes without a view of their own.
+view IURI {
+  fn spec() -> text { return "<unknown IURI>"; }
+  summary "{view(this).spec()}"
+}
+
+view StandardURL {
+  fn spec() -> text { return text(mSpec, mLength); }
+  summary "{spec()}"
+}
+
+// Also the view of NestedURI, through its base class.
+view SimpleURI {
+  fn spec() -> text {
+    return cstr(mScheme) + ":" + cstr(mPath) + (mHasQuery ? "?" + cstr(mQuery) : "");
+  }
+  summary "{spec()}"
+}
+
+view "[(]anonymous namespace[)]::HiddenURI" {
+  fn spec() -> text { return "hidden:" + cstr(mWhere); }
+}
+
+view TemplatedURI<.*> {
+  fn spec() -> text { return "templated:" + (mPort == 8080 ? "8080" : "other"); }
+}
+
+view LoadState {
+  summary "uri={view(mURI).spec()} type={mLoadType}"
+}
+
+view Point {
+  fn manhattan(Point *other) -> i64 { return (other->x - x) + (other->y - y); }
+  summary "({x}, {y})"
+}
+
+// {a} and {b} are formatted with Point's summary.
+view Segment {
+  summary "{a} -> {b} length={view(a).manhattan(&b)} first={view(a).summary}"
+}
+
+// A call on an object of the same type runs this view's own code.
+view Node {
+  fn sum() -> i64 { return mValue + (mNext ? view(mNext).sum() : 0); }
+  summary "sum={sum()}"
+}
+
+view CycleA {
+  fn depth() -> i64 { return view(mB).depth(); }
+  summary "{depth()}"
+}
+
+view CycleB {
+  fn depth() -> i64 { return view(mA).depth(); }
+}

@@ -93,10 +93,12 @@ ViewSerializer::SerializeVariable(const sym::Value &value, std::pmr::memory_reso
     summary = std::format("<view error: {}>", view->mBindError->ToString());
   } else {
     TargetReader reader{ SupervisorOf(value) };
+    TargetServices services{ SupervisorOf(value) };
     Root root{
       .mType = view->mRootType, .mAddress = RootAddress(*view, value), .mBytes = RootBytes(*view, value)
     };
     Evaluator evaluator{ *view, reader, std::span{ &root, 1 } };
+    evaluator.SetServices(&services);
 
     if (view->mSummaryKind == SummarySpec::Kind::Default) {
       summary = std::format("{}", *type);
@@ -319,8 +321,10 @@ ResolveUsingView(const VariableContext &context,
   }
 
   TargetReader reader{ supervisor };
+  TargetServices services{ supervisor };
   Root root{ .mType = view->mRootType, .mAddress = RootAddress(*view, value), .mBytes = RootBytes(*view, value) };
   Evaluator evaluator{ *view, reader, std::span{ &root, 1 } };
+  evaluator.SetServices(&services);
 
   if (view->mChildrenKind == ChildrenSpec::Kind::Block) {
     return RunBlock(views::GlobalCursorCache::Get().For(context.mId, registry.Generation()),

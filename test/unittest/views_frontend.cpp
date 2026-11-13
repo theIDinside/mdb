@@ -616,3 +616,49 @@ TEST(ViewsParser, FrameTemplateSourceLifetime)
   EXPECT_EQ(expr.mName, "shortName");
   EXPECT_EQ(expr.mName.data(), tmpl->mUnit.mSource.data() + 2);
 }
+
+TEST(ViewsParser, ViewCalls)
+{
+  auto file = Parse(R"(
+    view V {
+      fn f() -> text { return view(mURI).spec() + view(*mOther).summary; }
+      summary "{view(this).count(1, 2)->mX}"
+    }
+  )");
+  ASSERT_TRUE(file->mUnit.mDiagnostics.empty()) << file->mUnit.mDiagnostics[0].ToString();
+  const auto &arena = file->mUnit.mArena;
+  const auto &view = file->mViews[0];
+  ASSERT_EQ(view.mSummary.mParts.size(), 1);
+  const Expr &arrow = arena.Get(view.mSummary.mParts[0].mExpr);
+  ASSERT_EQ(arrow.mKind, ExprKind::Arrow);
+  const Expr &count = arena.Get(arrow.mA);
+  ASSERT_EQ(count.mKind, ExprKind::ViewCall);
+  EXPECT_EQ(count.mName, "count");
+  EXPECT_EQ(arena.Args(count).size(), 2);
+  EXPECT_EQ(arena.Get(count.mA).mKind, ExprKind::This);
+
+  const Stmt &body = arena.GetStmt(view.mFunctions[0].mBody);
+  const Stmt &ret = arena.GetStmt(arena.BlockItems(body)[0]);
+  const Expr &sum = arena.Get(ret.mExpr);
+  ASSERT_EQ(sum.mKind, ExprKind::Binary);
+  EXPECT_EQ(arena.Get(sum.mA).mKind, ExprKind::ViewCall);
+  EXPECT_EQ(arena.Get(sum.mA).mName, "spec");
+  EXPECT_EQ(arena.Args(arena.Get(sum.mA)).size(), 0);
+  EXPECT_EQ(arena.Get(sum.mB).mKind, ExprKind::ViewSummary);
+  EXPECT_EQ(arena.Get(arena.Get(sum.mB).mA).mKind, ExprKind::Unary);
+
+  // In a frame template
+  auto tmpl = ParseFrameTemplate("<frame>", "uri={view(aLoadState->mURI).spec()}");
+  ASSERT_TRUE(tmpl->mUnit.mDiagnostics.empty()) << tmpl->mUnit.mDiagnostics[0].ToString();
+  EXPECT_EQ(tmpl->mUnit.mArena.Get(tmpl->mSummary.mParts[0].mExpr).mKind, ExprKind::ViewCall);
+
+  auto bare = Parse("view V { summary view(this) }");
+  ASSERT_FALSE(bare->mUnit.mDiagnostics.empty());
+  EXPECT_NE(
+    bare->mUnit.mDiagnostics[0].mMessage.find("must be followed by .name(...) or .summary"), std::string::npos)
+    << bare->mUnit.mDiagnostics[0].mMessage;
+  auto member = Parse("view V { summary view(this).mX }");
+  ASSERT_FALSE(member->mUnit.mDiagnostics.empty());
+  EXPECT_NE(member->mUnit.mDiagnostics[0].mMessage.find("must be a call"), std::string::npos)
+    << member->mUnit.mDiagnostics[0].mMessage;
+}

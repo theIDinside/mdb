@@ -488,11 +488,18 @@ bool
 Logpoint::EnsureBound(tc::SupervisorState &controller, sym::Frame &frame) noexcept
 {
   auto *obj = frame.GetSymbolFile()->GetObjectFile();
-  if (mBound && mBoundPc == frame.FramePc() && mBoundObjectFile == obj) {
+  auto &registry = views::ViewRegistry::Get();
+  if (mBound && mBoundPc == frame.FramePc() && mBoundObjectFile == obj &&
+      mBoundGeneration == registry.Generation()) {
     return mBound->mCodeObject && !mBound->mCodeObject->mBindError;
+  }
+  if (mBound && mBoundGeneration != registry.Generation()) {
+    // Reloaded views can fix, or cause, a bind error
+    mReportedBindError = false;
   }
   mBoundPc = frame.FramePc();
   mBoundObjectFile = obj;
+  mBoundGeneration = registry.Generation();
   mRootSymbols.clear();
   mBindFailed = false;
   auto *fn = frame.MaybeGetFullSymbolInfo();
@@ -530,7 +537,11 @@ Logpoint::EnsureBound(tc::SupervisorState &controller, sym::Frame &frame) noexce
   const auto path = loc ? std::string_view{ loc->mSourceFile } : std::string_view{ "unknown" };
   const auto line = loc ? *loc->mLineNumber : 0;
   auto tmpl = views::ParseFrameTemplate(std::format("<logpoint {}:{}>", path, line), mMessage);
-  mBound = views::BindFrameTemplate(std::move(tmpl), variables, obj);
+  const views::ViewLookup lookup = [&registry](sym::Type *type) -> views::ViewLookupResult {
+    type->ResolveType();
+    return views::ViewLookupResult{ .mView = registry.Lookup(type) };
+  };
+  mBound = views::BindFrameTemplate(std::move(tmpl), variables, obj, lookup);
   for (u32 i : mBound->mRootVariables) {
     mRootSymbols.push_back(symbols[i]);
   }
@@ -574,17 +585,9 @@ Logpoint::Evaluate(tc::SupervisorState &controller, sym::Frame &frame) noexcept
       .mUnavailable = s.mUnavailable });
   }
   views::TargetReader reader{ &controller };
+  views::TargetServices services{ &controller };
   views::Evaluator evaluator{ *mBound->mCodeObject, reader, roots };
-  evaluator.SetAggregateFormatter([&reader](sym::Type *type, u64 address) -> std::optional<std::string> {
-    const auto *view = views::ViewRegistry::Get().Lookup(type);
-    if (!view || view->mBindError || view->mSummaryKind == views::SummarySpec::Kind::Default) {
-      return std::nullopt;
-    }
-    views::Root root{ .mType = view->mRootTypes.front(), .mAddress = address, .mBytes = {} };
-    views::Evaluator nested{ *view, reader, std::span{ &root, 1 } };
-    auto summary = nested.Summary();
-    return summary ? std::optional<std::string>{ std::move(*summary) } : std::nullopt;
-  });
+  evaluator.SetServices(&services);
   return evaluator.FormatTemplate();
 }
 

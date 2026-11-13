@@ -79,6 +79,14 @@ enum class Op : u8
   Call,
   // Return from the current function. mA = 1 if a value is returned (popped, and pushed for the caller)
   Return,
+  // Call a function of another view: CodeObject::mViewCallees[mA]. The object pointer is on the stack, below the
+  // arguments. The function may be replaced by the one of the same name in the view of the object's dynamic type
+  CallView,
+  // Pop an object pointer, push the summary of the view CodeObject::mViewCallees[mA] (or of the dynamic type's
+  // view) as text
+  ViewSummary,
+  // Pop two texts, push their concatenation
+  Concat,
   // Fail with Program::mConstants[mA]
   Fail,
   // Pop the value (and, if mA = 1, the key, which was pushed first) and hand them to the runtime

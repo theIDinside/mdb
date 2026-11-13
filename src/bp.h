@@ -302,6 +302,8 @@ class Logpoint : public Breakpoint
   std::optional<views::BoundFrameTemplate> mBound;
   AddrPtr mBoundPc{ nullptr };
   ObjectFile *mBoundObjectFile{ nullptr };
+  // The view registry generation the message was bound in: view() calls point into the registry's bound views
+  u64 mBoundGeneration{ 0 };
   std::vector<sym::Symbol *> mRootSymbols;
   bool mReportedBindError{ false };
   bool mBindFailed{ false };

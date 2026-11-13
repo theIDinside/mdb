@@ -132,6 +132,12 @@ enum class BoundOp : u8
   Convert,
   // Call function mImm with arguments in CodeObject::mCallArgs[mA ... mA + mB)
   Call,
+  // Call CodeObject::mViewCallees[mImm] on the object pointer mC, with arguments in mCallArgs[mA ... mA + mB)
+  CallView,
+  // The summary of the view CodeObject::mViewCallees[mImm] for the object pointer mA, as text
+  ViewSummary,
+  // text mA + text mB
+  Concat,
   // Root mImm, supplied by the caller of the program
   Root,
   // text(ptr = mA, length = mB or kNoNode for NUL terminated), mWidth = code unit size, mImm = limit in code units
@@ -166,6 +172,25 @@ struct BoundTemplatePart
   u32 mFunction{ kNoFunction };
 };
 
+struct CodeObject;
+
+// A function of another view, called with `view(object).name(...)`, or that view's summary
+// (`view(object).summary`).
+struct ViewCallee
+{
+  // The view for the object's static type. It can be the view being bound, for a call on an object of the same
+  // type.
+  const CodeObject *mCallee{ nullptr };
+  // Index into mCallee's functions, kNoFunction for the summary
+  u32 mFunction{ kNoFunction };
+  // The function's name, to find it in the view of the object's dynamic type
+  std::string mName;
+  // Added to the object's address to get the callee's `this`: the offset of the type the view matched
+  u32 mThisOffset{ 0 };
+  // The object's static type, for finding its dynamic type
+  sym::Type *mStaticType{ nullptr };
+};
+
 // The compiled form of one parsed source: a view bound against one concrete type, or a frame template (logpoint
 // message) bound against a frame's variables.
 struct CodeObject
@@ -188,6 +213,7 @@ struct CodeObject
   std::vector<std::string> mRootNames;
   std::vector<u32> mLetFunctions;
   std::vector<NodeId> mCallArgs;
+  std::vector<ViewCallee> mViewCallees;
 
   SummarySpec::Kind mSummaryKind{ SummarySpec::Kind::Default };
   std::vector<BoundTemplatePart> mSummaryParts;

@@ -60,6 +60,8 @@ CodeGen::EmitExpr(NodeId id) noexcept
     case BoundOp::Text:
     case BoundOp::ArrayProvider:
     case BoundOp::Call:
+    case BoundOp::CallView:
+    case BoundOp::ViewSummary:
     case BoundOp::LocalRef:
     case BoundOp::LoadRef:
     case BoundOp::Root:
@@ -123,6 +125,8 @@ CodeGen::EmitExpr(NodeId id) noexcept
       return Op::PointerDiff;
     case BoundOp::Convert:
       return Op::Convert;
+    case BoundOp::Concat:
+      return Op::Concat;
     case BoundOp::Local:
       return Op::LoadLocal;
     }
@@ -232,6 +236,20 @@ CodeGen::EmitExpr(NodeId id) noexcept
     emit(Op::Call, static_cast<u32>(node.mImm));
     break;
   }
+  case BoundOp::CallView: {
+    EmitExpr(node.mC);
+    const u32 first = static_cast<u32>(node.mA);
+    const u32 count = static_cast<u32>(node.mB);
+    for (u32 i = 0; i < count; ++i) {
+      EmitExpr(mCodeObject.mCallArgs[first + i]);
+    }
+    emit(Op::CallView, static_cast<u32>(node.mImm));
+    break;
+  }
+  case BoundOp::ViewSummary:
+    EmitExpr(node.mA);
+    emit(Op::ViewSummary, static_cast<u32>(node.mImm));
+    break;
   default:
     const auto op = emitOp();
     if (!op) {
