@@ -535,6 +535,37 @@ ObjectFile::ParseELFSymbols(Elf64Header *header, std::vector<ElfSection> &&secti
   }
 }
 
+auto
+ObjectFile::FindVtableSymbol(AddrPtr unrelocated) noexcept -> const MinSymbol *
+{
+  if (!mVtableSymbols) { // todo: parallelize
+    std::vector<MinSymbol> vtables;
+    for (const auto *symbols : { &mMinimalObjectSymbols, &mMinimalDynamicObjectSymbols }) {
+      for (const auto &[name, symbol] : *symbols) {
+        if (symbol.name.starts_with("_ZTV") && symbol.maybe_size > 0) {
+          vtables.push_back(symbol);
+        }
+      }
+    }
+    std::ranges::sort(vtables, [](const MinSymbol &a, const MinSymbol &b) { return a.address < b.address; });
+    mVtableSymbols = std::move(vtables);
+  }
+  const auto &vtables = *mVtableSymbols;
+  auto it = std::ranges::upper_bound(
+    vtables, unrelocated.GetRaw(), {}, [](const MinSymbol &symbol) { return symbol.address.GetRaw(); });
+  if (it == vtables.begin()) {
+    return nullptr;
+  }
+  --it;
+  return unrelocated < it->EndPc() ? &*it : nullptr;
+}
+
+auto
+ObjectFile::GetDynamicTypeCache() noexcept -> DynamicTypeCache &
+{
+  return mDynamicTypeCache;
+}
+
 /* static */
 void
 ObjectFile::SetSerializerFor(sym::Value &value) noexcept

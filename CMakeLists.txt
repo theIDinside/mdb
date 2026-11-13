@@ -141,6 +141,8 @@ set(MIDAS_SOURCES
   src/symbolication/dwarf/typeread.h
   src/symbolication/dwarf/unit_header.cpp
   src/symbolication/dwarf/unit_header.h
+  src/symbolication/dynamic_type.cpp
+  src/symbolication/dynamic_type.h
   src/symbolication/elf_symbols.h
   src/symbolication/elf.cpp
   src/symbolication/elf.h
