@@ -412,6 +412,7 @@ private:
   ExprId ParsePostfix(ExprId base) noexcept;
   ExprId ParsePrimary() noexcept;
   ExprId ParseCall(const Token &name) noexcept;
+  ExprId ParseViewCall(const Token &keyword) noexcept;
 };
 
 void
@@ -1494,6 +1495,38 @@ Parser::ParsePostfix(ExprId base) noexcept
 }
 
 ExprId
+Parser::ParseViewCall(const Token &keyword) noexcept
+{
+  // `view(` already consumed
+  const ExprId object = ParseExpression();
+  if (Failed() || !Expect(TokenKind::RParen, "after the object in view(...)")) {
+    return kNoExpr;
+  }
+  if (!Peek().Is(TokenKind::Dot) || !Peek(1).Is(TokenKind::Identifier)) {
+    Error(Peek(), "view(...) must be followed by .name(...) or .summary");
+    return kNoExpr;
+  }
+  Advance();
+  const Token &name = Advance();
+  if (!Accept(TokenKind::LParen)) {
+    if (name.mText != "summary") {
+      Error(name, std::format("view(...).{} must be a call: view(...).{}(...)", name.mText, name.mText));
+      return kNoExpr;
+    }
+    const ExprId id = AddNewExpression(ExprKind::ViewSummary, keyword.mLoc);
+    Get(id).mA = object;
+    return id;
+  }
+  const ExprId id = ParseCall(name);
+  if (Failed()) {
+    return kNoExpr;
+  }
+  Get(id).mKind = ExprKind::ViewCall;
+  Get(id).mA = object;
+  return id;
+}
+
+ExprId
 Parser::ParseCall(const Token &name) noexcept
 {
   // `(` already consumed
@@ -1616,6 +1649,9 @@ Parser::ParsePrimary() noexcept
       const ExprId id = AddNewExpression(ExprKind::SizeofExpr, token.mLoc);
       Get(id).mA = operand;
       return id;
+    }
+    if (token.mText == "view" && Accept(TokenKind::LParen)) {
+      return ParseViewCall(token);
     }
     if (Accept(TokenKind::LParen)) {
       return ParseCall(token);

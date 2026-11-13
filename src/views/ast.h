@@ -17,6 +17,10 @@
 
 namespace mdb::views {
 
+// Index of an expression in its owning ExprArena::mExprs. Used to link child
+// expressions and refer to expressions from statements and call arguments without
+// storing pointers that vector growth could invalidate. IDs are local to an arena;
+// kNoExpr denotes an absent expression.
 using ExprId = u32;
 static constexpr ExprId kNoExpr = std::numeric_limits<ExprId>::max();
 
@@ -38,6 +42,10 @@ enum class ExprKind : u8
   Index,
   // name(args...)
   Call,
+  // view(a).name(args...): mA is the object, mName the function
+  ViewCall,
+  // view(a).summary
+  ViewSummary,
   Unary,
   Binary,
   // a ? b : c

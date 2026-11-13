@@ -49,12 +49,12 @@ Evaluator::ErrorAt(SourceLoc loc, std::string message) noexcept
 }
 
 EvalValue
-Evaluator::MakeText(TypeId type, std::string text, bool truncated) noexcept
+Evaluator::MakeText(TypeId type, std::string text, bool truncated, bool verbatim) noexcept
 {
   mOwnedTexts.push_back(std::move(text));
   const u32 handle = static_cast<u32>(mTexts.size());
   mTexts.push_back(mOwnedTexts.back());
-  return EvalValue::Text(type, handle, truncated);
+  return EvalValue::Text(type, handle, truncated, verbatim);
 }
 
 EvalValue
@@ -66,9 +66,9 @@ Evaluator::MakeTextConstant(TypeId type, std::string_view constant) noexcept
 }
 
 EvalValue
-Evaluator::MakeInteger(TypeId type, u64 bits) const noexcept
+Evaluator::MakeInteger(const CodeObject &code, TypeId type, u64 bits) noexcept
 {
-  const BoundType &t = mCodeObject.Type(type);
+  const BoundType &t = code.Type(type);
   u64 normalized = t.mIsSigned ? SignExtend(bits, t.mSize * 8) : Truncate(bits, t.mSize * 8);
   if (t.mKind == TypeKind::Bool) {
     normalized = bits != 0 ? 1 : 0;
@@ -96,9 +96,9 @@ Evaluator::ReadBytes(u64 address, std::span<u8> out) noexcept
 }
 
 Evaluator::Result
-Evaluator::Load(const EvalValue &lvalue, SourceLoc loc) noexcept
+Evaluator::Load(const CodeObject &code, const EvalValue &lvalue, SourceLoc loc) noexcept
 {
-  const BoundType &type = mCodeObject.Type(lvalue.Type());
+  const BoundType &type = code.Type(lvalue.Type());
   if (!type.IsScalar()) {
     return std::unexpected(ErrorAt(loc, std::format("can not read a value of type '{}'", type.mName)));
   }
@@ -165,14 +165,14 @@ Evaluator::Load(const EvalValue &lvalue, SourceLoc loc) noexcept
     }
     return EvalValue::Float(lvalue.Type(), number);
   }
-  return MakeInteger(lvalue.Type(), raw);
+  return MakeInteger(code, lvalue.Type(), raw);
 }
 
 Evaluator::Result
-Evaluator::Convert(const EvalValue &value, TypeId to, SourceLoc loc) noexcept
+Evaluator::Convert(const CodeObject &code, const EvalValue &value, TypeId to, SourceLoc loc) noexcept
 {
-  const BoundType &from = mCodeObject.Type(value.Type());
-  const BoundType &target = mCodeObject.Type(to);
+  const BoundType &from = code.Type(value.Type());
+  const BoundType &target = code.Type(to);
   if (target.mKind == TypeKind::Float) {
     double number = 0.0;
     if (from.mKind == TypeKind::Float) {
@@ -191,16 +191,16 @@ Evaluator::Convert(const EvalValue &value, TypeId to, SourceLoc loc) noexcept
   if (target.IsInteger() || target.mKind == TypeKind::Pointer) {
     if (from.mKind == TypeKind::Float) {
       if (target.mKind == TypeKind::Bool) {
-        return MakeInteger(to, value.AsFloat() != 0.0 ? 1 : 0);
+        return MakeInteger(code, to, value.AsFloat() != 0.0 ? 1 : 0);
       }
       const u64 bits =
         target.mIsSigned ? static_cast<u64>(static_cast<i64>(value.AsFloat())) : static_cast<u64>(value.AsFloat());
-      return MakeInteger(to, bits);
+      return MakeInteger(code, to, bits);
     }
     if (target.mKind == TypeKind::Pointer) {
       return EvalValue::Scalar(to, value.Bits());
     }
-    return MakeInteger(to, value.Bits());
+    return MakeInteger(code, to, value.Bits());
   }
 
   return std::unexpected(
@@ -208,9 +208,14 @@ Evaluator::Convert(const EvalValue &value, TypeId to, SourceLoc loc) noexcept
 }
 
 Evaluator::Result
-Evaluator::EvalBinary(Op op, const EvalValue &lhs, const EvalValue &rhs, TypeId resultType, SourceLoc loc) noexcept
+Evaluator::EvalBinary(const CodeObject &code,
+  Op op,
+  const EvalValue &lhs,
+  const EvalValue &rhs,
+  TypeId resultType,
+  SourceLoc loc) noexcept
 {
-  const BoundType &operandType = mCodeObject.Type(lhs.Type());
+  const BoundType &operandType = code.Type(lhs.Type());
   const bool isFloat = operandType.mKind == TypeKind::Float;
   const bool isSigned = operandType.mIsSigned;
   const u64 a = lhs.Bits();
@@ -218,12 +223,12 @@ Evaluator::EvalBinary(Op op, const EvalValue &lhs, const EvalValue &rhs, TypeId 
   const double fa = lhs.AsFloat();
   const double fb = rhs.AsFloat();
 
-  const auto boolean = [&](bool value) { return MakeInteger(resultType, value ? 1 : 0); };
+  const auto boolean = [&](bool value) { return MakeInteger(code, resultType, value ? 1 : 0); };
   const auto arithmetic = [&](u64 bits, double f) {
     if (isFloat) {
       return EvalValue::Float(resultType, f);
     }
-    return MakeInteger(resultType, bits);
+    return MakeInteger(code, resultType, bits);
   };
 
   switch (op) {
@@ -362,10 +367,15 @@ Evaluator::EvalText(
 ProgramState
 Evaluator::Start(u32 function, std::span<const EvalValue> args) noexcept
 {
+  return Start(mCodeObject, function, args);
+}
+
+ProgramState
+Evaluator::Start(const CodeObject &code, u32 function, std::span<const EvalValue> args) noexcept
+{
   ProgramState state;
-  const Function &fn = mCodeObject.mProgram.mFunctions[function];
-  state.mFrames.push_back(
-    Frame{ .mCodeObject = &mCodeObject, .mFunction = function, .mPc = fn.mEntry, .mLocalBase = 0 });
+  const Function &fn = code.mProgram.mFunctions[function];
+  state.mFrames.push_back(Frame{ .mCodeObject = &code, .mFunction = function, .mPc = fn.mEntry, .mLocalBase = 0 });
   state.mLocals.assign(args.begin(), args.end());
   for (size_t i = state.mLocals.size(); i < fn.mLocalTypes.size(); ++i) {
     state.mLocals.push_back(EvalValue::Scalar(fn.mLocalTypes[i], 0));
@@ -409,7 +419,8 @@ Evaluator::RunWithBudget(ProgramState &state,
       return RunResult{ .mStop = RunStop::Budget, .mSteps = mStepsUsed - stepsAtStart };
     }
     Frame &frame = state.mFrames.back();
-    const Instruction instruction = frame.mCodeObject->mProgram.mCode[frame.mPc++];
+    const CodeObject &code = *frame.mCodeObject;
+    const Instruction instruction = code.mProgram.mCode[frame.mPc++];
     --stepsLeft;
     ++mStepsUsed;
     const auto pop = [&]() {
@@ -423,7 +434,7 @@ Evaluator::RunWithBudget(ProgramState &state,
 
     switch (instruction.mOp) {
     case Op::PushInt:
-      state.mOperands.push_back(MakeInteger(instruction.mType, instruction.mImm));
+      state.mOperands.push_back(MakeInteger(code, instruction.mType, instruction.mImm));
       break;
     case Op::PushFloat:
       state.mOperands.push_back(EvalValue::Float(instruction.mType, instruction.mFloat));
@@ -461,8 +472,7 @@ Evaluator::RunWithBudget(ProgramState &state,
       }
       mLetInProgress.insert(key);
       const EvalValue thisPointer = state.mLocals[frame.mLocalBase];
-      ProgramState letState =
-        Start(frame.mCodeObject->mLetFunctions[instruction.mA], std::span{ &thisPointer, 1 });
+      ProgramState letState = Start(code, code.mLetFunctions[instruction.mA], std::span{ &thisPointer, 1 });
       auto value = RunToCompletion(letState, limits, stepsLeft);
       mLetInProgress.erase(key);
       if (!value) {
@@ -550,7 +560,7 @@ Evaluator::RunWithBudget(ProgramState &state,
     }
     case Op::Load: {
       const EvalValue lvalue = pop();
-      auto value = Load(lvalue, instruction.mLoc);
+      auto value = Load(code, lvalue, instruction.mLoc);
       if (!value) {
         return std::unexpected(std::move(value.error()));
       }
@@ -559,22 +569,22 @@ Evaluator::RunWithBudget(ProgramState &state,
     }
     case Op::Negate: {
       const EvalValue operand = pop();
-      if (mCodeObject.Type(instruction.mType).mKind == TypeKind::Float) {
+      if (code.Type(instruction.mType).mKind == TypeKind::Float) {
         state.mOperands.push_back(EvalValue::Float(instruction.mType, -operand.AsFloat()));
       } else {
-        state.mOperands.push_back(MakeInteger(instruction.mType, 0 - operand.Bits()));
+        state.mOperands.push_back(MakeInteger(code, instruction.mType, 0 - operand.Bits()));
       }
       break;
     }
     case Op::LogicalNot: {
       const EvalValue operand = pop();
-      const bool isFloat = mCodeObject.Type(operand.Type()).mKind == TypeKind::Float;
+      const bool isFloat = code.Type(operand.Type()).mKind == TypeKind::Float;
       state.mOperands.push_back(
-        MakeInteger(instruction.mType, (isFloat ? operand.AsFloat() == 0.0 : operand.Bits() == 0) ? 1 : 0));
+        MakeInteger(code, instruction.mType, (isFloat ? operand.AsFloat() == 0.0 : operand.Bits() == 0) ? 1 : 0));
       break;
     }
     case Op::BitNot:
-      state.mOperands.push_back(MakeInteger(instruction.mType, ~pop().Bits()));
+      state.mOperands.push_back(MakeInteger(code, instruction.mType, ~pop().Bits()));
       break;
     case Op::Add:
     case Op::Sub:
@@ -594,7 +604,7 @@ Evaluator::RunWithBudget(ProgramState &state,
     case Op::GreaterEqual: {
       const EvalValue rhs = pop();
       const EvalValue lhs = pop();
-      auto value = EvalBinary(instruction.mOp, lhs, rhs, instruction.mType, instruction.mLoc);
+      auto value = EvalBinary(code, instruction.mOp, lhs, rhs, instruction.mType, instruction.mLoc);
       if (!value) {
         return std::unexpected(std::move(value.error()));
       }
@@ -615,12 +625,12 @@ Evaluator::RunWithBudget(ProgramState &state,
       const EvalValue lhs = pop();
       const i64 bytes = static_cast<i64>(lhs.Bits() - rhs.Bits());
       state.mOperands.push_back(MakeInteger(
-        instruction.mType, static_cast<u64>(bytes / static_cast<i64>(std::max<u64>(instruction.mImm, 1)))));
+        code, instruction.mType, static_cast<u64>(bytes / static_cast<i64>(std::max<u64>(instruction.mImm, 1)))));
       break;
     }
     case Op::Convert: {
       const EvalValue operand = pop();
-      auto value = Convert(operand, instruction.mType, instruction.mLoc);
+      auto value = Convert(code, operand, instruction.mType, instruction.mLoc);
       if (!value) {
         return std::unexpected(std::move(value.error()));
       }
@@ -678,10 +688,11 @@ Evaluator::RunWithBudget(ProgramState &state,
         }
       }
       const u32 localBase = frame.mLocalBase;
+      const TypeId returnAs = frame.mReturnAs;
       state.mLocals.resize(localBase);
       state.mFrames.pop_back();
       if (value) {
-        state.mOperands.push_back(std::move(*value));
+        state.mOperands.push_back(returnAs == kNoType ? std::move(*value) : value->Retyped(returnAs));
       }
       if (state.mFrames.empty()) {
         state.mDone = true;
@@ -693,11 +704,10 @@ Evaluator::RunWithBudget(ProgramState &state,
       if (state.mFrames.size() >= limits.mMaxDepth) {
         return fail(std::format("call depth exceeded {}", limits.mMaxDepth));
       }
-      const CodeObject *code = frame.mCodeObject;
-      if (instruction.mA >= code->mProgram.mFunctions.size()) {
+      if (instruction.mA >= code.mProgram.mFunctions.size()) {
         return fail("internal error: function index out of range");
       }
-      const Function &callee = code->mProgram.mFunctions[instruction.mA];
+      const Function &callee = code.mProgram.mFunctions[instruction.mA];
       const u32 function = instruction.mA;
       const u32 entry = callee.mEntry;
       const u32 paramCount = callee.mParamCount;
@@ -715,11 +725,80 @@ Evaluator::RunWithBudget(ProgramState &state,
         state.mLocals.push_back(EvalValue::Scalar(localTypes[i], 0));
       }
       state.mFrames.push_back(
-        Frame{ .mCodeObject = code, .mFunction = function, .mPc = entry, .mLocalBase = localBase });
+        Frame{ .mCodeObject = &code, .mFunction = function, .mPc = entry, .mLocalBase = localBase });
+      break;
+    }
+    case Op::CallView: {
+      if (state.mFrames.size() >= limits.mMaxDepth) {
+        return fail(std::format("call depth exceeded {}", limits.mMaxDepth));
+      }
+      if (instruction.mA >= code.mViewCallees.size()) {
+        return fail("internal error: view callee index out of range");
+      }
+      const ViewCallee &call = code.mViewCallees[instruction.mA];
+      const u32 argCount = call.mCallee->mProgram.mFunctions[call.mFunction].mParamCount - 1;
+      if (state.mOperands.size() < argCount + 1) {
+        return fail("internal error: not enough call arguments");
+      }
+      std::vector<EvalValue> args(argCount);
+      for (u32 i = argCount; i > 0; --i) {
+        args[i - 1] = pop();
+      }
+      u64 address = pop().Bits();
+      if (address == 0) {
+        return fail("view() of a null pointer");
+      }
+      auto target = Dispatch(call, address);
+      if (!target) {
+        return fail(std::move(target.error()));
+      }
+      const Function &callee = target->mCode->mProgram.mFunctions[target->mFunction];
+      const u32 localBase = static_cast<u32>(state.mLocals.size());
+      state.mLocals.push_back(EvalValue::Scalar(target->mCode->mThisType, address));
+      for (u32 i = 0; i < argCount; ++i) {
+        state.mLocals.push_back(args[i].Retyped(callee.mLocalTypes[i + 1]));
+      }
+      for (size_t i = argCount + 1; i < callee.mLocalTypes.size(); ++i) {
+        state.mLocals.push_back(EvalValue::Scalar(callee.mLocalTypes[i], 0));
+      }
+      state.mFrames.push_back(Frame{ .mCodeObject = target->mCode,
+        .mFunction = target->mFunction,
+        .mPc = callee.mEntry,
+        .mLocalBase = localBase,
+        .mReturnAs = instruction.mType });
+      break;
+    }
+    case Op::ViewSummary: {
+      if (instruction.mA >= code.mViewCallees.size()) {
+        return fail("internal error: view callee index out of range");
+      }
+      const ViewCallee &call = code.mViewCallees[instruction.mA];
+      u64 address = pop().Bits();
+      if (address == 0) {
+        return fail("view() of a null pointer");
+      }
+      auto target = Dispatch(call, address);
+      if (!target) {
+        return fail(std::move(target.error()));
+      }
+      auto summary = SummaryOf(*target->mCode, address, limits, stepsLeft);
+      if (!summary) {
+        return std::unexpected(std::move(summary.error()));
+      }
+      state.mOperands.push_back(MakeText(instruction.mType, std::move(*summary), false, true));
+      break;
+    }
+    case Op::Concat: {
+      const EvalValue rhs = pop();
+      const EvalValue lhs = pop();
+      std::string text{ TextOf(lhs) };
+      text.append(TextOf(rhs));
+      state.mOperands.push_back(MakeText(
+        instruction.mType, std::move(text), lhs.Truncated() || rhs.Truncated(), lhs.Verbatim() && rhs.Verbatim()));
       break;
     }
     case Op::Fail:
-      return fail(frame.mCodeObject->mProgram.mConstants[instruction.mA]);
+      return fail(code.mProgram.mConstants[instruction.mA]);
     case Op::Yield: {
       if (!allowYield) {
         return fail("internal error: yield outside a children block");
@@ -738,7 +817,7 @@ Evaluator::RunWithBudget(ProgramState &state,
       std::optional<std::string> key;
       if (instruction.mA == 1) {
         const EvalValue keyValue = pop();
-        auto formatted = Format(keyValue, FormatSpec::Default);
+        auto formatted = FormatIn(code, keyValue, FormatSpec::Default);
         if (!formatted) {
           return std::unexpected(std::move(formatted.error()));
         }
@@ -806,13 +885,40 @@ FormatInteger(std::string &out, u64 bits, bool isSigned, u32 size, FormatSpec fo
 std::expected<std::string, EvalError>
 Evaluator::Format(const EvalValue &input, FormatSpec format) noexcept
 {
-  const BoundType &type = mCodeObject.Type(input.Type());
+  return FormatIn(mCodeObject, input, format);
+}
+
+std::optional<std::expected<std::string, EvalError>>
+Evaluator::FormatRecord(sym::Type *type, u64 address) noexcept
+{
+  if (mServices == nullptr || type == nullptr) {
+    return std::nullopt;
+  }
+  const CodeObject *view = nullptr;
+  if (auto dynamic = mServices->DynamicTypeOf(type, address); dynamic) {
+    view = mServices->ViewFor(dynamic->mType);
+    address = dynamic->mAddress;
+  }
+  if (view == nullptr) {
+    view = mServices->ViewFor(type);
+  }
+  if (view == nullptr || view->mBindError || view->mSummaryKind == SummarySpec::Kind::Default) {
+    return std::nullopt;
+  }
+  u64 stepsLeft = kDefaultBudget;
+  return SummaryOf(*view, address + view->mRootOffset, RunLimits{}, stepsLeft);
+}
+
+std::expected<std::string, EvalError>
+Evaluator::FormatIn(const CodeObject &code, const EvalValue &input, FormatSpec format) noexcept
+{
+  const BoundType &type = code.Type(input.Type());
   std::string out;
   if (input.IsLValue()) {
     if (type.mKind == TypeKind::Record || type.mKind == TypeKind::Array) {
-      if (mAggregateFormatter && input.Root() == kNoRoot && type.mDwarf) {
-        if (auto formatted = mAggregateFormatter(type.mDwarf, input.Address())) {
-          return *formatted;
+      if (input.Root() == kNoRoot && type.mKind == TypeKind::Record) {
+        if (auto formatted = FormatRecord(type.mDwarf, input.Address()); formatted) {
+          return std::move(*formatted);
         }
       }
       out.append("{");
@@ -820,11 +926,11 @@ Evaluator::Format(const EvalValue &input, FormatSpec format) noexcept
       out.append("}");
       return out;
     }
-    auto loaded = Load(input, {});
+    auto loaded = Load(code, input, {});
     if (!loaded) {
       return std::unexpected(std::move(loaded.error()));
     }
-    return Format(*loaded, format);
+    return FormatIn(code, *loaded, format);
   }
 
   switch (type.mKind) {
@@ -868,6 +974,10 @@ Evaluator::Format(const EvalValue &input, FormatSpec format) noexcept
     std::format_to(std::back_inserter(out), "0x{:x}", input.Bits());
     return out;
   case TypeKind::Text:
+    if (input.Verbatim()) {
+      out.append(TextOf(input));
+      return out;
+    }
     AppendQuoted(TextOf(input), input.Truncated(), out);
     return out;
   case TypeKind::ArrayProvider:
@@ -888,6 +998,125 @@ Evaluator::TextOf(const EvalValue &value) const noexcept
   const u32 handle = value.TextHandle();
   assert(handle < mTexts.size());
   return mTexts[handle];
+}
+
+// Can a value of type `a` (of one code object) be used as a value of type `b` (of another)?
+static bool
+SameRepresentation(const BoundType &a, const BoundType &b) noexcept
+{
+  if (a.mKind == TypeKind::Pointer || b.mKind == TypeKind::Pointer) {
+    return a.mKind == b.mKind;
+  }
+  return a.mKind == b.mKind && a.mSize == b.mSize && a.mIsSigned == b.mIsSigned;
+}
+
+std::expected<Evaluator::DispatchTarget, std::string>
+Evaluator::Dispatch(const ViewCallee &call, u64 &address) noexcept
+{
+  const DispatchTarget staticTarget{ .mCode = call.mCallee, .mFunction = call.mFunction };
+  const auto useStatic = [&]() {
+    address += call.mThisOffset;
+    return staticTarget;
+  };
+  if (mServices == nullptr) {
+    return useStatic();
+  }
+  const auto dynamic = mServices->DynamicTypeOf(call.mStaticType, address);
+  if (!dynamic || dynamic->mType == call.mStaticType) {
+    return useStatic();
+  }
+  const auto key = std::make_pair(&call, dynamic->mType);
+  auto cached = mDispatch.find(key);
+  if (cached == mDispatch.end()) {
+    std::optional<DispatchTarget> target;
+    const CodeObject *view = mServices->ViewFor(dynamic->mType);
+    if (view != nullptr && view != call.mCallee && !view->mBindError) {
+      if (call.mFunction == kNoFunction) {
+        target = DispatchTarget{ .mCode = view, .mFunction = kNoFunction };
+      } else if (view->mDef != nullptr) {
+        const auto &functions = view->mDef->mFunctions;
+        const auto found = std::ranges::find_if(functions, [&](const auto &f) { return f.mName == call.mName; });
+        if (found != functions.end()) {
+          const u32 index = static_cast<u32>(found - functions.begin());
+          const Function &own = call.mCallee->mProgram.mFunctions[call.mFunction];
+          const Function &other = view->mProgram.mFunctions[index];
+          bool same =
+            own.mParamCount == other.mParamCount && (own.mReturn == kNoType) == (other.mReturn == kNoType);
+          for (u32 i = 1; same && i < own.mParamCount; ++i) {
+            same = SameRepresentation(call.mCallee->Type(own.mLocalTypes[i]), view->Type(other.mLocalTypes[i]));
+          }
+          if (same && own.mReturn != kNoType) {
+            same = SameRepresentation(call.mCallee->Type(own.mReturn), view->Type(other.mReturn));
+          }
+          if (!same) {
+            return std::unexpected(
+              std::format("'{}' of the view for '{}' doesn't have the signature of '{}' of the "
+                          "view for '{}'",
+                call.mName,
+                view->Type(view->mRootType).mName,
+                call.mName,
+                call.mCallee->Type(call.mCallee->mRootType).mName));
+          }
+          target = DispatchTarget{ .mCode = view, .mFunction = index };
+        }
+      }
+    }
+    cached = mDispatch.emplace(key, target).first;
+  }
+  if (!cached->second) {
+    return useStatic();
+  }
+  address = dynamic->mAddress + cached->second->mCode->mRootOffset;
+  return *cached->second;
+}
+
+std::expected<std::string, EvalError>
+Evaluator::SummaryOf(const CodeObject &code, u64 thisAddress, const RunLimits &limits, u64 &stepsLeft) noexcept
+{
+  if (code.mBindError) {
+    return std::unexpected(ErrorAt({},
+      std::format(
+        "the view for '{}' has an error: {}", code.Type(code.mRootType).mName, code.mBindError->ToString())));
+  }
+  if (code.mSummaryKind == SummarySpec::Kind::Default) {
+    return code.Type(code.mRootType).mName;
+  }
+  if (mSummaryDepth >= kMaxNestedSummaries) {
+    return std::unexpected(ErrorAt({}, std::format("summaries nested more than {} deep", kMaxNestedSummaries)));
+  }
+  ++mSummaryDepth;
+  const EvalValue thisPointer = EvalValue::Scalar(code.mThisType, thisAddress);
+  const auto run = [&](u32 function, FormatSpec format) -> std::expected<std::string, EvalError> {
+    ProgramState state = Start(code, function, std::span{ &thisPointer, 1 });
+    auto value = RunToCompletion(state, limits, stepsLeft);
+    if (!value) {
+      return std::unexpected(std::move(value.error()));
+    }
+    return FormatIn(code, *value, format);
+  };
+  std::expected<std::string, EvalError> result;
+  if (code.mSummaryKind == SummarySpec::Kind::Expression) {
+    result = run(code.mSummaryFunction, code.mSummaryFormat);
+  } else {
+    std::string out;
+    for (const auto &part : code.mSummaryParts) {
+      out.append(part.mLiteral);
+      if (part.mFunction == kNoFunction) {
+        continue;
+      }
+      auto formatted = run(part.mFunction, part.mFormat);
+      if (!formatted) {
+        result = std::unexpected(std::move(formatted.error()));
+        break;
+      }
+      out.append(*formatted);
+    }
+    if (result) {
+      result = std::move(out);
+    }
+  }
+  --mSummaryDepth;
+  return result;
 }
 
 static std::expected<EvalValue, EvalError>

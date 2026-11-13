@@ -38,7 +38,29 @@ struct EvalError
   SourceLoc mLoc;
 };
 
+// An object's dynamic (most derived) type, and the address of the complete object.
+struct DynamicObject
+{
+  sym::Type *mType;
+  u64 mAddress;
+};
+
+// What the evaluator needs from the debugger, beyond memory: views for other types, for view() and for formatting
+// records with their summary, and dynamic types.
+class RuntimeServices
+{
+public:
+  virtual ~RuntimeServices() noexcept = default;
+  // The view for values of `type`, or nullptr
+  virtual const CodeObject *ViewFor(sym::Type *type) noexcept = 0;
+  // The dynamic type of the object of static type `type` at `address`. nullopt if the type has no vtable, or the
+  // dynamic type can't be determined.
+  virtual std::optional<DynamicObject> DynamicTypeOf(sym::Type *type, u64 address) noexcept = 0;
+};
+
 static constexpr u32 kNoRoot = std::numeric_limits<u32>::max();
+// Summaries that format records with their own summary can nest this deep.
+static constexpr u32 kMaxNestedSummaries = 8;
 static constexpr u64 kDefaultBudget = 100'000;
 
 enum class ValueKind : u8
@@ -59,13 +81,15 @@ private:
   ValueKind mKind{ ValueKind::Scalar };
   u8 mBitOffset{ 0 }; // LValue bit offset inside the byte at mA (0..7).
   u8 mBitSize{ 0 };   // LValue bitfield width; 0 means not a bitfield.
-  u8 mFlags{ 0 };     // kTruncated for Text and ArrayProvider.
+  u8 mFlags{ 0 };     // kTruncated for Text and ArrayProvider, kVerbatim for Text.
   // Scalar bits (floats are a bit-cast double), LValue address, LocalRef slot, Text handle, or ArrayProvider base.
   u64 mA{ 0 };
   // LValue root, LocalRef stack, or ArrayProvider count; otherwise unused.
   u64 mB{ 0 };
 
   static constexpr u8 kTruncated = 1;
+  // Text that is formatted as it is, without quotes: a summary
+  static constexpr u8 kVerbatim = 2;
 
 public:
   EvalValue() noexcept = default;
@@ -132,13 +156,13 @@ public:
   }
 
   [[nodiscard]] static EvalValue
-  Text(TypeId type, u32 handle, bool truncated) noexcept
+  Text(TypeId type, u32 handle, bool truncated, bool verbatim = false) noexcept
   {
     EvalValue value;
     value.mType = type;
     value.mKind = ValueKind::Text;
     value.mA = handle;
-    value.mFlags = truncated ? kTruncated : 0;
+    value.mFlags = static_cast<u8>((truncated ? kTruncated : 0) | (verbatim ? kVerbatim : 0));
     return value;
   }
 
@@ -158,6 +182,14 @@ public:
   Type() const noexcept
   {
     return mType;
+  }
+  // The same value, described by type `type` of another code object (see Op::CallView).
+  [[nodiscard]] EvalValue
+  Retyped(TypeId type) const noexcept
+  {
+    EvalValue value = *this;
+    value.mType = type;
+    return value;
   }
   [[nodiscard]] ValueKind
   Kind() const noexcept
@@ -234,6 +266,12 @@ public:
     assert(mKind == ValueKind::Text || mKind == ValueKind::ArrayProvider);
     return (mFlags & kTruncated) != 0;
   }
+  [[nodiscard]] bool
+  Verbatim() const noexcept
+  {
+    assert(mKind == ValueKind::Text);
+    return (mFlags & kVerbatim) != 0;
+  }
   [[nodiscard]] u32
   TextHandle() const noexcept
   {
@@ -257,6 +295,8 @@ struct Frame
   u32 mFunction;
   u32 mPc;
   u32 mLocalBase;
+  // For a call into another view: the caller's type for the returned value. kNoType: the type is the callee's.
+  TypeId mReturnAs{ kNoType };
 };
 
 struct ProgramState
@@ -311,6 +351,7 @@ class Evaluator
 {
   const CodeObject &mCodeObject;
   MemoryReader &mReader;
+  RuntimeServices *mServices{ nullptr };
   std::vector<Root> mRoots;
   // Own decoded text without moving strings as more text is added.
   std::deque<std::string> mOwnedTexts;
@@ -320,27 +361,52 @@ class Evaluator
   std::map<LetKey, EvalValue> mLetValues;
   std::set<LetKey> mLetInProgress;
   u64 mStepsUsed{ 0 };
-  std::function<std::optional<std::string>(sym::Type *, u64)> mAggregateFormatter;
+  u32 mSummaryDepth{ 0 };
+  // Dynamic dispatch of view calls: (callee, dynamic type) -> the code object and function to run, or null to run
+  // the static callee.
+  struct DispatchTarget
+  {
+    const CodeObject *mCode;
+    u32 mFunction;
+  };
+  std::map<std::pair<const ViewCallee *, sym::Type *>, std::optional<DispatchTarget>> mDispatch;
 
   using Result = std::expected<EvalValue, EvalError>;
 
   bool ReadBytes(u64 address, std::span<u8> out) noexcept;
-  Result Load(const EvalValue &lvalue, SourceLoc loc) noexcept;
+  Result Load(const CodeObject &code, const EvalValue &lvalue, SourceLoc loc) noexcept;
   Result EvalText(
     const Instruction &instruction, const EvalValue &pointer, const std::optional<EvalValue> &length) noexcept;
-  Result EvalBinary(Op op, const EvalValue &lhs, const EvalValue &rhs, TypeId resultType, SourceLoc loc) noexcept;
-  Result Convert(const EvalValue &value, TypeId to, SourceLoc loc) noexcept;
-  [[nodiscard]] EvalValue MakeText(TypeId type, std::string text, bool truncated) noexcept;
+  Result EvalBinary(const CodeObject &code,
+    Op op,
+    const EvalValue &lhs,
+    const EvalValue &rhs,
+    TypeId resultType,
+    SourceLoc loc) noexcept;
+  Result Convert(const CodeObject &code, const EvalValue &value, TypeId to, SourceLoc loc) noexcept;
+  [[nodiscard]] EvalValue MakeText(TypeId type, std::string text, bool truncated, bool verbatim = false) noexcept;
   [[nodiscard]] EvalValue MakeTextConstant(TypeId type, std::string_view constant) noexcept;
-  [[nodiscard]] EvalValue MakeInteger(TypeId type, u64 bits) const noexcept;
+  [[nodiscard]] static EvalValue MakeInteger(const CodeObject &code, TypeId type, u64 bits) noexcept;
   [[nodiscard]] static EvalError ErrorAt(SourceLoc loc, std::string message) noexcept;
 
+  ProgramState Start(const CodeObject &code, u32 function, std::span<const EvalValue> args) noexcept;
   std::expected<RunResult, EvalError> RunWithBudget(ProgramState &state,
     const RunLimits &limits,
     u64 &stepsLeft,
     const std::function<void(const YieldedElement &)> &onYield,
     bool allowYield) noexcept;
   Result RunToCompletion(ProgramState &state, const RunLimits &limits, u64 &stepsLeft) noexcept;
+
+  // Where a view call on the object at `address` goes: the view of its dynamic type, if that view has a function
+  // with the same name and signature, otherwise the static callee. `address` becomes the callee's `this`.
+  std::expected<DispatchTarget, std::string> Dispatch(const ViewCallee &call, u64 &address) noexcept;
+  // The summary of `code` for the object at `thisAddress`, which is a pointer to the type the view matched.
+  std::expected<std::string, EvalError> SummaryOf(
+    const CodeObject &code, u64 thisAddress, const RunLimits &limits, u64 &stepsLeft) noexcept;
+  std::expected<std::string, EvalError> FormatIn(
+    const CodeObject &code, const EvalValue &value, FormatSpec format) noexcept;
+  // A record at `address` formatted with its view's summary, if it has one.
+  std::optional<std::expected<std::string, EvalError>> FormatRecord(sym::Type *type, u64 address) noexcept;
 
 public:
   Evaluator(const CodeObject &code, MemoryReader &reader, std::span<const Root> roots) noexcept;
@@ -353,11 +419,11 @@ public:
 
   std::expected<std::string, EvalError> Summary(u64 budget = kDefaultBudget) noexcept;
   std::string FormatTemplate(u64 budget = kDefaultBudget) noexcept;
-  using AggregateFormatter = std::function<std::optional<std::string>(sym::Type *, u64)>;
+  // Without services, view calls run their static callee and records are formatted as their type name.
   void
-  SetAggregateFormatter(AggregateFormatter formatter) noexcept
+  SetServices(RuntimeServices *services) noexcept
   {
-    mAggregateFormatter = std::move(formatter);
+    mServices = services;
   }
   std::expected<ArrayChildren, EvalError> Children(u64 budget = kDefaultBudget) noexcept;
   std::expected<EvalValue, EvalError> ThisArgument() const noexcept;

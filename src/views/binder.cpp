@@ -105,6 +105,7 @@ class Binder
   sym::Type *mMatchedType;
   ObjectFile *mObjectFile;
   BindingEnvironment &mEnvironment;
+  const ViewLookup &mViewLookup;
   CodeGen mCodeGen;
   std::vector<Scope> mScopes;
   struct LoopTargets
@@ -143,9 +144,10 @@ public:
     CodeObject &code,
     sym::Type *matchedType,
     ObjectFile *objectFile,
-    BindingEnvironment &environment)
+    BindingEnvironment &environment,
+    const ViewLookup &viewLookup)
       : mUnit(unit), mDef(def), mArena(unit.mArena), mCodeObject(code), mMatchedType(matchedType),
-        mObjectFile(objectFile), mEnvironment(environment), mCodeGen(code)
+        mObjectFile(objectFile), mEnvironment(environment), mViewLookup(viewLookup), mCodeGen(code)
   {
     mI64 = FromBuiltin(BuiltinI64());
     mU64 = FromBuiltin(BuiltinU64());
@@ -230,6 +232,9 @@ private:
 
   std::optional<NodeId> RValue(const BoundExpr &expr, SourceLoc loc) noexcept;
   std::optional<NodeId> ScalarRValue(ExprId expr, std::string_view context) noexcept;
+  std::optional<NodeId> ScalarRValueOf(const BoundExpr &bound, SourceLoc loc, std::string_view context) noexcept;
+  TypeId ImportType(const CodeObject &from, TypeId id) noexcept;
+  BindResult BindViewCall(const Expr &expr) noexcept;
   std::optional<NodeId> IntegerRValue(ExprId expr, std::string_view context) noexcept;
   NodeId ConvertTo(NodeId node, TypeId type, SourceLoc loc) noexcept;
   NodeId ToBool(NodeId node, SourceLoc loc) noexcept;
@@ -246,6 +251,7 @@ private:
   BindResult BindCast(const Expr &expr) noexcept;
   BindResult BindCall(const Expr &expr) noexcept;
   bool EnsureSignature(u32 function) noexcept;
+  std::optional<TypeId> ResolveReturnType(const TypeExpr &type) noexcept;
   std::optional<std::vector<NodeId>> BindFunctionArguments(const Expr &expr, u32 function) noexcept;
   NodeId AddCallNode(const Expr &expr, u32 function, std::span<const NodeId> args, TypeId returnType) noexcept;
   bool LowerCallStatement(ExprId exprId, SourceLoc loc) noexcept;
@@ -266,7 +272,7 @@ public:
   PopulateGlobalScope(Binder &binder, Scope &scope) noexcept override
   {
     static constexpr std::string_view builtins[] = {
-      "template_arg", "typeof", "array", "text", "cstr", "utf8", "utf16", "utf32", "sizeof"
+      "template_arg", "typeof", "array", "text", "cstr", "utf8", "utf16", "utf32", "sizeof", "view"
     };
     binder.mSignatureState.resize(mDef.mFunctions.size());
     binder.mFunctionReferences.resize(mDef.mFunctions.size());
@@ -581,13 +587,13 @@ Binder::EnsureSignature(u32 function) noexcept
 
   TypeId returnType = kNoType;
   if (definition.mReturnType) {
-    auto type = ResolveTypeExpr(mArena.mTypes[*definition.mReturnType]);
+    auto type = ResolveReturnType(mArena.mTypes[*definition.mReturnType]);
     if (!type) {
       return false;
     }
-    if (!Type(*type).IsScalar()) {
+    if (!Type(*type).IsScalar() && Type(*type).mKind != TypeKind::Text) {
       return Fail(mArena.mTypes[*definition.mReturnType].mLoc,
-        std::format("return type of '{}' must be a number or a pointer", definition.mName));
+        std::format("return type of '{}' must be a number, a pointer or text", definition.mName));
     }
     returnType = *type;
   }
@@ -596,6 +602,17 @@ Binder::EnsureSignature(u32 function) noexcept
   boundFunction.mReturn = returnType;
   mSignatureState[function] = 2;
   return true;
+}
+
+// `text` is a return type, not a type of the program.
+std::optional<TypeId>
+Binder::ResolveReturnType(const TypeExpr &type) noexcept
+{
+  if (!type.mIsBuiltin && !type.mIsRooted && type.mPointerDepth == 0 && type.mNameParts.size() == 1 &&
+      type.mNameParts[0] == "text") {
+    return mTextType;
+  }
+  return ResolveTypeExpr(type);
 }
 
 std::optional<std::vector<NodeId>>
@@ -769,8 +786,13 @@ Binder::ScalarRValue(ExprId id, std::string_view context) noexcept
   if (!bound) {
     return std::nullopt;
   }
-  const SourceLoc loc = mArena.Get(id).mLoc;
-  auto value = RValue(*bound, loc);
+  return ScalarRValueOf(*bound, mArena.Get(id).mLoc, context);
+}
+
+std::optional<NodeId>
+Binder::ScalarRValueOf(const BoundExpr &bound, SourceLoc loc, std::string_view context) noexcept
+{
+  auto value = RValue(bound, loc);
   if (!value) {
     return std::nullopt;
   }
@@ -911,7 +933,24 @@ BindResult
 Binder::BindBinary(const Expr &expr) noexcept
 {
   const auto op = expr.Binary();
-  auto lhs = ScalarRValue(expr.mA, std::format("the left operand of '{}'", ToString(op)));
+  auto left = Bind(expr.mA);
+  if (!left) {
+    return std::nullopt;
+  }
+  if (op == BinaryOp::Add && TypeOf(*left).mKind == TypeKind::Text) {
+    auto right = Bind(expr.mB);
+    if (!right) {
+      return std::nullopt;
+    }
+    if (TypeOf(*right).mKind != TypeKind::Text) {
+      return FailExpr(mArena.Get(expr.mB).mLoc,
+        std::format("text can only be joined with text, not '{}'; format numbers in a summary template",
+          TypeOf(*right).mName));
+    }
+    return BoundExpr{ .mNode = AddNode(BoundOp::Concat, mTextType, expr.mLoc, left->mNode, right->mNode) };
+  }
+  auto lhs =
+    ScalarRValueOf(*left, mArena.Get(expr.mA).mLoc, std::format("the left operand of '{}'", ToString(op)));
   if (!lhs) {
     return std::nullopt;
   }
@@ -1423,6 +1462,165 @@ Binder::BindCall(const Expr &expr) noexcept
     expr.mLoc, std::format("unknown function '{}'; available are array, text, cstr, utf8, utf16 and utf32", name));
 }
 
+TypeId
+Binder::ImportType(const CodeObject &from, TypeId id) noexcept
+{
+  const BoundType type = from.Type(id);
+  if (type.mDwarf != nullptr) {
+    return FromDwarf(type.mDwarf);
+  }
+  switch (type.mKind) {
+  case TypeKind::Text:
+    return mTextType;
+  case TypeKind::Pointer:
+    return PointerTo(ImportType(from, type.mElement));
+  default: {
+    BoundType copy = type;
+    copy.mElement = kNoType;
+    return AddType(std::move(copy));
+  }
+  }
+}
+
+BindResult
+Binder::BindViewCall(const Expr &expr) noexcept
+{
+  const bool isSummary = expr.mKind == ExprKind::ViewSummary;
+  auto object = Bind(expr.mA);
+  if (!object) {
+    return std::nullopt;
+  }
+  const SourceLoc objectLoc = mArena.Get(expr.mA).mLoc;
+  NodeId pointer = kNoNode;
+  TypeId record = kNoType;
+  if (object->mIsLValue && TypeOf(*object).mKind == TypeKind::Record) {
+    record = TypeOf(object->mNode);
+    pointer = AddNode(BoundOp::AddressOf, PointerTo(record), objectLoc, object->mNode);
+  } else {
+    auto value = RValue(*object, objectLoc);
+    if (!value) {
+      return std::nullopt;
+    }
+    const BoundType &type = Type(TypeOf(*value));
+    if (type.mKind == TypeKind::Pointer && Type(type.mElement).mKind == TypeKind::Record) {
+      record = type.mElement;
+      pointer = *value;
+    }
+  }
+  if (record == kNoType || Type(record).mDwarf == nullptr) {
+    return FailExpr(objectLoc,
+      std::format("view() needs a struct, class or union, or a pointer to one, not '{}'", TypeOf(*object).mName));
+  }
+  sym::Type *dwarf = Type(record).mDwarf;
+  const std::string typeName = Type(record).mName;
+
+  // A call on an object of the type being bound runs this view's own code.
+  const bool self = mDef != nullptr && dwarf == mMatchedType;
+  const CodeObject *callee = &mCodeObject;
+  u32 thisOffset = 0;
+  if (!self) {
+    if (!mViewLookup) {
+      return FailExpr(expr.mLoc, "view() is not available here");
+    }
+    const ViewLookupResult found = mViewLookup(dwarf);
+    if (found.mCycle) {
+      return FailExpr(expr.mLoc,
+        std::format(
+          "view() calls between this view and the view for '{}' form a cycle, which isn't supported", typeName));
+    }
+    if (found.mView == nullptr) {
+      return FailExpr(expr.mLoc, std::format("no view for '{}'", typeName));
+    }
+    if (found.mView->mBindError) {
+      return FailExpr(expr.mLoc,
+        std::format("the view for '{}' has an error: {}", typeName, found.mView->mBindError->ToString()));
+    }
+    callee = found.mView;
+    thisOffset = found.mView->mRootOffset;
+  }
+
+  ViewCallee call{ .mCallee = callee, .mThisOffset = thisOffset, .mStaticType = dwarf };
+  if (isSummary) {
+    const u32 index = static_cast<u32>(mCodeObject.mViewCallees.size());
+    mCodeObject.mViewCallees.push_back(std::move(call));
+    NodeId node = AddNode(BoundOp::ViewSummary, mTextType, expr.mLoc, pointer);
+    mCodeObject.mNodes[node].mImm = index;
+    return BoundExpr{ .mNode = node };
+  }
+
+  const std::string_view name = expr.mName;
+  const ViewDefinition *calleeDef = self ? mDef : callee->mDef;
+  u32 function = kNoFunction;
+  if (calleeDef != nullptr) {
+    for (u32 i = 0; i < calleeDef->mFunctions.size(); ++i) {
+      if (calleeDef->mFunctions[i].mName == name) {
+        function = i;
+        break;
+      }
+    }
+  }
+  if (function == kNoFunction) {
+    return FailExpr(expr.mLoc, std::format("the view for '{}' has no function '{}'", typeName, name));
+  }
+  if (self) {
+    function = mFunctionIndex.find(name)->second;
+    if (!EnsureSignature(function)) {
+      return std::nullopt;
+    }
+  }
+  const FunctionDef &definition = calleeDef->mFunctions[function];
+  // Copies: binding arguments adds functions and types to this code object, which may be the callee.
+  const Function signature = callee->mProgram.mFunctions[function];
+  if (signature.mReturn == kNoType) {
+    return FailExpr(expr.mLoc,
+      std::format("'{}' of the view for '{}' doesn't return a value; only functions that return a value can be "
+                  "called with view()",
+        name,
+        typeName));
+  }
+  const auto args = mArena.Args(expr);
+  for (const CallArg &arg : args) {
+    if (!arg.mName.empty()) {
+      return FailExpr(mArena.Get(arg.mExpr).mLoc, std::format("'{}' takes positional arguments", name));
+    }
+  }
+  if (args.size() != definition.mParams.size()) {
+    const size_t count = definition.mParams.size();
+    return FailExpr(
+      expr.mLoc, std::format("'{}' takes {} argument{}, got {}", name, count, count == 1 ? "" : "s", args.size()));
+  }
+  std::vector<NodeId> bound;
+  for (size_t i = 0; i < args.size(); ++i) {
+    if (definition.mParams[i].mIsReference) {
+      return FailExpr(mArena.Get(args[i].mExpr).mLoc,
+        std::format(
+          "'{}' is a reference parameter; they can't be passed through view()", definition.mParams[i].mName));
+    }
+    auto value = ScalarRValue(args[i].mExpr, "a function argument");
+    if (!value) {
+      return std::nullopt;
+    }
+    const TypeId parameter =
+      self ? signature.mLocalTypes[i + 1] : ImportType(*callee, signature.mLocalTypes[i + 1]);
+    bound.push_back(ConvertTo(*value, parameter, mArena.Get(args[i].mExpr).mLoc));
+  }
+  const TypeId result = self ? signature.mReturn : ImportType(*callee, signature.mReturn);
+
+  call.mFunction = function;
+  call.mName = std::string{ name };
+  const u32 index = static_cast<u32>(mCodeObject.mViewCallees.size());
+  mCodeObject.mViewCallees.push_back(std::move(call));
+  const u32 first = static_cast<u32>(mCodeObject.mCallArgs.size());
+  mCodeObject.mCallArgs.insert(mCodeObject.mCallArgs.end(), bound.begin(), bound.end());
+  return BoundExpr{ .mNode = AddNode(BoundNode{ .mOp = BoundOp::CallView,
+                      .mType = result,
+                      .mA = first,
+                      .mB = static_cast<u32>(bound.size()),
+                      .mC = pointer,
+                      .mImm = index,
+                      .mLoc = expr.mLoc }) };
+}
+
 bool
 Binder::LowerDeclaration(const Stmt &stmt) noexcept
 {
@@ -1665,6 +1863,19 @@ Binder::LowerStatement(StmtId id) noexcept
       if (function.mReturn == kNoType) {
         return Fail(stmt.mLoc, std::format("'{}' doesn't return a value", function.mName));
       }
+      if (Type(function.mReturn).mKind == TypeKind::Text) {
+        const std::string name = function.mName;
+        auto text = Bind(stmt.mExpr);
+        if (!text) {
+          return false;
+        }
+        if (TypeOf(*text).mKind != TypeKind::Text) {
+          return Fail(stmt.mLoc, std::format("'{}' returns text, not '{}'", name, TypeOf(*text).mName));
+        }
+        mCodeGen.EmitExpr(text->mNode);
+        mCodeGen.Emit(Instruction{ .mOp = Op::Return, .mA = 1, .mLoc = stmt.mLoc });
+        return true;
+      }
       auto value = ScalarRValue(stmt.mExpr, "a return value");
       if (!value) {
         return false;
@@ -1830,6 +2041,9 @@ Binder::Bind(ExprId id) noexcept
   }
   case ExprKind::Call:
     return BindCall(expr);
+  case ExprKind::ViewCall:
+  case ExprKind::ViewSummary:
+    return BindViewCall(expr);
   case ExprKind::Unary:
     return BindUnary(expr);
   case ExprKind::Binary:
@@ -2041,7 +2255,7 @@ Binder::EmitCode() noexcept
 } // namespace
 
 std::unique_ptr<CodeObject>
-BindView(const ViewDefinition &view, sym::Type *matchedType, u32 rootOffset) noexcept
+BindView(const ViewDefinition &view, sym::Type *matchedType, u32 rootOffset, const ViewLookup &lookup) noexcept
 {
   auto bound = std::make_unique<CodeObject>();
   bound->mSource = view.mSource;
@@ -2050,7 +2264,9 @@ BindView(const ViewDefinition &view, sym::Type *matchedType, u32 rootOffset) noe
   bound->mRootOffset = rootOffset;
 
   ViewEnvironment environment{ view };
-  Binder binder{ *view.mSource, &view, *bound, matchedType, matchedType->DefiningObjectFile(), environment };
+  Binder binder{
+    *view.mSource, &view, *bound, matchedType, matchedType->DefiningObjectFile(), environment, lookup
+  };
   if (!binder.BindAll()) {
     bound->mBindError = std::move(binder.mError);
   } else {
@@ -2120,8 +2336,10 @@ FrameEnvironment::ResolveThis(Binder &binder, const Expr &expr) noexcept
 }
 
 BoundFrameTemplate
-BindFrameTemplate(
-  std::unique_ptr<FrameTemplate> tmpl, std::span<const FrameVariable> variables, ObjectFile *objectFile) noexcept
+BindFrameTemplate(std::unique_ptr<FrameTemplate> tmpl,
+  std::span<const FrameVariable> variables,
+  ObjectFile *objectFile,
+  const ViewLookup &lookup) noexcept
 {
   BoundFrameTemplate result;
   result.mTemplate = std::move(tmpl);
@@ -2132,7 +2350,7 @@ BindFrameTemplate(
     return result;
   }
   FrameEnvironment environment{ variables };
-  Binder binder{ result.mTemplate->mUnit, nullptr, *result.mCodeObject, nullptr, objectFile, environment };
+  Binder binder{ result.mTemplate->mUnit, nullptr, *result.mCodeObject, nullptr, objectFile, environment, lookup };
   if (!binder.BindFrame(result.mTemplate->mSummary)) {
     result.mCodeObject->mBindError = std::move(binder.mError);
   } else {

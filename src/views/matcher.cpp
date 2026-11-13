@@ -92,7 +92,7 @@ IsWordCharacter(char c) noexcept
 
 // Whitespace is removed, except where it separates two words: `vector<int, std::allocator<int> >` becomes
 // `vector<int,std::allocator<int>>`, but `long unsigned int` stays as it is.
-static std::string
+std::string
 NormalizeTypeName(std::string_view name) noexcept
 {
   std::string result;

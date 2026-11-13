@@ -95,8 +95,12 @@ the existing binder tests stay valid.
 
 ### 3. Values have no lifetimes
 
-The paused state is `{frames, locals, operands}`: plain vectors, copied for each checkpoint. Locals, parameters and
-return values hold scalars and pointers. There's no heap.
+The paused state is `{frames, locals, operands}`: plain vectors, copied for each checkpoint. Locals and parameters
+hold scalars and pointers. There's no heap.
+
+Return values can also be text (`fn spec() -> text`). Text handles belong to the `Evaluator`, and a text never
+reaches a checkpoint: locals can't hold it, and value functions, the only ones that return text, can't yield, so the
+operand stack is empty at every `yield` (decision 5).
 
 ### 4. References to locals: only as parameters, only down the stack
 
@@ -213,7 +217,7 @@ cost is bigger checkpoints.
 - file-level functions (decision 6);
 - `template_arg(i, j)`;
 - the frame environment: watch expressions, hover, logpoints and breakpoint conditions (decision 11);
-- calls across views: nested summaries, and view functions as methods in expressions (`tree.count()`), decision 12;
+- calls into void functions of other views (decision 12);
 - generators in range-`for` loops (decision 13);
 - the features in "Gaps compared to other debuggers" at the end of this document, delegation among them.
 
@@ -276,7 +280,8 @@ Some features need code bound for one type to call code bound for **another** ty
 - **view functions as methods** in expressions: `tree.count()` in a watch, or `mList.count()` in another view. This is
   how mdb answers "call `size()`" without calling into the target: GDB's *xmethods* work the same way.
 
-The calls themselves are deferred. Two choices in the implementation keep them possible without reworking the VM:
+Both are implemented, as `view(x).name(args)` and `view(x).summary` (and structs in summaries, which are formatted
+with their view's summary). Two choices made before keep them possible without reworking the VM:
 
 - **`this` is a hidden first parameter.** Every function of a view has `this` as local 0, a pointer to the viewed
   type: lets, summary parts, the children block, every `fn`. Implicit member access (`mLength`) compiles to
@@ -284,18 +289,37 @@ The calls themselves are deferred. Two choices in the implementation keep them p
 
   If functions read root 0 instead, a function of `MdbTree`'s view called from another view would see the other
   view's object as `this`.
-- **A frame knows which view it runs.** `Frame` has `const CodeObject *mView`, and `Call` looks up function `mA` in
-  that view's `Program`. A later `CallView` instruction can push a frame for another view's function, with the other
-  object's address as `this`. The pointer is safe in checkpoints: bound views only change in `Rebuild()`, which also
-  forgets all cursors.
+- **A frame knows which view it runs.** `Frame` has `const CodeObject *mCodeObject`, and `Call` looks up function
+  `mA` in that view's `Program`. `CallView` pushes a frame for another view's function, with the other object's
+  address as `this`. The pointer is safe in checkpoints: bound views only change in `Rebuild()`, which also forgets
+  all cursors. A logpoint is bound again when the registry's generation changes.
+
+How `view()` calls work:
+
+- **Binding.** The binder finds the view for the object's static type through a `ViewLookup` callback (the registry,
+  or nothing in unit tests), and records a `ViewCallee` in the caller's code object: the callee, the function, its
+  name, and the offset to add to the object's address (the callee may have matched a base class). An object of the
+  type being bound calls the view's own code object, which is how `view(mNext).count()` recurses without a lookup.
+  The registry tracks the types it's binding; a lookup of one of them is a cycle, which is an error.
+- **Types across code objects.** A `TypeId` only means something in its own code object. Evaluator helpers take
+  the frame's code object. The binder imports the callee's parameter and return types into the caller's table
+  (`ImportType`: through `mDwarf` when there is one), and the VM retypes the arguments to the callee's TypeIds when it
+  pushes the frame, and the result to the caller's (`Frame::mReturnAs`) when it returns.
+- **Dynamic dispatch.** With `RuntimeServices`, `CallView` asks for the object's dynamic type. If that type's view is
+  another code object, with a function of the same name whose parameters and result have the same representation,
+  that function runs, with `this` at the complete object plus that view's root offset. The result is cached per call
+  site and dynamic type. `sym::ResolveDynamicType` finds the dynamic type: the vtable pointer, the `_ZTV` ELF symbol
+  containing it, `offset_to_top`, and the demangled class name looked up in the debug info.
+- **Summaries.** `ViewSummary` can't be one frame: a template summary is one function per part. It runs the parts
+  with a C++ call that shares the step counter, like lets, bounded by a nesting limit of 8. The result is *verbatim*
+  text, which is formatted without quotes.
 
 The runtime starts every view function with the viewed object's address as the `this` argument. That address can
 be 0, for a value the program holds in registers. The dereference of the hidden `this` is therefore not
-null-checked (`Deref` with `mA = 1`), and its reads are served from the root's bytes. Today, every
-frame runs the same view, and every call passes the caller's `this` on.
+null-checked (`Deref` with `mA = 1`), and its reads are served from the root's bytes. A plain `Call` passes the
+caller's `this` on; `CallView` null-checks the object instead (`view() of a null pointer`).
 
-Because `this` can differ between calls, **the let cache is keyed by (view, let, `this` address)**. Today it
-always holds one view and one `this`, but the key is right from the start.
+Because `this` can differ between calls, **the let cache is keyed by (view, let, `this` address)**.
 
 **Delegation doesn't need cross-view calls.** Every child is already a `sym::Value` that gets its own type's view,
 so an array of `RefPtr<Foo>` shows each element through `RefPtr`'s view, and expanding it shows the `Foo` through
@@ -507,7 +531,12 @@ The work was done in four parts, each split into steps that compile and are test
 
 - `test/unittest/views_frontend.cpp`: the lexer and parser.
 - `test/unittest/views_eval.cpp`: codegen, and the VM through hand-built programs (the binder isn't in the unit
-  tests): pausing and resuming from a copy, recursion, the depth limit, references, computed yields.
+  tests): pausing and resuming from a copy, recursion, the depth limit, references, computed yields, calls into
+  other code objects, dynamic dispatch with fake `RuntimeServices`, nested summaries, text functions.
+- `test/driver/viewCalls.js`, against `test/dynamic_types.cpp` (built with `-fno-rtti`) and
+  `test/views/viewcalls.mdbv`: `view()` calls in views and logpoints, dynamic types (an interface at a non-zero
+  offset, an anonymous namespace, a class template, a class without a view), and rebinding a logpoint after views are
+  reloaded.
 - `test/driver/views.js`, against `test/containers.cpp`: `hashTableChildren`, `listChildren`, `runawayLoops`,
   `keyedChildren`, `computedChildren`, `treeChildren`, `functionErrors`, plus the earlier view tests. The view files
   are in `test/views/`.
@@ -534,6 +563,11 @@ The work was done in four parts, each split into steps that compile and are test
   a `sum` that returns its accumulator, and drops its result when called as a statement.
 - **Test views.** The bitset view yields its bits without a key, so they're named `[0]`, `[1]`, …, and `setBits`
   yields `(u32)(i * 2)`, because `long` may not be in the test program's debug information.
+
+- **`view()` calls** (decision 12) go to value functions only; a void function of another view can't be called. Two
+  views that need each other's code are a bind error, whichever is bound first. Lifting that needs the callee's
+  signatures before its bodies are bound, across two binders.
+- **Text concatenation** isn't limited beyond the limits of its parts.
 
 ### Known issues
 
@@ -645,11 +679,11 @@ iterators become invalid.
 
 Features that other debuggers (Natvis in Visual Studio, LLDB formatters, GDB pretty printers, WinDbg's data model)
 have, and mscript doesn't. Each can be added without changing the design. Calls across
-views (nested summaries, view functions as methods) are covered by decision 12, and generators in loops by decision
-13.
+views (nested summaries, view functions as methods) are implemented (decision 12), and generators in loops are
+covered by decision 13.
 
 Calling functions in the target (`v.size()` running real code) is **not a gap**: it will not be supported. A view
-must never change the program being debugged. View functions used as methods (decision 12) are the replacement.
+must never change the program being debugged. `view(x).name()` (decision 12) is the replacement.
 
 | Feature | Who has it | How it would fit |
 |---|---|---|
@@ -658,7 +692,7 @@ must never change the program being debugged. View functions used as methods (de
 | **Random-access children**: element `i` computed directly, without walking | Natvis `IndexListItems`, LLDB `get_child_at_index` | a children form with an element count and an `index(i) expr`. Needed for `std::deque` and segmented arrays: jumping to the last page of a million-element deque would otherwise walk from the nearest checkpoint |
 | **Tolerating missing members** across library versions | Natvis `Optional="true"` and `Condition` | a condition evaluated when binding, such as `if (has(mFoo))`, where the branch not taken isn't bound. Today one renamed member fails the whole view |
 | **Building strings**: flag enums as `A \| C`, conditional summaries | Natvis (several `DisplayString`s with conditions), LLDB/GDB in Python | a summary block that yields text pieces: `summary { if (mFlags & 1) yield "A"; … }`. Same model as children blocks, and text values are copies |
-| **Dynamic types**: an `nsISupports*` displayed as its concrete class | LLDB dynamic values, Natvis | look up the vtable to find the real type, then apply that type's view. Independent of mscript |
+| **Dynamic types** in the variables panel: an `nsISupports*` displayed as its concrete class | LLDB dynamic values, Natvis | `view()` calls and summaries already use the dynamic type (`sym::ResolveDynamicType`). The variables panel would substitute the value before serializing it |
 | **Globals in views**: an atom table, interned strings | Natvis | a global's address is fixed per object file, so it's a constant at bind time, not a root |
 | **Named and indexed children together**: `[size]`, `[capacity]`, then the elements | Natvis `Item` and `ArrayItems`, DAP `namedVariables` / `indexedVariables` | a set of named children next to the paged indexed ones |
 | **Alternate views**: a short and a detailed view per type, picked in a watch with a format specifier | Natvis `IncludeView` / `ExcludeView` | named views, and a format specifier that picks one |

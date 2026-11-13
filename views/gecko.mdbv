@@ -1,4 +1,4 @@
-// Views for Gecko types: arrays, strings, atoms, nsID, hash tables and smart pointers.
+// Views for Gecko types: arrays, strings, atoms, nsID, hash tables, smart pointers and URIs.
 //
 // Load it from the debug console with loadViews("<path>/views/gecko.mdbv"), list it under "views" in the launch
 // configuration, or symlink it into ~/.config/mdb/views to load it at startup.
@@ -336,4 +336,38 @@ view mozilla::HashSet<.*> {
       yield entries[i];
     }
   }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// URIs
+// ---------------------------------------------------------------------------------------------------------------
+
+// spec() reads what GetSpec() would return, without calling it. view(uri).spec() runs the spec() of the view of
+// the URI's dynamic type, e.g. in a logpoint: uri={view(aLoadState->mURI.mRawPtr).spec()}. This one is the default,
+// for URI classes without a view: DefaultURI, for example, keeps its spec in a Rust MozURL.
+view nsIURI {
+  fn spec() -> text { return "<unknown nsIURI>"; }
+  summary "{view(this).spec()}"
+}
+
+// http, https, file, ...
+view mozilla::net::nsStandardURL {
+  fn spec() -> text { return text(mSpec.mData, mSpec.mLength.mLength); }
+  summary "{spec()}"
+}
+
+// about:, data:, javascript:, blob:, ... and the classes derived from it, through the base class.
+view mozilla::net::nsSimpleURI {
+  fn spec() -> text { return text(mSpec.mData, mSpec.mLength.mLength); }
+  summary "{spec()}"
+}
+
+view mozilla::net::nsHttpChannel {
+  fn spec() -> text { return text(mSpec.mData, mSpec.mLength.mLength); }
+  summary "{spec()}"
+}
+
+view mozilla::net::HttpBaseChannel {
+  fn spec() -> text { return text(mSpec.mData, mSpec.mLength.mLength); }
+  summary "{spec()}"
 }
