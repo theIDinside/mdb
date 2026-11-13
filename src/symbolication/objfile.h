@@ -14,8 +14,11 @@
 #include <symbolication/value_visualizer.h>
 
 // std
+#include <map>
+#include <optional>
 #include <string_view>
 #include <type_traits>
+#include <unordered_map>
 
 // system
 #include <sys/mman.h>
@@ -93,6 +96,15 @@ struct BreakpointLookup
  * The owning data-structure that all debug info symbols point to. The ObjFile is meant
  * to outlive them all, so it's safe to take raw pointers into `loaded_binary`.
  */
+// Results of sym::ResolveDynamicType for the types and vtables of one object file.
+struct DynamicTypeCache
+{
+  // Class type -> does it have a vtable pointer
+  std::unordered_map<sym::Type *, bool> mIsDynamic;
+  // (unrelocated vtable pointer, static type) -> the dynamic type, or nullptr if it isn't one of the static type
+  std::map<std::pair<u64, sym::Type *>, sym::Type *> mByVtable;
+};
+
 class ObjectFile
 {
   friend SymbolFile;
@@ -115,6 +127,9 @@ class ObjectFile
   StringViewMap<Index> mMinimalDynamicFunctionSymbols;
   std::vector<MinSymbol> mMinimalDynamicFunctionSymbolsSorted;
   StringViewMap<MinSymbol> mMinimalDynamicObjectSymbols;
+  // Vtables (`_ZTV` object symbols) sorted by address, built on first use
+  std::optional<std::vector<MinSymbol>> mVtableSymbols;
+  DynamicTypeCache mDynamicTypeCache;
 
   std::mutex mLnpHeaderMutex;
   std::unordered_map<u64, sym::dw::LNPHeader *> mLineNumberProgramHeaders;
@@ -172,6 +187,9 @@ public:
     -> std::optional<MinSymbol>;
   auto SearchMinimalSymbolFunctionInfo(AddrPtr pc) noexcept -> const MinSymbol *;
   auto FindMinimalObjectSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>;
+  // The vtable symbol whose object contains `unrelocated`, or nullptr
+  auto FindVtableSymbol(AddrPtr unrelocated) noexcept -> const MinSymbol *;
+  auto GetDynamicTypeCache() noexcept -> DynamicTypeCache &;
 
   auto SetCompileUnitData(const std::vector<sym::dw::UnitData *> &unit_data) noexcept -> void;
   auto GetAllCompileUnits() noexcept -> std::span<sym::dw::UnitData *>;
