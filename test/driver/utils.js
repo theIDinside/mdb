@@ -53,6 +53,11 @@ class TestArgs {
    */
   constructor(cfg) {
     const { map, config } = cfg
+    const dwarf = map.get('dwarf') ?? 'default'
+    if (!['default', '5'].includes(dwarf)) {
+      throw new Error(`Expected --dwarf=default|5 but got ${dwarf}`)
+    }
+    this.subjectSuffix = dwarf === '5' ? '_d5' : ''
     for (const arg of RecognizedArgsConfig) {
       let maparg = map.get(arg.short)
       if (maparg == null) {

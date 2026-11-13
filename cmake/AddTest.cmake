@@ -1,22 +1,42 @@
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 include(GoogleTest)
 
+# Build the usual subject and a DWARF 5 companion. Put shared compiler flags in
+# COMPILE_OPTIONS so both targets receive them.
 function(BuildTestSubject)
+  set(options SHARED)
   set(oneValueArgs NAME)
-  set(multiValueArgs SOURCES LIBS INCLUDE_DIR)
+  set(multiValueArgs SOURCES LIBS INCLUDE_DIR COMPILE_OPTIONS)
   cmake_parse_arguments(BUILD_TEST "${options}"
                         "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
-  add_executable(${BUILD_TEST_NAME} ${BUILD_TEST_SOURCES})
-  set_target_properties(${BUILD_TEST_NAME} PROPERTIES LINKER_LANGUAGE CXX)  # Specify the linker languag
-  set_target_properties(${BUILD_TEST_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
-  target_link_libraries(${BUILD_TEST_NAME} ${BUILD_TEST_LIBS})
-  target_include_directories(${BUILD_TEST_NAME} PRIVATE ./src ${BUILD_TEST_INCLUDE_DIR})
-  if(USE_DWARF5)
-    target_compile_options(${BUILD_TEST_NAME} PRIVATE -O0 -g3 -gdwarf-5 -fdebug-types-section)
-  else()
-    target_compile_options(${BUILD_TEST_NAME} PRIVATE -O0 -g3 -gdwarf-4)
-  endif()
+  foreach(suffix IN ITEMS "" "_d5")
+    set(target_name "${BUILD_TEST_NAME}${suffix}")
+    if(BUILD_TEST_SHARED)
+      add_library(${target_name} SHARED ${BUILD_TEST_SOURCES})
+    else()
+      add_executable(${target_name} ${BUILD_TEST_SOURCES})
+    endif()
+    set_target_properties(${target_name} PROPERTIES
+      LINKER_LANGUAGE CXX
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+      LIBRARY_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+    # Subject libraries must be declared before the subjects that use them.
+    foreach(lib IN LISTS BUILD_TEST_LIBS)
+      if(suffix AND TARGET "${lib}${suffix}")
+        target_link_libraries(${target_name} PRIVATE "${lib}${suffix}")
+      else()
+        target_link_libraries(${target_name} PRIVATE ${lib})
+      endif()
+    endforeach()
+    target_include_directories(${target_name} PRIVATE ./src ${BUILD_TEST_INCLUDE_DIR})
+    if(suffix OR USE_DWARF5)
+      target_compile_options(${target_name} PRIVATE -O0 -g3 -gdwarf-5 -fdebug-types-section)
+    else()
+      target_compile_options(${target_name} PRIVATE -O0 -g3 -gdwarf-4)
+    endif()
+    target_compile_options(${target_name} PRIVATE ${BUILD_TEST_COMPILE_OPTIONS})
+  endforeach()
 endfunction()
 
 function(AddTest)
