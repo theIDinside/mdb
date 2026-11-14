@@ -100,6 +100,11 @@ std::string_view syscall_name(unsigned long long syscall_number);
   }
 // clang-format on
 #if defined(MDB_DEBUG) and MDB_DEBUG == 1
+#define MDB_ENSURE(cond)                                                                                          \
+  if (!(cond)) [[unlikely]] {                                                                                     \
+    std::source_location loc = std::source_location::current();                                                   \
+    mdb::panic(std::format("{} FAILED", #cond), loc, 1);                                                          \
+  }
 #define MDB_ASSERT(cond, msg, ...) VERIFY(cond, msg, __VA_ARGS__)
 /* A macro that asserts on failure in debug mode, but also actually performs the (op) in release. */
 #define PERFORM_ASSERT(op, msg, ...) VERIFY((op), msg, __VA_ARGS__)
@@ -109,7 +114,8 @@ std::string_view syscall_name(unsigned long long syscall_number);
   MDB_ASSERT(cond, __VA_ARGS__)
 
 #else
-#define MDB_ASSERT(cond, msg, ...) VERIFY(cond, msg, __VA_ARGS__)
+#define MDB_ENSURE(cond)
+#define MDB_ASSERT(cond, msg, ...)
 #define MDB_ASSERT_IF(ONLYWHEN, cond, ...)
 #define PERFORM_ASSERT(op, msg, ...) op
 #endif

@@ -105,6 +105,26 @@ struct DynamicTypeCache
   std::map<std::pair<u64, sym::Type *>, sym::Type *> mByVtable;
 };
 
+// Vtables (`_ZTV` object symbols) sorted by address, built on first use
+struct RuntimeVTableSymbols
+{
+  bool mInitialized{ false };
+  std::vector<MinSymbol> mSymbols;
+
+  [[nodiscard]] constexpr bool
+  IsInitialized() const
+  {
+    return mInitialized;
+  }
+
+  void
+  SetSymbols(std::vector<MinSymbol> &&symbols)
+  {
+    mSymbols = std::move(symbols);
+    mInitialized = true;
+  }
+};
+
 class ObjectFile
 {
   friend SymbolFile;
@@ -127,8 +147,7 @@ class ObjectFile
   StringViewMap<Index> mMinimalDynamicFunctionSymbols;
   std::vector<MinSymbol> mMinimalDynamicFunctionSymbolsSorted;
   StringViewMap<MinSymbol> mMinimalDynamicObjectSymbols;
-  // Vtables (`_ZTV` object symbols) sorted by address, built on first use
-  std::optional<std::vector<MinSymbol>> mVtableSymbols;
+  RuntimeVTableSymbols mVTableSymbols;
   DynamicTypeCache mDynamicTypeCache;
 
   std::mutex mLnpHeaderMutex;

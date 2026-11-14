@@ -317,9 +317,9 @@ struct Parameter
   std::string_view mName;
   // Index into ExprArena::mTypes
   u32 mType;
+  SourceLoc mLoc;
   // `Type &name`: refers to a local of the caller
   bool mIsReference{ false };
-  SourceLoc mLoc;
 };
 
 // `fn name(params) -> T { ... }`, or without `-> T` for a void function, which can yield
@@ -328,6 +328,13 @@ struct FunctionDef
   std::string_view mName;
   std::vector<Parameter> mParams;
   // Index into ExprArena::mTypes. None: a void function
+
+  [[nodiscard]] bool
+  HasReturnType() const
+  {
+    return mReturnType.has_value();
+  }
+
   std::optional<u32> mReturnType;
   StmtId mBody{ kNoStmt };
   SourceLoc mLoc;

@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "binder.h"
+#include "common.h"
 
 // mdb
 #include <symbolication/dwarf/die.h>
@@ -12,7 +13,6 @@
 
 // std
 #include <algorithm>
-#include <cassert>
 #include <cstring>
 #include <format>
 #include <unordered_map>
@@ -127,6 +127,9 @@ class Binder
   std::vector<NodeId> mSummaryPartNodes;
   std::unordered_map<std::string_view, u32> mFunctionIndex;
   std::vector<u8> mSignatureState;
+  static constexpr u8 kSignatureNeedProcessing = 0;
+  static constexpr u8 kSignatureCurrentlyProcessing = 1;
+  static constexpr u8 kSignatureProcessedComplete = 2;
   std::vector<std::vector<bool>> mFunctionReferences;
   NodeId mSummaryNode{ kNoNode };
   NodeId mChildrenNode{ kNoNode };
@@ -256,6 +259,12 @@ private:
   NodeId AddCallNode(const Expr &expr, u32 function, std::span<const NodeId> args, TypeId returnType) noexcept;
   bool LowerCallStatement(ExprId exprId, SourceLoc loc) noexcept;
   BindResult BindPointerArithmetic(BinaryOp op, NodeId lhs, NodeId rhs, SourceLoc loc) noexcept;
+  bool LowerIf(const Stmt &stmt);
+  bool LowerWhile(const Stmt &stmt);
+  bool LowerYield(const Stmt &stmt);
+  bool LowerFor(const Stmt &stmt);
+  bool LowerReturn(const Stmt &stmt);
+
   bool LowerStatement(StmtId id) noexcept;
   bool LowerDeclaration(const Stmt &stmt) noexcept;
   bool LowerAssignment(const Stmt &stmt) noexcept;
@@ -563,14 +572,11 @@ Binder::ResolveTypeExpr(const TypeExpr &typeExpr) noexcept
 bool
 Binder::EnsureSignature(u32 function) noexcept
 {
-  assert(mDef);
-  if (mSignatureState[function] == 2) {
+  MDB_ASSERT(mDef, "No definition");
+  if (mSignatureState[function] != kSignatureNeedProcessing) {
     return true;
   }
-  if (mSignatureState[function] == 1) {
-    return true;
-  }
-  mSignatureState[function] = 1;
+  mSignatureState[function] = kSignatureCurrentlyProcessing;
   const FunctionDef &definition = mDef->mFunctions[function];
   for (const Parameter &parameter : definition.mParams) {
     auto type = ResolveTypeExpr(mArena.mTypes[parameter.mType]);
@@ -586,7 +592,7 @@ Binder::EnsureSignature(u32 function) noexcept
   }
 
   TypeId returnType = kNoType;
-  if (definition.mReturnType) {
+  if (definition.HasReturnType()) {
     auto type = ResolveReturnType(mArena.mTypes[*definition.mReturnType]);
     if (!type) {
       return false;
@@ -600,7 +606,7 @@ Binder::EnsureSignature(u32 function) noexcept
   auto &boundFunction = mCodeObject.mProgram.mFunctions[function];
   boundFunction.mParamCount = static_cast<u32>(definition.mParams.size() + 1);
   boundFunction.mReturn = returnType;
-  mSignatureState[function] = 2;
+  mSignatureState[function] = kSignatureProcessedComplete;
   return true;
 }
 
@@ -1729,6 +1735,199 @@ Binder::LowerCallStatement(ExprId exprId, SourceLoc loc) noexcept
   return true;
 }
 
+[[clang::always_inline]]
+bool
+Binder::LowerIf(const Stmt &stmt)
+{
+  auto condition = ScalarRValue(stmt.mExpr, "an if condition");
+  if (!condition) {
+    return false;
+  }
+  mCodeGen.EmitExpr(ToBool(*condition, stmt.mLoc));
+  const u32 elseJump = mCodeGen.Emit(Instruction{ .mOp = Op::JumpIfFalse, .mLoc = stmt.mLoc });
+  if (!LowerStatement(stmt.mA)) {
+    return false;
+  }
+  if (stmt.mB == kNoStmt) {
+    mCodeGen.PatchTarget(elseJump, mCodeGen.Here());
+    return true;
+  }
+  const u32 endJump = mCodeGen.Emit(Instruction{ .mOp = Op::Jump, .mLoc = stmt.mLoc });
+  mCodeGen.PatchTarget(elseJump, mCodeGen.Here());
+  if (!LowerStatement(stmt.mB)) {
+    return false;
+  }
+  mCodeGen.PatchTarget(endJump, mCodeGen.Here());
+  return true;
+}
+
+[[clang::always_inline]]
+bool
+Binder::LowerWhile(const Stmt &stmt)
+{
+  const u32 top = mCodeGen.Here();
+  auto condition = ScalarRValue(stmt.mExpr, "a while condition");
+  if (!condition) {
+    return false;
+  }
+  mCodeGen.EmitExpr(ToBool(*condition, stmt.mLoc));
+  const u32 endJump = mCodeGen.Emit(Instruction{ .mOp = Op::JumpIfFalse, .mLoc = stmt.mLoc });
+  mLoops.emplace_back();
+  if (!LowerStatement(stmt.mA)) {
+    mLoops.pop_back();
+    return false;
+  }
+  mCodeGen.Emit(Instruction{ .mOp = Op::Jump, .mImm = top, .mLoc = stmt.mLoc });
+  const u32 end = mCodeGen.Here();
+  mCodeGen.PatchTarget(endJump, end);
+  for (const u32 jump : mLoops.back().mBreaks) {
+    mCodeGen.PatchTarget(jump, end);
+  }
+  for (const u32 jump : mLoops.back().mContinues) {
+    mCodeGen.PatchTarget(jump, top);
+  }
+  mLoops.pop_back();
+  return true;
+}
+
+[[clang::always_inline]]
+bool
+Binder::LowerYield(const Stmt &stmt)
+{
+  if (!mCodeObject.mProgram.mFunctions[mCurrentFunction].mCanYield) {
+    return Fail(stmt.mLoc, "yield is only allowed in a children block or a void function");
+  }
+  auto value = Bind(stmt.mExpr);
+  if (!value) {
+    return false;
+  }
+  bool computed = !value->mIsLValue;
+  NodeId yielded = value->mNode;
+  if (computed) {
+    auto rvalue = RValue(*value, stmt.mLoc);
+    if (!rvalue) {
+      return false;
+    }
+    yielded = *rvalue;
+    const TypeId rvalueType = TypeOf(yielded);
+    if (!Type(rvalueType).IsScalar()) {
+      return Fail(stmt.mLoc, std::format("yield needs a scalar value, not '{}'", Type(rvalueType).mName));
+    }
+  }
+  const TypeId type = computed ? TypeOf(yielded) : TypeOf(value->mNode);
+  if (EnsureDwarfType(type) == nullptr) {
+    if (computed) {
+      return Fail(stmt.mLoc,
+        std::format(
+          "no type for '{}' in the debug info of this object file, cast to a type it has", Type(type).mName));
+    }
+    return Fail(stmt.mLoc,
+      std::format("yielded values of type '{}' can't be displayed: the type is not in the debug information",
+        Type(type).mName));
+  }
+  if (stmt.mKey != kNoExpr) {
+    auto key = Bind(stmt.mKey);
+    if (!key) {
+      return false;
+    }
+    mCodeGen.EmitExpr(key->mNode);
+  }
+  mCodeGen.EmitExpr(yielded);
+  mCodeGen.Emit(Instruction{
+    .mOp = Op::Yield, .mA = stmt.mKey == kNoExpr ? 0u : 1u, .mImm = computed ? 1u : 0u, .mLoc = stmt.mLoc });
+  return true;
+}
+
+[[clang::always_inline]]
+bool
+Binder::LowerFor(const Stmt &stmt)
+{
+  mScopes.emplace_back();
+  if (stmt.mA != kNoStmt && !LowerStatement(stmt.mA)) {
+    mScopes.pop_back();
+    return false;
+  }
+  const u32 top = mCodeGen.Here();
+  u32 endJump = kNoFunction;
+  if (stmt.mExpr != kNoExpr) {
+    auto condition = ScalarRValue(stmt.mExpr, "a for condition");
+    if (!condition) {
+      mScopes.pop_back();
+      return false;
+    }
+    mCodeGen.EmitExpr(ToBool(*condition, stmt.mLoc));
+    endJump = mCodeGen.Emit(Instruction{ .mOp = Op::JumpIfFalse, .mLoc = stmt.mLoc });
+  }
+  mLoops.emplace_back();
+  if (!LowerStatement(stmt.mC)) {
+    mLoops.pop_back();
+    mScopes.pop_back();
+    return false;
+  }
+  const u32 next = mCodeGen.Here();
+  if (stmt.mB != kNoStmt && !LowerStatement(stmt.mB)) {
+    mLoops.pop_back();
+    mScopes.pop_back();
+    return false;
+  }
+  mCodeGen.Emit(Instruction{ .mOp = Op::Jump, .mImm = top, .mLoc = stmt.mLoc });
+  const u32 end = mCodeGen.Here();
+  if (endJump != kNoFunction) {
+    mCodeGen.PatchTarget(endJump, end);
+  }
+  for (const u32 jump : mLoops.back().mBreaks) {
+    mCodeGen.PatchTarget(jump, end);
+  }
+  for (const u32 jump : mLoops.back().mContinues) {
+    mCodeGen.PatchTarget(jump, next);
+  }
+  mLoops.pop_back();
+  mScopes.pop_back();
+  return true;
+}
+
+[[clang::always_inline]]
+bool
+Binder::LowerReturn(const Stmt &stmt)
+{
+  if (stmt.mExpr != kNoExpr) {
+    if (mCurrentFunction == mCodeObject.mChildrenFunction) {
+      return Fail(stmt.mLoc, "a children block can't return a value");
+    }
+    const Function &function = mCodeObject.mProgram.mFunctions[mCurrentFunction];
+    if (function.mReturn == kNoType) {
+      return Fail(stmt.mLoc, std::format("'{}' doesn't return a value", function.mName));
+    }
+    if (Type(function.mReturn).mKind == TypeKind::Text) {
+      const std::string name = function.mName;
+      auto text = Bind(stmt.mExpr);
+      if (!text) {
+        return false;
+      }
+      if (TypeOf(*text).mKind != TypeKind::Text) {
+        return Fail(stmt.mLoc, std::format("'{}' returns text, not '{}'", name, TypeOf(*text).mName));
+      }
+      mCodeGen.EmitExpr(text->mNode);
+      mCodeGen.Emit(Instruction{ .mOp = Op::Return, .mA = 1, .mLoc = stmt.mLoc });
+      return true;
+    }
+    auto value = ScalarRValue(stmt.mExpr, "a return value");
+    if (!value) {
+      return false;
+    }
+    const NodeId converted = ConvertTo(*value, function.mReturn, stmt.mLoc);
+    mCodeGen.EmitExpr(converted);
+    mCodeGen.Emit(Instruction{ .mOp = Op::Return, .mA = 1, .mLoc = stmt.mLoc });
+    return true;
+  }
+  if (mCurrentFunction != kNoFunction && mCodeObject.mProgram.mFunctions[mCurrentFunction].mReturn != kNoType) {
+    return Fail(
+      stmt.mLoc, std::format("'{}' must return a value", mCodeObject.mProgram.mFunctions[mCurrentFunction].mName));
+  }
+  mCodeGen.Emit(Instruction{ .mOp = Op::Return, .mA = 0, .mLoc = stmt.mLoc });
+  return true;
+}
+
 bool
 Binder::LowerStatement(StmtId id) noexcept
 {
@@ -1751,95 +1950,13 @@ Binder::LowerStatement(StmtId id) noexcept
   case StmtKind::Increment:
     return LowerAssignment(stmt);
   case StmtKind::If: {
-    auto condition = ScalarRValue(stmt.mExpr, "an if condition");
-    if (!condition) {
-      return false;
-    }
-    mCodeGen.EmitExpr(ToBool(*condition, stmt.mLoc));
-    const u32 elseJump = mCodeGen.Emit(Instruction{ .mOp = Op::JumpIfFalse, .mLoc = stmt.mLoc });
-    if (!LowerStatement(stmt.mA)) {
-      return false;
-    }
-    if (stmt.mB == kNoStmt) {
-      mCodeGen.PatchTarget(elseJump, mCodeGen.Here());
-      return true;
-    }
-    const u32 endJump = mCodeGen.Emit(Instruction{ .mOp = Op::Jump, .mLoc = stmt.mLoc });
-    mCodeGen.PatchTarget(elseJump, mCodeGen.Here());
-    if (!LowerStatement(stmt.mB)) {
-      return false;
-    }
-    mCodeGen.PatchTarget(endJump, mCodeGen.Here());
-    return true;
+    return LowerIf(stmt);
   }
   case StmtKind::While: {
-    const u32 top = mCodeGen.Here();
-    auto condition = ScalarRValue(stmt.mExpr, "a while condition");
-    if (!condition) {
-      return false;
-    }
-    mCodeGen.EmitExpr(ToBool(*condition, stmt.mLoc));
-    const u32 endJump = mCodeGen.Emit(Instruction{ .mOp = Op::JumpIfFalse, .mLoc = stmt.mLoc });
-    mLoops.emplace_back();
-    if (!LowerStatement(stmt.mA)) {
-      mLoops.pop_back();
-      return false;
-    }
-    mCodeGen.Emit(Instruction{ .mOp = Op::Jump, .mImm = top, .mLoc = stmt.mLoc });
-    const u32 end = mCodeGen.Here();
-    mCodeGen.PatchTarget(endJump, end);
-    for (const u32 jump : mLoops.back().mBreaks) {
-      mCodeGen.PatchTarget(jump, end);
-    }
-    for (const u32 jump : mLoops.back().mContinues) {
-      mCodeGen.PatchTarget(jump, top);
-    }
-    mLoops.pop_back();
-    return true;
+    return LowerWhile(stmt);
   }
   case StmtKind::For: {
-    mScopes.emplace_back();
-    if (stmt.mA != kNoStmt && !LowerStatement(stmt.mA)) {
-      mScopes.pop_back();
-      return false;
-    }
-    const u32 top = mCodeGen.Here();
-    u32 endJump = kNoFunction;
-    if (stmt.mExpr != kNoExpr) {
-      auto condition = ScalarRValue(stmt.mExpr, "a for condition");
-      if (!condition) {
-        mScopes.pop_back();
-        return false;
-      }
-      mCodeGen.EmitExpr(ToBool(*condition, stmt.mLoc));
-      endJump = mCodeGen.Emit(Instruction{ .mOp = Op::JumpIfFalse, .mLoc = stmt.mLoc });
-    }
-    mLoops.emplace_back();
-    if (!LowerStatement(stmt.mC)) {
-      mLoops.pop_back();
-      mScopes.pop_back();
-      return false;
-    }
-    const u32 next = mCodeGen.Here();
-    if (stmt.mB != kNoStmt && !LowerStatement(stmt.mB)) {
-      mLoops.pop_back();
-      mScopes.pop_back();
-      return false;
-    }
-    mCodeGen.Emit(Instruction{ .mOp = Op::Jump, .mImm = top, .mLoc = stmt.mLoc });
-    const u32 end = mCodeGen.Here();
-    if (endJump != kNoFunction) {
-      mCodeGen.PatchTarget(endJump, end);
-    }
-    for (const u32 jump : mLoops.back().mBreaks) {
-      mCodeGen.PatchTarget(jump, end);
-    }
-    for (const u32 jump : mLoops.back().mContinues) {
-      mCodeGen.PatchTarget(jump, next);
-    }
-    mLoops.pop_back();
-    mScopes.pop_back();
-    return true;
+    return LowerFor(stmt);
   }
   case StmtKind::Continue:
   case StmtKind::Break: {
@@ -1855,85 +1972,9 @@ Binder::LowerStatement(StmtId id) noexcept
     return true;
   }
   case StmtKind::Return:
-    if (stmt.mExpr != kNoExpr) {
-      if (mCurrentFunction == mCodeObject.mChildrenFunction) {
-        return Fail(stmt.mLoc, "a children block can't return a value");
-      }
-      const Function &function = mCodeObject.mProgram.mFunctions[mCurrentFunction];
-      if (function.mReturn == kNoType) {
-        return Fail(stmt.mLoc, std::format("'{}' doesn't return a value", function.mName));
-      }
-      if (Type(function.mReturn).mKind == TypeKind::Text) {
-        const std::string name = function.mName;
-        auto text = Bind(stmt.mExpr);
-        if (!text) {
-          return false;
-        }
-        if (TypeOf(*text).mKind != TypeKind::Text) {
-          return Fail(stmt.mLoc, std::format("'{}' returns text, not '{}'", name, TypeOf(*text).mName));
-        }
-        mCodeGen.EmitExpr(text->mNode);
-        mCodeGen.Emit(Instruction{ .mOp = Op::Return, .mA = 1, .mLoc = stmt.mLoc });
-        return true;
-      }
-      auto value = ScalarRValue(stmt.mExpr, "a return value");
-      if (!value) {
-        return false;
-      }
-      const NodeId converted = ConvertTo(*value, function.mReturn, stmt.mLoc);
-      mCodeGen.EmitExpr(converted);
-      mCodeGen.Emit(Instruction{ .mOp = Op::Return, .mA = 1, .mLoc = stmt.mLoc });
-      return true;
-    }
-    if (mCurrentFunction != kNoFunction && mCodeObject.mProgram.mFunctions[mCurrentFunction].mReturn != kNoType) {
-      return Fail(stmt.mLoc,
-        std::format("'{}' must return a value", mCodeObject.mProgram.mFunctions[mCurrentFunction].mName));
-    }
-    mCodeGen.Emit(Instruction{ .mOp = Op::Return, .mA = 0, .mLoc = stmt.mLoc });
-    return true;
+    return LowerReturn(stmt);
   case StmtKind::Yield: {
-    if (!mCodeObject.mProgram.mFunctions[mCurrentFunction].mCanYield) {
-      return Fail(stmt.mLoc, "yield is only allowed in a children block or a void function");
-    }
-    auto value = Bind(stmt.mExpr);
-    if (!value) {
-      return false;
-    }
-    bool computed = !value->mIsLValue;
-    NodeId yielded = value->mNode;
-    if (computed) {
-      auto rvalue = RValue(*value, stmt.mLoc);
-      if (!rvalue) {
-        return false;
-      }
-      yielded = *rvalue;
-      const TypeId rvalueType = TypeOf(yielded);
-      if (!Type(rvalueType).IsScalar()) {
-        return Fail(stmt.mLoc, std::format("yield needs a scalar value, not '{}'", Type(rvalueType).mName));
-      }
-    }
-    const TypeId type = computed ? TypeOf(yielded) : TypeOf(value->mNode);
-    if (EnsureDwarfType(type) == nullptr) {
-      if (computed) {
-        return Fail(stmt.mLoc,
-          std::format(
-            "no type for '{}' in the debug info of this object file, cast to a type it has", Type(type).mName));
-      }
-      return Fail(stmt.mLoc,
-        std::format("yielded values of type '{}' can't be displayed: the type is not in the debug information",
-          Type(type).mName));
-    }
-    if (stmt.mKey != kNoExpr) {
-      auto key = Bind(stmt.mKey);
-      if (!key) {
-        return false;
-      }
-      mCodeGen.EmitExpr(key->mNode);
-    }
-    mCodeGen.EmitExpr(yielded);
-    mCodeGen.Emit(Instruction{
-      .mOp = Op::Yield, .mA = stmt.mKey == kNoExpr ? 0u : 1u, .mImm = computed ? 1u : 0u, .mLoc = stmt.mLoc });
-    return true;
+    return LowerYield(stmt);
   }
   case StmtKind::Call: {
     return LowerCallStatement(stmt.mExpr, stmt.mLoc);
@@ -2109,7 +2150,7 @@ Binder::BindFrame(const SummarySpec &summary) noexcept
 bool
 Binder::BindAll() noexcept
 {
-  assert(mDef && mMatchedType);
+  MDB_ASSERT(mDef && mMatchedType, "Must have a definition and a matched type");
   mCodeLoc = mDef->mLoc;
   mCodeObject.mRootType = FromDwarf(mMatchedType);
   mCodeObject.mThisType = PointerTo(mCodeObject.mRootType);
@@ -2126,8 +2167,8 @@ Binder::BindAll() noexcept
       return false;
     }
   }
-  for (u32 i = 0; i < mDef->mFunctions.size(); ++i) {
-    const FunctionDef &definition = mDef->mFunctions[i];
+
+  for (const auto &definition : mDef->mFunctions) {
     mCurrentFunction = mFunctionIndex.find(definition.mName)->second;
     mCodeObject.mProgram.mFunctions[mCurrentFunction].mEntry = mCodeGen.Here();
     mLoops.clear();

@@ -538,7 +538,7 @@ ObjectFile::ParseELFSymbols(Elf64Header *header, std::vector<ElfSection> &&secti
 auto
 ObjectFile::FindVtableSymbol(AddrPtr unrelocated) noexcept -> const MinSymbol *
 {
-  if (!mVtableSymbols) { // todo: parallelize
+  if (!mVTableSymbols.IsInitialized()) { // todo: parallelize
     std::vector<MinSymbol> vtables;
     for (const auto *symbols : { &mMinimalObjectSymbols, &mMinimalDynamicObjectSymbols }) {
       for (const auto &[name, symbol] : *symbols) {
@@ -548,12 +548,14 @@ ObjectFile::FindVtableSymbol(AddrPtr unrelocated) noexcept -> const MinSymbol *
       }
     }
     std::ranges::sort(vtables, [](const MinSymbol &a, const MinSymbol &b) { return a.address < b.address; });
-    mVtableSymbols = std::move(vtables);
+    mVTableSymbols.SetSymbols(std::move(vtables));
   }
-  const auto &vtables = *mVtableSymbols;
-  auto it = std::ranges::upper_bound(
-    vtables, unrelocated.GetRaw(), {}, [](const MinSymbol &symbol) { return symbol.address.GetRaw(); });
-  if (it == vtables.begin()) {
+
+  auto it =
+    std::ranges::upper_bound(mVTableSymbols.mSymbols, unrelocated.GetRaw(), {}, [](const MinSymbol &symbol) {
+      return symbol.address.GetRaw();
+    });
+  if (it == mVTableSymbols.mSymbols.begin()) {
     return nullptr;
   }
   --it;
