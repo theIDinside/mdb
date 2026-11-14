@@ -53,11 +53,11 @@ class TestArgs {
    */
   constructor(cfg) {
     const { map, config } = cfg
-    const dwarf = map.get('dwarf') ?? 'default'
-    if (!['default', '5'].includes(dwarf)) {
-      throw new Error(`Expected --dwarf=default|5 but got ${dwarf}`)
+    const dwarf = map.get('dwarf') ?? '4'
+    if (!['4', '5'].includes(dwarf)) {
+      throw new Error(`Expected --dwarf=4|5 but got ${dwarf}`)
     }
-    this.subjectSuffix = dwarf === '5' ? '_d5' : ''
+    this.dwarf = dwarf
     for (const arg of RecognizedArgsConfig) {
       let maparg = map.get(arg.short)
       if (maparg == null) {
@@ -83,6 +83,10 @@ class TestArgs {
 
   getBinary(exe_name) {
     return path.join(this.binaryDir, exe_name)
+  }
+
+  getSubjectBinary(exe_name) {
+    return path.join(this.binaryDir, `d${this.dwarf}`, exe_name)
   }
 
   get binaryDir() {

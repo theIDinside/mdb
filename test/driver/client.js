@@ -713,7 +713,7 @@ class DebugAdapterClient {
   }
 
   buildDirFile(fileName) {
-    return this.config.args.getBinary(fileName + this.config.args.subjectSuffix)
+    return this.config.args.getSubjectBinary(fileName)
   }
 
   async setBreakpoints(filePath, lines) {

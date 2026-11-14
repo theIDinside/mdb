@@ -91,8 +91,8 @@ BuildTestSubject(
 )
 add_dependencies(dynamicLoading metricsconv)
 add_dependencies(dynamicLoading_d5 metricsconv_d5)
-target_compile_definitions(dynamicLoading PRIVATE METRICSCONV_LIBRARY="./bin/libmetricsconv.so")
-target_compile_definitions(dynamicLoading_d5 PRIVATE METRICSCONV_LIBRARY="./bin/libmetricsconv_d5.so")
+target_compile_definitions(dynamicLoading PRIVATE METRICSCONV_LIBRARY="$<TARGET_FILE:metricsconv>")
+target_compile_definitions(dynamicLoading_d5 PRIVATE METRICSCONV_LIBRARY="$<TARGET_FILE:metricsconv_d5>")
 
 BuildTestSubject(
   NAME fork

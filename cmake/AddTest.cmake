@@ -1,7 +1,7 @@
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 include(GoogleTest)
 
-# Build the usual subject and a DWARF 5 companion. Put shared compiler flags in
+# Build explicit DWARF 4 and DWARF 5 subjects. Put shared compiler flags in
 # COMPILE_OPTIONS so both targets receive them.
 function(BuildTestSubject)
   set(options SHARED)
@@ -11,6 +11,11 @@ function(BuildTestSubject)
                         "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
   foreach(suffix IN ITEMS "" "_d5")
+    if(suffix)
+      set(dwarf 5)
+    else()
+      set(dwarf 4)
+    endif()
     set(target_name "${BUILD_TEST_NAME}${suffix}")
     if(BUILD_TEST_SHARED)
       add_library(${target_name} SHARED ${BUILD_TEST_SOURCES})
@@ -19,8 +24,9 @@ function(BuildTestSubject)
     endif()
     set_target_properties(${target_name} PROPERTIES
       LINKER_LANGUAGE CXX
-      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
-      LIBRARY_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+      OUTPUT_NAME "${BUILD_TEST_NAME}"
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/d${dwarf}"
+      LIBRARY_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/d${dwarf}")
     # Subject libraries must be declared before the subjects that use them.
     foreach(lib IN LISTS BUILD_TEST_LIBS)
       if(suffix AND TARGET "${lib}${suffix}")
@@ -30,7 +36,7 @@ function(BuildTestSubject)
       endif()
     endforeach()
     target_include_directories(${target_name} PRIVATE ./src ${BUILD_TEST_INCLUDE_DIR})
-    if(suffix OR USE_DWARF5)
+    if(dwarf EQUAL 5)
       target_compile_options(${target_name} PRIVATE -O0 -g3 -gdwarf-5 -fdebug-types-section)
     else()
       target_compile_options(${target_name} PRIVATE -O0 -g3 -gdwarf-4)
