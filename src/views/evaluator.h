@@ -2,6 +2,7 @@
 #pragma once
 
 // mdb
+#include "common.h"
 #include <views/bound_ir.h>
 
 // std
@@ -136,9 +137,9 @@ public:
   [[nodiscard]] static EvalValue
   Bitfield(EvalValue lvalue, u32 bitOffset, u16 bitSize) noexcept
   {
-    assert(lvalue.IsLValue());
-    assert(bitOffset < 8);
-    assert(bitSize > 0 && bitSize <= 64);
+    MDB_ENSURE(lvalue.IsLValue());
+    MDB_ENSURE(bitOffset < 8);
+    MDB_ENSURE(bitSize > 0 && bitSize <= 64);
     lvalue.mBitOffset = static_cast<u8>(bitOffset);
     lvalue.mBitSize = static_cast<u8>(bitSize);
     return lvalue;
@@ -209,73 +210,73 @@ public:
   [[nodiscard]] u64
   Bits() const noexcept
   {
-    assert(mKind == ValueKind::Scalar || mKind == ValueKind::ArrayProvider);
+    MDB_ENSURE(mKind == ValueKind::Scalar || mKind == ValueKind::ArrayProvider);
     return mA;
   }
   [[nodiscard]] double
   AsFloat() const noexcept
   {
-    assert(mKind == ValueKind::Scalar);
+    MDB_ENSURE(mKind == ValueKind::Scalar);
     return std::bit_cast<double>(mA);
   }
   [[nodiscard]] u64
   Address() const noexcept
   {
-    assert(mKind == ValueKind::LValue);
+    MDB_ENSURE(mKind == ValueKind::LValue);
     return mA;
   }
   [[nodiscard]] u32
   Root() const noexcept
   {
-    assert(mKind == ValueKind::LValue);
+    MDB_ENSURE(mKind == ValueKind::LValue);
     return static_cast<u32>(mB);
   }
   [[nodiscard]] u8
   BitOffset() const noexcept
   {
-    assert(mKind == ValueKind::LValue);
+    MDB_ENSURE(mKind == ValueKind::LValue);
     return mBitOffset;
   }
   [[nodiscard]] u8
   BitSize() const noexcept
   {
-    assert(mKind == ValueKind::LValue);
+    MDB_ENSURE(mKind == ValueKind::LValue);
     return mBitSize;
   }
   [[nodiscard]] u32
   RefSlot() const noexcept
   {
-    assert(mKind == ValueKind::LocalRef);
+    MDB_ENSURE(mKind == ValueKind::LocalRef);
     return static_cast<u32>(mA);
   }
   [[nodiscard]] u32
   RefStack() const noexcept
   {
-    assert(mKind == ValueKind::LocalRef);
+    MDB_ENSURE(mKind == ValueKind::LocalRef);
     return static_cast<u32>(mB);
   }
   [[nodiscard]] u64
   Count() const noexcept
   {
-    assert(mKind == ValueKind::ArrayProvider);
+    MDB_ENSURE(mKind == ValueKind::ArrayProvider);
     return mB;
   }
   [[nodiscard]] bool
   Truncated() const noexcept
   {
-    assert(mKind == ValueKind::Text || mKind == ValueKind::ArrayProvider);
+    MDB_ENSURE(mKind == ValueKind::Text || mKind == ValueKind::ArrayProvider);
     return (mFlags & kTruncated) != 0;
   }
   [[nodiscard]] bool
   Verbatim() const noexcept
   {
-    assert(mKind == ValueKind::Text);
+    MDB_ENSURE(mKind == ValueKind::Text);
     return (mFlags & kVerbatim) != 0;
   }
   [[nodiscard]] u32
   TextHandle() const noexcept
   {
-    assert(mKind == ValueKind::Text);
+    MDB_ENSURE(mKind == ValueKind::Text);
     return static_cast<u32>(mA);
   }
 };
@@ -305,6 +306,8 @@ struct ProgramState
   std::vector<EvalValue> mLocals;
   std::vector<EvalValue> mOperands;
   bool mDone{ false };
+
+  EvalValue PopOperand() noexcept;
 };
 
 struct RunLimits
@@ -312,6 +315,7 @@ struct RunLimits
   u64 mMaxYields{ std::numeric_limits<u64>::max() };
   u64 mBudget{ kDefaultBudget };
   u32 mMaxDepth{ 1024 };
+  u32 mStepsLeft;
 };
 
 struct YieldedElement
@@ -349,6 +353,8 @@ struct RunResult
  */
 class Evaluator
 {
+  using LetKey = std::tuple<const CodeObject *, u32, u64>;
+
   const CodeObject &mCodeObject;
   MemoryReader &mReader;
   RuntimeServices *mServices{ nullptr };
@@ -357,7 +363,6 @@ class Evaluator
   std::deque<std::string> mOwnedTexts;
   // Handles index views into mOwnedTexts or immutable program constants.
   std::vector<std::string_view> mTexts;
-  using LetKey = std::tuple<const CodeObject *, u32, u64>;
   std::map<LetKey, EvalValue> mLetValues;
   std::set<LetKey> mLetInProgress;
   u64 mStepsUsed{ 0 };

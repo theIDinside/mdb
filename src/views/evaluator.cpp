@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "evaluator.h"
+#include "common.h"
 
 // mdb
 #include <views/text.h>
@@ -7,7 +8,6 @@
 // std
 #include <algorithm>
 #include <array>
-#include <bit>
 #include <cstring>
 #include <format>
 
@@ -35,6 +35,18 @@ Truncate(u64 bits, u32 sizeInBits) noexcept
     return bits;
   }
   return bits & ((1ULL << sizeInBits) - 1);
+}
+
+constexpr bool
+TextHasLength(const Instruction &instruction)
+{
+  return instruction.mA == 1;
+}
+
+constexpr bool
+HasReturnValue(const Instruction &instruction)
+{
+  return instruction.mA == 1;
 }
 
 Evaluator::Evaluator(const CodeObject &code, MemoryReader &reader, std::span<const Root> roots) noexcept
@@ -423,11 +435,6 @@ Evaluator::RunWithBudget(ProgramState &state,
     const Instruction instruction = code.mProgram.mCode[frame.mPc++];
     --stepsLeft;
     ++mStepsUsed;
-    const auto pop = [&]() {
-      EvalValue value = std::move(state.mOperands.back());
-      state.mOperands.pop_back();
-      return value;
-    };
     const auto fail = [&](std::string message) -> std::expected<RunResult, EvalError> {
       return std::unexpected(ErrorAt(instruction.mLoc, std::move(message)));
     };
@@ -486,7 +493,7 @@ Evaluator::RunWithBudget(ProgramState &state,
       state.mOperands.push_back(state.mLocals[frame.mLocalBase + instruction.mA]);
       break;
     case Op::StoreLocal: {
-      EvalValue value = pop();
+      EvalValue value = state.PopOperand();
       if (value.IsLocalRef()) {
         return fail("internal error: storing a reference");
       }
@@ -522,7 +529,7 @@ Evaluator::RunWithBudget(ProgramState &state,
       if (!reference.IsLocalRef() || reference.RefStack() != 0 || reference.RefSlot() >= state.mLocals.size()) {
         return fail("internal error: invalid local reference");
       }
-      EvalValue value = pop();
+      EvalValue value = state.PopOperand();
       if (value.IsLocalRef()) {
         return fail("internal error: storing a reference");
       }
@@ -530,7 +537,7 @@ Evaluator::RunWithBudget(ProgramState &state,
       break;
     }
     case Op::Member: {
-      EvalValue base = pop();
+      EvalValue base = state.PopOperand();
       EvalValue value =
         base.Root() == kNoRoot
           ? EvalValue::LValue(instruction.mType, base.Address() + instruction.mImm)
@@ -542,7 +549,7 @@ Evaluator::RunWithBudget(ProgramState &state,
       break;
     }
     case Op::Deref: {
-      const EvalValue pointer = pop();
+      const EvalValue pointer = state.PopOperand();
       if (pointer.Bits() == 0 && instruction.mA == 0) {
         return fail("null pointer dereference");
       }
@@ -551,7 +558,7 @@ Evaluator::RunWithBudget(ProgramState &state,
     }
     case Op::AddressOf:
     case Op::Decay: {
-      const EvalValue lvalue = pop();
+      const EvalValue lvalue = state.PopOperand();
       if (lvalue.Root() != kNoRoot) {
         return fail("the value has no address (it is in a register)");
       }
@@ -559,16 +566,16 @@ Evaluator::RunWithBudget(ProgramState &state,
       break;
     }
     case Op::Load: {
-      const EvalValue lvalue = pop();
+      const EvalValue lvalue = state.PopOperand();
       auto value = Load(code, lvalue, instruction.mLoc);
       if (!value) {
         return std::unexpected(std::move(value.error()));
       }
-      state.mOperands.push_back(std::move(*value));
+      state.mOperands.push_back(*value);
       break;
     }
     case Op::Negate: {
-      const EvalValue operand = pop();
+      const EvalValue operand = state.PopOperand();
       if (code.Type(instruction.mType).mKind == TypeKind::Float) {
         state.mOperands.push_back(EvalValue::Float(instruction.mType, -operand.AsFloat()));
       } else {
@@ -577,14 +584,14 @@ Evaluator::RunWithBudget(ProgramState &state,
       break;
     }
     case Op::LogicalNot: {
-      const EvalValue operand = pop();
+      const EvalValue operand = state.PopOperand();
       const bool isFloat = code.Type(operand.Type()).mKind == TypeKind::Float;
       state.mOperands.push_back(
         MakeInteger(code, instruction.mType, (isFloat ? operand.AsFloat() == 0.0 : operand.Bits() == 0) ? 1 : 0));
       break;
     }
     case Op::BitNot:
-      state.mOperands.push_back(MakeInteger(code, instruction.mType, ~pop().Bits()));
+      state.mOperands.push_back(MakeInteger(code, instruction.mType, ~state.PopOperand().Bits()));
       break;
     case Op::Add:
     case Op::Sub:
@@ -602,57 +609,57 @@ Evaluator::RunWithBudget(ProgramState &state,
     case Op::LessEqual:
     case Op::Greater:
     case Op::GreaterEqual: {
-      const EvalValue rhs = pop();
-      const EvalValue lhs = pop();
+      const EvalValue rhs = state.PopOperand();
+      const EvalValue lhs = state.PopOperand();
       auto value = EvalBinary(code, instruction.mOp, lhs, rhs, instruction.mType, instruction.mLoc);
       if (!value) {
         return std::unexpected(std::move(value.error()));
       }
-      state.mOperands.push_back(std::move(*value));
+      state.mOperands.push_back(*value);
       break;
     }
     case Op::PointerAdd:
     case Op::PointerSub: {
-      const EvalValue offset = pop();
-      const EvalValue pointer = pop();
+      const EvalValue offset = state.PopOperand();
+      const EvalValue pointer = state.PopOperand();
       const u64 scaled = static_cast<u64>(static_cast<i64>(offset.Bits())) * instruction.mImm;
       const u64 address = instruction.mOp == Op::PointerAdd ? pointer.Bits() + scaled : pointer.Bits() - scaled;
       state.mOperands.push_back(EvalValue::Scalar(instruction.mType, address));
       break;
     }
     case Op::PointerDiff: {
-      const EvalValue rhs = pop();
-      const EvalValue lhs = pop();
+      const EvalValue rhs = state.PopOperand();
+      const EvalValue lhs = state.PopOperand();
       const i64 bytes = static_cast<i64>(lhs.Bits() - rhs.Bits());
       state.mOperands.push_back(MakeInteger(
         code, instruction.mType, static_cast<u64>(bytes / static_cast<i64>(std::max<u64>(instruction.mImm, 1)))));
       break;
     }
     case Op::Convert: {
-      const EvalValue operand = pop();
+      const EvalValue operand = state.PopOperand();
       auto value = Convert(code, operand, instruction.mType, instruction.mLoc);
       if (!value) {
         return std::unexpected(std::move(value.error()));
       }
-      state.mOperands.push_back(std::move(*value));
+      state.mOperands.push_back(*value);
       break;
     }
     case Op::Text: {
       std::optional<EvalValue> length;
-      if (instruction.mA == 1) {
-        length = pop();
+      if (TextHasLength(instruction)) {
+        length = state.PopOperand();
       }
-      const EvalValue pointer = pop();
+      const EvalValue pointer = state.PopOperand();
       auto value = EvalText(instruction, pointer, length);
       if (!value) {
         return std::unexpected(std::move(value.error()));
       }
-      state.mOperands.push_back(std::move(*value));
+      state.mOperands.push_back(*value);
       break;
     }
     case Op::ArrayProvider: {
-      const EvalValue count = pop();
-      const EvalValue pointer = pop();
+      const EvalValue count = state.PopOperand();
+      const EvalValue pointer = state.PopOperand();
       const i64 signedCount = static_cast<i64>(count.Bits());
       if (signedCount < 0) {
         return fail(std::format("negative element count {}", signedCount));
@@ -667,13 +674,13 @@ Evaluator::RunWithBudget(ProgramState &state,
       break;
     }
     case Op::Pop:
-      (void)pop();
+      (void)state.PopOperand();
       break;
     case Op::Jump:
       frame.mPc = static_cast<u32>(instruction.mImm);
       break;
     case Op::JumpIfFalse: {
-      const EvalValue condition = pop();
+      const EvalValue condition = state.PopOperand();
       if (condition.Bits() == 0) {
         frame.mPc = static_cast<u32>(instruction.mImm);
       }
@@ -681,8 +688,8 @@ Evaluator::RunWithBudget(ProgramState &state,
     }
     case Op::Return: {
       std::optional<EvalValue> value;
-      if (instruction.mA == 1) {
-        value = pop();
+      if (HasReturnValue(instruction)) {
+        value = state.PopOperand();
         if (value->IsLocalRef()) {
           return fail("internal error: returning a reference");
         }
@@ -692,7 +699,7 @@ Evaluator::RunWithBudget(ProgramState &state,
       state.mLocals.resize(localBase);
       state.mFrames.pop_back();
       if (value) {
-        state.mOperands.push_back(returnAs == kNoType ? std::move(*value) : value->Retyped(returnAs));
+        state.mOperands.push_back(returnAs == kNoType ? *value : value->Retyped(returnAs));
       }
       if (state.mFrames.empty()) {
         state.mDone = true;
@@ -718,7 +725,7 @@ Evaluator::RunWithBudget(ProgramState &state,
       }
       std::vector<EvalValue> args(paramCount);
       for (u32 i = paramCount; i > 0; --i) {
-        args[i - 1] = pop();
+        args[i - 1] = state.PopOperand();
       }
       state.mLocals.insert(state.mLocals.end(), args.begin(), args.end());
       for (size_t i = paramCount; i < localTypes.size(); ++i) {
@@ -742,9 +749,9 @@ Evaluator::RunWithBudget(ProgramState &state,
       }
       std::vector<EvalValue> args(argCount);
       for (u32 i = argCount; i > 0; --i) {
-        args[i - 1] = pop();
+        args[i - 1] = state.PopOperand();
       }
-      u64 address = pop().Bits();
+      u64 address = state.PopOperand().Bits();
       if (address == 0) {
         return fail("view() of a null pointer");
       }
@@ -773,7 +780,7 @@ Evaluator::RunWithBudget(ProgramState &state,
         return fail("internal error: view callee index out of range");
       }
       const ViewCallee &call = code.mViewCallees[instruction.mA];
-      u64 address = pop().Bits();
+      u64 address = state.PopOperand().Bits();
       if (address == 0) {
         return fail("view() of a null pointer");
       }
@@ -789,8 +796,8 @@ Evaluator::RunWithBudget(ProgramState &state,
       break;
     }
     case Op::Concat: {
-      const EvalValue rhs = pop();
-      const EvalValue lhs = pop();
+      const EvalValue rhs = state.PopOperand();
+      const EvalValue lhs = state.PopOperand();
       std::string text{ TextOf(lhs) };
       text.append(TextOf(rhs));
       state.mOperands.push_back(MakeText(
@@ -803,7 +810,7 @@ Evaluator::RunWithBudget(ProgramState &state,
       if (!allowYield) {
         return fail("internal error: yield outside a children block");
       }
-      const EvalValue value = pop();
+      const EvalValue value = state.PopOperand();
       if (value.IsLocalRef()) {
         return fail("internal error: yielding a reference");
       }
@@ -816,7 +823,7 @@ Evaluator::RunWithBudget(ProgramState &state,
       }
       std::optional<std::string> key;
       if (instruction.mA == 1) {
-        const EvalValue keyValue = pop();
+        const EvalValue keyValue = state.PopOperand();
         auto formatted = FormatIn(code, keyValue, FormatSpec::Default);
         if (!formatted) {
           return std::unexpected(std::move(formatted.error()));
@@ -994,9 +1001,9 @@ Evaluator::FormatIn(const CodeObject &code, const EvalValue &input, FormatSpec f
 std::string_view
 Evaluator::TextOf(const EvalValue &value) const noexcept
 {
-  assert(value.Kind() == ValueKind::Text);
+  MDB_ENSURE(value.Kind() == ValueKind::Text);
   const u32 handle = value.TextHandle();
-  assert(handle < mTexts.size());
+  MDB_ENSURE(handle < mTexts.size());
   return mTexts[handle];
 }
 
@@ -1207,6 +1214,15 @@ Evaluator::Children(u64 budget) noexcept
   return ArrayChildren{
     .mBase = value->Bits(), .mCount = value->Count(), .mElement = mCodeObject.Type(value->Type()).mElement
   };
+}
+
+[[clang::always_inline]]
+EvalValue
+ProgramState::PopOperand() noexcept
+{
+  EvalValue result = mOperands.back();
+  mOperands.pop_back();
+  return result;
 }
 
 } // namespace mdb::views

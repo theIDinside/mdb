@@ -1603,8 +1603,8 @@ Parser::ParsePrimary() noexcept
     if (!value) {
       return kNoExpr;
     }
-    const ExprId id = AddNewExpression(ExprKind::StringLiteral, token.mLoc);
     mUnit.mArena.mStrings.push_back(std::move(*value));
+    const ExprId id = AddNewExpression(ExprKind::StringLiteral, token.mLoc);
     Get(id).mString = static_cast<u32>(mUnit.mArena.mStrings.size() - 1);
     return id;
   }
