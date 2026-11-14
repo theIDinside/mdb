@@ -39,6 +39,12 @@ class TestCommand(Command):
             help="Run only DWARF 5 driver tests",
         )
 
+        self.parser.add_argument(
+            "--verbose",
+            action="store_true",
+            help="Make ctests be verbose",
+        )
+
     def usage(self):
         self.parser.print_help()
 
@@ -50,36 +56,23 @@ class TestCommand(Command):
             )
         return args
 
-    def runCtest(self, buildDirectory: str, testRegex: str | None):
-        if testRegex is None:
-            subprocess.run(
-                [
-                    "ctest",
-                    "--test-dir",
-                    buildDirectory,
-                    "--output-on-failure",
-                ],
-                check=True,
-            )
-        else:
-            subprocess.run(
-                [
-                    "ctest",
-                    "--test-dir",
-                    buildDirectory,
-                    "--output-on-failure",
-                    "-R",
-                    testRegex,
-                ],
-                check=True,
-            )
+    def runCtest(self, buildDirectory: str, verbose: bool, testRegex: str | None):
+        command = ["ctest", "--test-dir", buildDirectory, "--output-on-failure"]
+        if verbose:
+            command.append("--verbose")
+        if testRegex is not None:
+            command.extend(["-R", testRegex])
+        subprocess.run(command, check=False)
 
     def run(self, buildMetadata: BuildMetadata, args):
         buildDirectory = buildMetadata.getSelected()
+        verbose = args.verbose
 
         # ./mdbuild test
         if args.name is None and args.dwarf is None:
-            return self.runCtest(buildDirectory=buildDirectory, testRegex=None)
+            return self.runCtest(
+                buildDirectory=buildDirectory, verbose=verbose, testRegex=None
+            )
 
         # Resolve literal name fragments and optional DWARF variants against the registry.
         listing = subprocess.run(
@@ -113,7 +106,9 @@ class TestCommand(Command):
         # CTest uses its own regex engine, which supports capturing groups but
         # not Python's non-capturing group syntax.
         testRegex = "^(" + "|".join(re.escape(name) for name in matches) + ")$"
-        return self.runCtest(buildDirectory=buildDirectory, testRegex=testRegex)
+        return self.runCtest(
+            buildDirectory=buildDirectory, verbose=verbose, testRegex=testRegex
+        )
 
 
 TestCommand()
