@@ -280,7 +280,7 @@ TaskInfo::StepOverBreakpoint() noexcept
   MDB_ASSERT(mBreakpointLocationStatus.IsValid(), "Requires a valid bpstat");
 
   auto userBreakpointIds = mBreakpointLocationStatus.mBreakpointLocation->GetUserIds();
-  DBGBUFLOG(control,
+  DBGLOG(control,
     "Task {} stepping over bps {} at {}",
     mTid,
     JoinFormatIterator{ userBreakpointIds, ", " },

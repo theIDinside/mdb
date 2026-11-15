@@ -291,11 +291,11 @@ Session::InstallBreakpoint(Tid tid, AddrPtr addr) noexcept
   constexpr u64 bkpt = 0xcc;
   const auto read_value = ::ptrace(PTRACE_PEEKDATA, tid, addr.GetRaw(), nullptr);
   if (read_value == -1) {
-    DBGBUFLOG(control, "instructions at {} contains 0x{:x}", addr, read_value);
+    DBGLOG(control, "instructions at {} contains 0x{:x}", addr, read_value);
   }
 
   const u64 installed_bp = ((read_value & ~0xff) | bkpt);
-  DBGBUFLOG(control, "writing instructions at {} to 0x{:x}", addr, installed_bp);
+  DBGLOG(control, "writing instructions at {} to 0x{:x}", addr, installed_bp);
   if (const auto res = ::ptrace(PTRACE_POKEDATA, tid, addr.GetRaw(), installed_bp); res == -1) {
     return TaskExecuteResponse::Error(errno);
   }
@@ -308,7 +308,7 @@ TaskExecuteResponse
 Session::EnableBreakpoint(Tid tid, BreakpointLocation &location) noexcept
 {
   MDB_ASSERT(HasTask(tid), "This supervisor does not have thread {}", tid);
-  DBGBUFLOG(control, "[{}.{}:bkpt]: enabling breakpoint at {}", TaskLeaderTid(), tid, location.Address());
+  DBGLOG(control, "[{}.{}:bkpt]: enabling breakpoint at {}", TaskLeaderTid(), tid, location.Address());
   return InstallBreakpoint(tid, location.Address());
 }
 
@@ -316,12 +316,12 @@ TaskExecuteResponse
 Session::DisableBreakpoint(Tid tid, BreakpointLocation &location) noexcept
 {
   MDB_ASSERT(HasTask(tid), "This supervisor does not have thread {}", tid);
-  DBGBUFLOG(control, "[{}.{}:bkpt]: disabling breakpoint at {}", TaskLeaderTid(), tid, location.Address());
+  DBGLOG(control, "[{}.{}:bkpt]: disabling breakpoint at {}", TaskLeaderTid(), tid, location.Address());
 
   const auto addrParam = location.Address().GetRaw();
   const auto read_value = ::ptrace(PTRACE_PEEKDATA, tid, addrParam, nullptr);
   if (read_value == -1) {
-    DBGBUFLOG(control, "failed to read instructions at {}", addrParam);
+    DBGLOG(control, "failed to read instructions at {}", addrParam);
     return TaskExecuteResponse::Error(errno);
   }
 
@@ -329,7 +329,7 @@ Session::DisableBreakpoint(Tid tid, BreakpointLocation &location) noexcept
   const u64 restore = ((read_value & ~0xff) | original_byte);
 
   if (auto res = ::ptrace(PTRACE_POKEDATA, tid, addrParam, restore); res == -1) {
-    DBGBUFLOG(control, "failed to write instructions 0x{:x} at {}", restore, addrParam);
+    DBGLOG(control, "failed to write instructions 0x{:x} at {}", restore, addrParam);
     return TaskExecuteResponse::Error(errno);
   }
 
@@ -340,7 +340,7 @@ TaskExecuteResponse
 Session::StopTask(TaskInfo &t) noexcept
 {
   const auto result = tgkill(mTaskLeader, t.mTid, SIGSTOP);
-  DBGBUFLOG(control, "SIGSTOP to {}.{}: {}", mTaskLeader, t.mTid, result == -1 ? "failed" : "success");
+  DBGLOG(control, "SIGSTOP to {}.{}: {}", mTaskLeader, t.mTid, result == -1 ? "failed" : "success");
   if (result == -1) {
     return TaskExecuteResponse::Error(errno);
   }
@@ -354,7 +354,7 @@ Session::DoResumeTask(TaskInfo &t, RunType runType) noexcept
   MDB_ASSERT(t.mTraceeState > TraceeState::Running, "Attempted to resume task that was running");
   if (t.mTraceeState > TraceeState::Running) {
     const auto signal = t.ConsumeSignal();
-    DBGBUFLOG(
+    DBGLOG(
       control, "[{}.{}] resuming with {} with signal {}", TaskLeaderTid(), t.mTid, runType, signal.value_or(0));
     const auto ptrace_result = ::ptrace(ToPtrace(runType), t.mTid, nullptr, signal.value_or(0));
     if (ptrace_result == -1) {
@@ -362,11 +362,11 @@ Session::DoResumeTask(TaskInfo &t, RunType runType) noexcept
       if (signal) {
         t.SetSignalToForward(*signal);
       }
-      DBGBUFLOG(control, "[WARNING]: failed to resume {}: {}", t.mTid, strerror(errno));
+      DBGLOG(control, "[WARNING]: failed to resume {}: {}", t.mTid, strerror(errno));
       return;
     }
   } else {
-    DBGBUFLOG(control, "[{}.{}]: Did not resume, not recorded signal delivery stop.", mTaskLeader, t.mTid);
+    DBGLOG(control, "[{}.{}]: Did not resume, not recorded signal delivery stop.", mTaskLeader, t.mTid);
   }
   t.SetIsRunning();
 }
@@ -629,7 +629,7 @@ Session::HandleEvent(TaskInfo &task, StopStatus stopStatus) noexcept
   task.SetValueLiveness(Tracer::GetCurrentVariableReferenceBoundary());
 
   if (stopStatus.mIsTerminatingEvent) {
-    DBGBUFLOG(core, "stop event is tracee-termination.");
+    DBGLOG(core, "stop event is tracee-termination.");
   }
 
   bool steppedOverBreakpoint = false;
@@ -670,7 +670,7 @@ Session::HandleEvent(TaskInfo &task, StopStatus stopStatus) noexcept
     HandleExec(task, execFile);
   } break;
   case StopKind::Exited: {
-    DBGBUFLOG(core,
+    DBGLOG(core,
       "Exit code for thread {} exited={}, terminating event={}",
       task.mTid,
       stopStatus.uExitCode,
@@ -683,7 +683,7 @@ Session::HandleEvent(TaskInfo &task, StopStatus stopStatus) noexcept
       task.mReaped = true;
       const auto ptrace_result = ::ptrace(PTRACE_CONT, task.mTid, nullptr, 0);
       if (ptrace_result == -1) {
-        DBGBUFLOG(control, "Failed to resume task.");
+        DBGLOG(control, "Failed to resume task.");
       }
     } else {
       if (mThreads.empty()) {

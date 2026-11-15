@@ -38,7 +38,7 @@ namespace mdb {
 BreakpointLocation::BreakpointLocation(AddrPtr address, u8 original) noexcept
     : mAddress(address), mOriginalByte(original)
 {
-  DBGBUFLOG(control, "[breakpoint loc]: Constructed breakpoint location at {}", address);
+  DBGLOG(control, "[breakpoint loc]: Constructed breakpoint location at {}", address);
 }
 
 BreakpointLocation::BreakpointLocation(
@@ -377,7 +377,7 @@ DetermineBehavior(EventResult evaluationResult, tc::SupervisorState &tc) noexcep
 BreakpointHitEventResult
 Breakpoint::OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcept
 {
-  DBGBUFLOG(control, "[{}:bkpt]: bp {} hit", task.mTid, mId);
+  DBGLOG(control, "[{}:bkpt]: bp {} hit", task.mTid, mId);
   IncrementHitCount();
 
   const auto evaluatedResult = EvaluateStopCondition(task).value_or(BreakpointHitEventResult{ this });
@@ -431,7 +431,7 @@ FinishBreakpoint::OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcep
   if (task.mTid != mStopOnlyTid) {
     return BP_KEEP(Resume);
   }
-  DBGBUFLOG(control, "Hit finish_bp_t {}", mId);
+  DBGLOG(control, "Hit finish_bp_t {}", mId);
   const auto all_stopped = controller.IsAllStopped();
 
   // TODO(simon): This is the point where we should read the value produced by the function we returned from.
@@ -453,7 +453,7 @@ CodeInjectionBoundaryBreakpoint::CodeInjectionBoundaryBreakpoint(RequiredUserPar
 BreakpointHitEventResult
 CodeInjectionBoundaryBreakpoint::OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcept
 {
-  DBGBUFLOG(control, "Task {} hit code injection boundary breakpoint at {}", task.mTid, Address().value());
+  DBGLOG(control, "Task {} hit code injection boundary breakpoint at {}", task.mTid, Address().value());
   (void)controller;
   (void)task;
   return BP_KEEP(None);
@@ -468,7 +468,7 @@ BreakpointHitEventResult
 ResumeToBreakpoint::OnHit([[maybe_unused]] tc::SupervisorState &controller, TaskInfo &task) noexcept
 {
   if (task.mTid == mStopOnlyTid) {
-    DBGBUFLOG(control, "Hit resume_bp_t {}", mId);
+    DBGLOG(control, "Hit resume_bp_t {}", mId);
     return BP_RETIRE(Resume);
   }
   return BP_KEEP(None);
