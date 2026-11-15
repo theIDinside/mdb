@@ -95,7 +95,7 @@ template <> struct std::formatter<ui::dap::Message>
   ({                                                                                                              \
     auto supervisor = GetSessionOrSendError();                                                                    \
     if (supervisor->IsExited()) {                                                                                 \
-      DBGBUFLOG(core, "Could not find supervisor for session {} ({})", mProcessId, __PRETTY_FUNCTION__);          \
+      DBGLOG(core, "Could not find supervisor for session {} ({})", mProcessId, __PRETTY_FUNCTION__);             \
       std::pmr::string err{ MemoryResource() };                                                                   \
       std::format_to(std::back_inserter(err), "Could not find supervisor for session {}", mProcessId);            \
       WriteResponse(ErrorResponse{ Request, this, std::move(err), {} });                                          \
@@ -393,7 +393,7 @@ struct Continue final : public ui::UICommand
         target->ResumeTask(*task, tc::RunType::Continue);
         success = true;
       } else {
-        DBGBUFLOG(core, "task {} could not be resumed", mThreadId);
+        DBGLOG(core, "task {} could not be resumed", mThreadId);
         success = false;
       }
     }
@@ -805,7 +805,7 @@ private:
       [sessionId = mProcessId, dap = mDebugAdapterManager, file = std::move(file), specs = std::move(specs)](
         tc::SupervisorState &target) {
         // Set the breakpoints
-        DBGBUFLOG(core, "Setting post poned source breakpoints");
+        DBGLOG(core, "Setting post poned source breakpoints");
         target.SetSourceBreakpoints(file, specs);
         // Then emit "new breakpoint" events, since we're not actually responding to a request, anymore.
         for (const auto &[bp, ids] : target.GetUserBreakpoints().GetBreakpointsFromSourceFile(file)) {
@@ -922,10 +922,10 @@ private:
     DBGLOG(core, "setInstructionBreakpoints with no target, postponed");
     mDebugAdapterManager->OnSessionConfiguredWithSupervisor(std::move(configToken),
       [sessionId = mProcessId, dap = mDebugAdapterManager, specs = std::move(specs)](tc::SupervisorState &target) {
-        DBGBUFLOG(core, "Setting post poned instruction breakpoints");
+        DBGLOG(core, "Setting post poned instruction breakpoints");
         // Set the breakpoints
         target.SetInstructionBreakpoints(specs);
-        DBGBUFLOG(core, "Instruction breakpoints was set.");
+        DBGLOG(core, "Instruction breakpoints was set.");
         // Then emit "new breakpoint" events, since we're not actually responding to a request, anymore.
         auto &userBreakpoints = target.GetUserBreakpoints();
 
@@ -1002,7 +1002,7 @@ private:
     DBGLOG(core, "setFunctionBreakpoints with no target, postponed");
     mDebugAdapterManager->OnSessionConfiguredWithSupervisor(std::move(configToken),
       [sessionId = mProcessId, dap = mDebugAdapterManager, specs = std::move(specs)](tc::SupervisorState &target) {
-        DBGBUFLOG(core, "Setting post poned function breakpoints");
+        DBGLOG(core, "Setting post poned function breakpoints");
         // Set the breakpoints
         target.SetFunctionBreakpoints(specs);
         // Then emit "new breakpoint" events, since we're not actually responding to a request, anymore.
@@ -1672,11 +1672,11 @@ struct RRLaunch final : public Launch
     PROFILE_SCOPE_ARGS("launch", "command", PEARG("traceDir", mTraceDirectory));
 
     namespace replay = mdb::tc::replay;
-    DBGBUFLOG(core, "[launch]: Creating replay supervisor");
+    DBGLOG(core, "[launch]: Creating replay supervisor");
     auto *replaySupervisor = replay::ReplaySupervisor::Create(tc::replay::RRInitOptions{});
 
     replaySupervisor->StartReplay(mTraceDirectory, [cmd = RefPtr{ this }, replaySupervisor]() -> void {
-      DBGBUFLOG(core, "RR Trace has been configured to be replayed!");
+      DBGLOG(core, "RR Trace has been configured to be replayed!");
       cmd->ExecuteOnReplayStarted(replaySupervisor);
     });
   }

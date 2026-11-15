@@ -31,7 +31,7 @@
 namespace fs = std::filesystem;
 
 #define RRLOG(FORMAT_STRING, ...)                                                                                 \
-  DBGBUFLOG(core,                                                                                                 \
+  DBGLOG(core,                                                                                                    \
     "[replay@{}]: " FORMAT_STRING,                                                                                \
     mTimeline->current_session().current_frame_time() __VA_OPT__(, ) __VA_ARGS__);
 
@@ -262,7 +262,7 @@ int64_t
 ReplaySupervisor::ReadMemory(pid_t recordedTid, uintptr_t address, int bufSize, void *buf)
 {
   MUTEX_RUNNING(-1);
-  DBGBUFLOG(core, "Read from target {} at 0x{:x}, {} bytes", recordedTid, address, bufSize);
+  DBGLOG(core, "Read from target {} at 0x{:x}, {} bytes", recordedTid, address, bufSize);
 
   ReplayTask *t = mTimeline->current_session().find_task(recordedTid);
   MDB_ASSERT(t != nullptr, "Expected to find task {}", recordedTid);
@@ -604,11 +604,11 @@ ReplaySupervisor::CheckStopKind(pid_t recTid, int syscallNumber, const rr::Trace
         return StopKind::NotKnown;
       }
       if (-1 == ReadMemory(recTid, cloneArgsPtr, sizeof(flags), &flags)) {
-        DBGBUFLOG(core, "Failed to read clone_args for clone system calls. That's bad.");
+        DBGLOG(core, "Failed to read clone_args for clone system calls. That's bad.");
         return StopKind::NotKnown;
       }
     }
-    DBGBUFLOG(core,
+    DBGLOG(core,
       "clone (clone3={}) flags: 0x{:x}, regs={}",
       is_clone_3,
       flags,
@@ -956,7 +956,7 @@ ReplaySupervisor::SpawnSupervisorThread() noexcept
     const auto debuggerBinaryPathResult = MdbPath();
     MDB_ASSERT(debuggerBinaryPathResult.has_value(), "Failed to get mdb executable path");
     rr::Flags::get_for_init().resource_path = debuggerBinaryPathResult->parent_path() / "resource/";
-    DBGBUFLOG(core, "Started supervisor thread, initialized resources path to={}", rr::Flags::get().resource_path);
+    DBGLOG(core, "Started supervisor thread, initialized resources path to={}", rr::Flags::get().resource_path);
     std::unique_lock lock(mCondVarMutex);
     while (!tok.stop_requested()) {
       // wait for start replay command

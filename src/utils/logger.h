@@ -326,14 +326,6 @@ LogChannel *GetLogChannel(Channel id) noexcept;
     chan->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, ::std::format(__VA_ARGS__));                          \
   }
 
-#define DBGBUFLOG(channel, ...)                                                                                   \
-  if (auto *chan = mdb::logging::GetLogChannel(Channel::channel); chan) {                                         \
-    std::source_location srcLoc = std::source_location::current();                                                \
-    char buf[1024];                                                                                               \
-    auto it = ::std::format_to(buf, __VA_ARGS__);                                                                 \
-    chan->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, std::string_view{ buf, it });                         \
-  }
-
 #define DBGLOG_STR(channel, str)                                                                                  \
   if (auto *chan = logging::GetLogChannel(Channel::channel); chan) {                                              \
     std::source_location srcLoc = std::source_location::current();                                                \
@@ -346,8 +338,6 @@ LogChannel *GetLogChannel(Channel id) noexcept;
     std::source_location srcLoc = std::source_location::current();                                                \
     chan->LogMessage(srcLoc.file_name(), srcLoc.line() - 1, ::std::format(__VA_ARGS__));                          \
   }
-
-#define DBGBUFLOG(channel, ...)
 
 #define CDLOG(...)
 #define DBGLOG_STR(channel, str)                                                                                  \

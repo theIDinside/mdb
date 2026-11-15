@@ -423,7 +423,7 @@ TypeDIEContext::operator==(const TypeDIEContext &rhs) const
       const auto leftName = lhs.mDie.ReadAttribute(Attribute::DW_AT_name).transform(AttributeValue::ToStringView);
       const auto rightName = rhs.mDie.ReadAttribute(Attribute::DW_AT_name).transform(AttributeValue::ToStringView);
       if (leftName && rightName) {
-        DBGBUFLOG(core, "leftDie={}, rightDie={}", *leftName, *rightName);
+        DBGLOG(core, "leftDie={}, rightDie={}", *leftName, *rightName);
       }
       return leftName == rightName;
     });

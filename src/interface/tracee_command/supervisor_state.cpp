@@ -228,7 +228,7 @@ SupervisorState::ConfigureBreakpointBehavior(BreakpointBehavior behavior) noexce
 void
 SupervisorState::SetLinkerDebugData(int version, AddrPtr rDebugAddr)
 {
-  DBGBUFLOG(core, "{}: Setting rdebug version={}, address={}", mTaskLeader, version, rDebugAddr);
+  DBGLOG(core, "{}: Setting rdebug version={}, address={}", mTaskLeader, version, rDebugAddr);
   mLinkerDebugData = LinkerLoaderDebug{ .mVersion = version, .mRDebug = rDebugAddr.As<r_debug>() };
 }
 
@@ -410,7 +410,7 @@ SupervisorState::IsRunning() const noexcept
 void
 SupervisorState::ConfigurationDone() noexcept
 {
-  DBGBUFLOG(core, "Configuration done for supervisor {}", mTaskLeader);
+  DBGLOG(core, "Configuration done for supervisor {}", mTaskLeader);
   mIsConfigured = true;
 }
 

@@ -791,7 +791,7 @@ Session::ReadRegisters([[maybe_unused]] TaskInfo &t) noexcept
   auto *task = mReplaySupervisor->GetTask(t.mTid);
   MDB_ASSERT(task, "No task by that id: {}", t.mTid);
   auto userRegs = task->regs().get_ptrace();
-  DBGBUFLOG(core,
+  DBGLOG(core,
     "read registers for {}: [rip:0x{:x}, rsp:0x{:x}, rax:0x{:x}]",
     t.mTid,
     userRegs.rip,

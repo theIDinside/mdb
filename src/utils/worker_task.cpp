@@ -10,12 +10,7 @@
 
 namespace mdb {
 
-TaskBase::~TaskBase() noexcept
-{
-#ifdef DEBUG
-  DBGBUFLOG(core, "TaskBase destructor");
-#endif
-}
+TaskBase::~TaskBase() noexcept {}
 
 void
 TaskBase::Cancel() noexcept
