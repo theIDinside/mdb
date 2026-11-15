@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "interface.h"
+#include "utils/write.h"
 
 // mdb
 #include <common.h>
@@ -705,23 +706,13 @@ DebugAdapterManager::WriteSerializedProtocolMessage(std::string_view output) con
   MessageHeader header;
   VERIFY(header.SetLength(output.size()), "Failed to set header!");
 
-  std::array<iovec, 2> iov;
-  iov[0] = header.ToParam();
-
-  iov[1].iov_base = (void *)output.data();
-  iov[1].iov_len = output.size();
-
 #ifdef DEBUG
   DBGLOG(dap, "[write]:[{}{}]", header.StringView(), output);
 #endif
 
-  const auto result = ::writev(mWriteFd, iov.data(), 2);
-  VERIFY(result == ssize_t(header.Length() + static_cast<ssize_t>(output.size())),
-    "Required flush-write but wrote partial content: {} out of {}",
-    result,
-    header.Length() + output.size());
-  VERIFY(result != -1, "Expected succesful write to fd={}. msg='{}'", mWriteFd, output);
-  return result >= static_cast<ssize_t>(output.size());
+  const bool success = WriteVectored(mWriteFd, header, output);
+  VERIFY(success, "Failed to write message to DAP client.");
+  return success;
 }
 
 } // namespace mdb::ui::dap
